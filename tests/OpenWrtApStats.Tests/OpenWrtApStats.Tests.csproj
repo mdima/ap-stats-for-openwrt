@@ -9,7 +9,7 @@
          is incompatible with xunit.v3 + Microsoft.Testing.Platform v2 (the configuration this
          plan locks). The repo-root global.json opts the SDK into MTP-aware dotnet test mode
          (per https://aka.ms/dotnet-test-mtp-error). UseMicrosoftTestingPlatformRunner=true
-         marks this project as an MTP application. CI-02 honored: no coverlet.* references. -->
+         marks this project as an MTP application. CI-02 honored (forbidden cov-rlet packages absent). -->
     <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
     <!-- Wave 0 ships with zero tests by design (test files land in subsequent waves). MTP
          exit code 8 means "zero tests ran" and is a non-success status by default. The plan's
