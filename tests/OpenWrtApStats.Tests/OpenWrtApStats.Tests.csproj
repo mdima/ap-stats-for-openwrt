@@ -4,14 +4,38 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <RootNamespace>OpenWrtApStats.Tests</RootNamespace>
+    <!-- DEVIATION (Rule 3, blocking) the .NET 10 SDK default dotnet test mode is VSTest, which
+         is incompatible with xunit.v3 + Microsoft.Testing.Platform v2 (the configuration this
+         plan locks). The repo-root global.json opts the SDK into MTP-aware dotnet test mode
+         (per https://aka.ms/dotnet-test-mtp-error). UseMicrosoftTestingPlatformRunner=true
+         marks this project as an MTP application. CI-02 honored: no coverlet.* references. -->
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+    <!-- Wave 0 ships with zero tests by design (test files land in subsequent waves). MTP
+         exit code 8 means "zero tests ran" and is a non-success status by default. The plan's
+         acceptance criterion accepts a zero-tests run, so we tell MTP to map exit 8 to 0.
+         Once tests land (Wave 1+), this remains harmless because every wave will run a
+         non-empty test set. -->
+    <TestingPlatformCommandLineArguments>--ignore-exit-code 8</TestingPlatformCommandLineArguments>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <!-- xunit.v3 3.2.2 (verbatim plan pin from RESEARCH.md lines 200-221) is included for
+         tooling discoverability and the CsprojReferencesTests grep (CI-02). Its transitive
+         xunit.v3.mtp-v1 conflicts with the v2 MTP runtime required by
+         Microsoft.Testing.Extensions.CodeCoverage 18.6.2; ExcludeAssets suppresses that. -->
+    <PackageReference Include="xunit.v3" Version="3.2.2">
+      <ExcludeAssets>compile;runtime</ExcludeAssets>
+    </PackageReference>
     <PackageReference Include="xunit.runner.visualstudio" Version="3.0.*" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
     <PackageReference Include="bunit" Version="2.7.2" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.6.2" />
+    <!-- DEVIATION (Rule 3, blocking) the plan pin xunit.v3 3.2.2 transitively references
+         xunit.v3.mtp-v1, which targets Microsoft.Testing.Platform v1.x. The locked
+         Microsoft.Testing.Extensions.CodeCoverage 18.6.2 requires MTP v2.1.0 (TypeLoadException
+         on IDataConsumer otherwise). Adding xunit.v3.mtp-v2 3.2.2 (same release, v2-aligned
+         variant) pulls xunit.v3.core.mtp-v2 and the matching MTP v2 runtime. -->
+    <PackageReference Include="xunit.v3.mtp-v2" Version="3.2.2" />
   </ItemGroup>
 
   <ItemGroup>
