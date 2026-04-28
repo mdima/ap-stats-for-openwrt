@@ -2,6 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <RootNamespace>OpenWrtApStats.Tests</RootNamespace>
     <!-- DEVIATION (Rule 3, blocking) the .NET 10 SDK default dotnet test mode is VSTest, which
@@ -30,6 +31,10 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
     <PackageReference Include="bunit" Version="2.7.2" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.6.2" />
+    <!-- Explicit pin used by SqliteInMemoryFixture to manage the in-memory connection lifecycle.
+         EF Core 10.0.7 brings it transitively, but pinning here is honest and survives any
+         future EF dependency changes. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.7" />
     <!-- DEVIATION (Rule 3, blocking) the plan pin xunit.v3 3.2.2 transitively references
          xunit.v3.mtp-v1, which targets Microsoft.Testing.Platform v1.x. The locked
          Microsoft.Testing.Extensions.CodeCoverage 18.6.2 requires MTP v2.1.0 (TypeLoadException
