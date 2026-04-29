@@ -1,0 +1,53 @@
+phy#5
+	Interface wlan1
+		ifindex 34
+		wdev 0x500000003
+		addr 72:02:dd:97:40:4c
+		mld_addr 00:00:00:00:00:00
+		ssid EnduringFreedom
+		type AP
+		channel 36 (5180 MHz), width: 160 MHz, center1: 5250 MHz
+		txpower 16.00 dBm
+		multicast TXQ:
+			qsz-byt	qsz-pkt	flows	drops	marks	overlmt	hashcol	tx-bytes	tx-packets
+						0				2387673700		20399997
+	Interface wifi1
+		ifindex 23
+		wdev 0x500000001
+		addr 94:83:c4:c8:ed:8f
+		mld_addr 00:00:00:00:00:00
+		type AP
+		channel 36 (5180 MHz), width: 160 MHz, center1: 5250 MHz
+		multicast TXQ:
+			qsz-byt	qsz-pkt	flows	drops	marks	overlmt	hashcol	tx-bytes	tx-packets
+												
+phy#4
+	Interface wlan0
+		ifindex 37
+		wdev 0x400000003
+		addr b6:e1:64:37:f6:c6
+		mld_addr 00:00:00:00:00:00
+		ssid DesertStorm
+		type AP
+		channel 9 (2452 MHz), width: 20 MHz, center1: 2452 MHz
+		txpower 9.00 dBm
+		multicast TXQ:
+			qsz-byt	qsz-pkt	flows	drops	marks	overlmt	hashcol	tx-bytes	tx-packets
+						0				694438257		48481885
+	Interface wifi0
+		ifindex 21
+		wdev 0x400000001
+		addr 94:83:c4:c8:ed:8e
+		mld_addr 00:00:00:00:00:00
+		type AP
+		channel 9 (2452 MHz), width: 20 MHz, center1: 2452 MHz
+		multicast TXQ:
+			qsz-byt	qsz-pkt	flows	drops	marks	overlmt	hashcol	tx-bytes	tx-packets
+												
+phy#3
+	Interface mld-wifi0
+		ifindex 20
+		wdev 0x300000001
+		addr 00:00:00:00:00:00
+		mld_addr 00:00:00:00:00:00
+		type AP

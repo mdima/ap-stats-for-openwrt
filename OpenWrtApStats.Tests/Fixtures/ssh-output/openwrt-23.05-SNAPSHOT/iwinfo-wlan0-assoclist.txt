@@ -1,0 +1,161 @@
+02:00:96:E5:25:BB  -50 dBm / -92 dBm (SNR 42)  0 ms ago
+	RX: 12 MBit/s                                   4095 Pkts.
+	TX: 72 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:33:87:8F:04  -34 dBm / -92 dBm (SNR 58)  0 ms ago
+	RX: 72 MBit/s                                   4095 Pkts.
+	TX: 72 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:6D:7F:7D:76  -47 dBm / -92 dBm (SNR 45)  0 ms ago
+	RX: 72 MBit/s                                   4095 Pkts.
+	TX: 28 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:AB:58:44:6B  -46 dBm / -92 dBm (SNR 46)  0 ms ago
+	RX: 36 MBit/s                                   4095 Pkts.
+	TX: 72 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:E3:68:CA:61  -57 dBm / -92 dBm (SNR 35)  0 ms ago
+	RX: 9 MBit/s                                    4095 Pkts.
+	TX: 58 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:5B:81:33:57  -58 dBm / -92 dBm (SNR 34)  0 ms ago
+	RX: 6 MBit/s                                    4095 Pkts.
+	TX: 57 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:BC:50:DF:65  -57 dBm / -92 dBm (SNR 35)  0 ms ago
+	RX: 48 MBit/s                                   4095 Pkts.
+	TX: 26 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:BC:50:E3:B4  -59 dBm / -92 dBm (SNR 33)  0 ms ago
+	RX: 48 MBit/s                                   4095 Pkts.
+	TX: 21 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:84:9D:A6:5C  -50 dBm / -92 dBm (SNR 42)  0 ms ago
+	RX: 48 MBit/s                                   4095 Pkts.
+	TX: 72 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:5E:02:7B:4E  -24 dBm / -92 dBm (SNR 68)  0 ms ago
+	RX: 1 MBit/s                                    4095 Pkts.
+	TX: 65 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:12:23:52:61  -48 dBm / -92 dBm (SNR 44)  0 ms ago
+	RX: 1 MBit/s                                    4095 Pkts.
+	TX: 13 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:12:D9:B9:B2  -56 dBm / -92 dBm (SNR 36)  0 ms ago
+	RX: 24 MBit/s                                   4095 Pkts.
+	TX: 21 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:96:E5:24:0B  -70 dBm / -92 dBm (SNR 22)  0 ms ago
+	RX: 1 MBit/s                                    4095 Pkts.
+	TX: 14 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:BC:50:E6:64  -63 dBm / -92 dBm (SNR 29)  0 ms ago
+	RX: 36 MBit/s                                   4095 Pkts.
+	TX: 28 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:CE:A5:71:40  -62 dBm / -92 dBm (SNR 30)  0 ms ago
+	RX: 48 MBit/s                                   4095 Pkts.
+	TX: 7 MBit/s                                       0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:E3:67:FD:A2  -53 dBm / -92 dBm (SNR 39)  0 ms ago
+	RX: 36 MBit/s                                   4095 Pkts.
+	TX: 19 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:BC:50:CD:74  -74 dBm / -92 dBm (SNR 18)  0 ms ago
+	RX: 1 MBit/s                                    4095 Pkts.
+	TX: 6 MBit/s                                       0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:8B:28:04:5C  -57 dBm / -92 dBm (SNR 35)  0 ms ago
+	RX: 39 MBit/s                                   4095 Pkts.
+	TX: 19 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:3B:70:A1:B8  -51 dBm / -92 dBm (SNR 41)  0 ms ago
+	RX: 19 MBit/s                                   4095 Pkts.
+	TX: 65 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:90:9B:C1:61  -56 dBm / -92 dBm (SNR 36)  0 ms ago
+	RX: 1 MBit/s                                    4095 Pkts.
+	TX: 19 MBit/s                                      0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:E3:68:8F:1B  -47 dBm / -92 dBm (SNR 45)  0 ms ago
+	RX: 9 MBit/s                                    4095 Pkts.
+	TX: 1 MBit/s                                       0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:81:AE:30:00  -73 dBm / -92 dBm (SNR 19)  0 ms ago
+	RX: 39 MBit/s                                   4095 Pkts.
+	TX: 7 MBit/s                                       0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+
+02:00:A2:F5:FE:5D  -68 dBm / -92 dBm (SNR 24)  0 ms ago
+	RX: 9 MBit/s                                    4095 Pkts.
+	TX: 1 MBit/s                                       0 Pkts.
+	expected throughput: unknown
+
+	MLO: NO
+

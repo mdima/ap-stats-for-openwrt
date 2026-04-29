@@ -1,0 +1,26 @@
+Station 02:00:12:d9:b9:b2 (on wlan0)
+	inactive time:	300000 ms
+	rx bytes:	2147518
+	rx packets:	34306
+	tx bytes:	1730203
+	tx packets:	29726
+	tx retries:	225
+	tx failed:	2
+	rx drop misc:	0
+	signal:  	-53 dBm
+	signal avg:	-53 [104, 103, 36, 36] dBm
+	tx bitrate:	2170.0 MBit/s
+	rx bitrate:	2400.0 MBit/s
+	authorized:	yes
+	authenticated:	yes
+	associated:	yes
+	preamble:	short
+	WMM/WME:	yes
+	DTIM period:	1
+	beacon interval:100
+	CTS protection:	yes
+	short preamble:	yes
+	connected time:	272690 seconds
+	associated at [boottime]:	0.000s
+	associated at:	1777088493336 ms
+	current time:	1777476289059 ms

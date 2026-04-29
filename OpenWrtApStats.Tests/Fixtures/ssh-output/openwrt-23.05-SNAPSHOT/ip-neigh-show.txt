@@ -1,0 +1,9 @@
+192.168.22.66 dev br-lan lladdr 02:00:c6:be:44:aa REACHABLE 
+192.168.22.1 dev br-lan lladdr 02:00:69:58:bb:a2 REACHABLE 
+192.168.22.60 dev br-lan lladdr 02:00:95:71:47:90 REACHABLE 
+192.168.22.30 dev br-lan lladdr 02:00:08:1a:fd:60 REACHABLE 
+192.168.22.2 dev br-lan lladdr 5e:93:32:79:28:8e REACHABLE 
+192.168.22.62 dev br-lan lladdr 8a:75:36:75:57:b3 REACHABLE 
+192.168.22.25 dev br-lan lladdr 02:00:2f:97:f8:53 REACHABLE 
+192.168.22.44 dev br-lan lladdr 02:00:c4:c8:e1:23 REACHABLE 
+192.168.22.54 dev br-lan lladdr 02:00:ef:b2:98:0f STALE 
