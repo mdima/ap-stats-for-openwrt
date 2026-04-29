@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
 namespace OpenWrtApStats.Data.Models;
@@ -26,6 +27,16 @@ public class WiFiNetwork
 
     public int TxPower { get; set; }
     public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Transient (NOT persisted) iface-name carrier used by the parser/orchestrator handoff (Plan 02-02 parser
+    /// emits, Plan 02-03 orchestrator consumes). Holds the WLAN iface name (e.g., "wlan0", "wlan1") detected
+    /// from `iwinfo` or `iw dev` output. Phase 2 plans use this to enumerate per-iface `iwinfo $iface assoclist`
+    /// commands and to map station BSSIDs back to WiFiNetworkId after persist. [NotMapped] so EF ignores it --
+    /// the production schema is unaffected; no migration is generated for this property.
+    /// </summary>
+    [NotMapped]
+    public string? IfaceName { get; set; }
 
     public WiFiNode? Node { get; set; } // navigation; cascade delete via FK convention
 }
