@@ -1,0 +1,5 @@
+192.168.1.42 dev br-lan lladdr 02:00:5f:aa:bb:01 REACHABLE
+192.168.1.43 dev br-lan lladdr 06:11:22:cc:dd:02 REACHABLE
+192.168.1.44 dev br-lan lladdr 0a:33:44:ee:ff:03 STALE
+fe80::1 dev br-lan lladdr 02:00:5f:aa:bb:01 STALE
+192.168.1.45 dev br-lan lladdr 0e:55:66:77:88:04 REACHABLE

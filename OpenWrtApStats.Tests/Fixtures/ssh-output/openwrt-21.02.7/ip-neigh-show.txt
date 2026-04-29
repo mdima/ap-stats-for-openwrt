@@ -1,0 +1,3 @@
+10.0.0.42 dev br-lan lladdr 02:de:ad:be:ef:11 REACHABLE
+10.0.0.43 dev br-lan lladdr 06:de:ad:be:ef:12 REACHABLE
+10.0.0.44 dev br-lan lladdr 0a:de:ad:be:ef:13 FAILED

@@ -1,0 +1,25 @@
+wlan0     ESSID: "OpenWrt-Lab-Net"
+          Access Point: 0E:00:5A:14:6B:01
+          Mode: Master  Channel: 6 (2.437 GHz)  HT Mode: HT20
+          Tx-Power: 20 dBm  Link Quality: 70/70
+          Signal: -50 dBm  Noise: -95 dBm
+          Bit Rate: 144.4 MBit/s
+          Encryption: WPA2 PSK (CCMP)
+          Type: nl80211  HW Mode(s): 802.11bgn
+          Hardware: 168C:002A 0777:E932 [Atheros AR9285]
+          TX power offset: unknown
+          Frequency offset: unknown
+          Supports VAPs: yes  PHY name: phy0
+
+wlan1     ESSID: "OpenWrt-Lab-5G"
+          Access Point: 0E:00:5A:14:6B:02
+          Mode: Master  Channel: 36 (5.180 GHz)  HT Mode: VHT80
+          Tx-Power: 23 dBm  Link Quality: 65/70
+          Signal: -55 dBm  Noise: -100 dBm
+          Bit Rate: 866.7 MBit/s
+          Encryption: WPA2 PSK (CCMP)
+          Type: nl80211  HW Mode(s): 802.11anac
+          Hardware: 168C:0042 [Atheros QCA9882]
+          TX power offset: unknown
+          Frequency offset: unknown
+          Supports VAPs: yes  PHY name: phy1

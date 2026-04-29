@@ -1,0 +1,12 @@
+wlan0     ESSID: "Legacy-OpenWrt"
+          Access Point: 0E:DE:AD:BE:EF:01
+          Mode: Master  Channel: 11 (2.462 GHz)  HT Mode: HT20
+          Tx-Power: 17 dBm  Link Quality: 60/70
+          Signal: -55 dBm  Noise: -94 dBm
+          Bit Rate: 72.2 MBit/s
+          Encryption: WPA2 PSK (CCMP)
+          Type: nl80211  HW Mode(s): 802.11bgn
+          Hardware: 168C:002A 0777:E941 [Atheros AR9285]
+          TX power offset: unknown
+          Frequency offset: unknown
+          Supports VAPs: yes  PHY name: phy0
