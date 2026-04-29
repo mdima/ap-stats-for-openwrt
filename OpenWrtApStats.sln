@@ -3,13 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenWrtApStats", "OpenWrtApStats\OpenWrtApStats.csproj", "{3204BD06-B07F-4649-99F5-78799F81DD10}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenWrtApStats", "src\OpenWrtApStats\OpenWrtApStats.csproj", "{3204BD06-B07F-4649-99F5-78799F81DD10}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenWrtApStats.Tests", "tests\OpenWrtApStats.Tests\OpenWrtApStats.Tests.csproj", "{B1B32BA0-F92E-43C8-97EF-3AF4EF7AA842}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenWrtApStats.Tests", "OpenWrtApStats.Tests\OpenWrtApStats.Tests.csproj", "{B1B32BA0-F92E-43C8-97EF-3AF4EF7AA842}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -48,9 +44,5 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
-	EndGlobalSection
-	GlobalSection(NestedProjects) = preSolution
-		{3204BD06-B07F-4649-99F5-78799F81DD10} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
-		{B1B32BA0-F92E-43C8-97EF-3AF4EF7AA842} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

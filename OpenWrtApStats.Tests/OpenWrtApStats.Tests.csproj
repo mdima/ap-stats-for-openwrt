@@ -44,6 +44,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\OpenWrtApStats\OpenWrtApStats.csproj" />
+    <ProjectReference Include="..\OpenWrtApStats\OpenWrtApStats.csproj" />
   </ItemGroup>
 </Project>

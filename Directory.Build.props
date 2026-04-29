@@ -7,7 +7,8 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'OpenWrtApStats'">
-    <!-- Production code is held to warnings-as-errors. Tests get a softer setting (see tests/Directory.Build.props). -->
+    <!-- Production code is held to warnings-as-errors. Test projects (any other MSBuildProjectName,
+         e.g. OpenWrtApStats.Tests) skip this PropertyGroup so warnings never fail their build. -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
   </PropertyGroup>
