@@ -445,6 +445,38 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
     }
 
     [Fact]
+    public async Task GenericException_DuringProbe_TranslatedToFailedAndLogged()
+    {
+        // Covers RunNodeProbeAsync's generic catch (Exception ex) path: a non-HostKeyMismatch,
+        // non-OperationCanceled exception logs Warning + returns NodeProbeResult.Failed("probe-failed").
+        var ct = TestContext.Current.CancellationToken;
+        var (nodeId, _, _) = await SeedNodeWithOneNetworkAsync(ct);
+
+        Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync = (n, _) =>
+        {
+            if (n.Id != nodeId)
+                return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Failed(n.Id, "not-this-test"));
+            throw new InvalidOperationException("synthetic-probe-failure");
+        };
+
+        var capLogger = new CapturingLogger<PollOrchestrator>();
+        var orch = BuildOrchestrator(probeAsync, capLogger);
+        await orch.RunCycleAsync(ct);
+
+        // Node stays Offline (mark-all-Offline ran; probe failed → no upsert pass).
+        await using var verify = _fixture.CreateContext();
+        var node = await verify.WiFiNodes.FirstAsync(n => n.Id == nodeId, ct);
+        Assert.Equal(Status.Offline, node.Status);
+
+        // Warning log emitted from the generic catch.
+        var probeFailLogs = capLogger.Entries
+            .Where(e => e.Level == LogLevel.Warning
+                     && e.Message.Contains("probe failed (top-level catch)", StringComparison.Ordinal))
+            .ToList();
+        Assert.NotEmpty(probeFailLogs);
+    }
+
+    [Fact]
     public async Task FanOut_Parallelism_RunsNodesConcurrently()
     {
         // B2 / POLL-03 LOCK — within one cycle, the 3 probeAsync invocations must enter

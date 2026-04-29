@@ -1,8 +1,11 @@
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using OpenWrtApStats.Data;
+using OpenWrtApStats.Data.Models;
 using OpenWrtApStats.Data.Repositories;
 using OpenWrtApStats.Services.Bootstrap;
+using OpenWrtApStats.Services.Polling;
+using OpenWrtApStats.Services.Polling.Ssh;
 using OpenWrtApStats.Services.Settings;
 using Serilog;
 using Serilog.Formatting.Compact;
@@ -57,9 +60,34 @@ try
     builder.Services.AddTransient<IAppSettingsRepo, AppSettingsRepo>();
     builder.Services.AddSingleton<IAppSettingsService, AppSettingsService>();
 
+    // 5b. Polling subsystem (Phase 2). PollOrchestrator is the PER-04 carve-out #3 — see ArchitectureTests.
+    //     ISshSession is transient (one fresh session per poll, per Pitfall 5).
+    //     NodePoller is constructed per-cycle via the Func<WiFiNode, CancellationToken, Task<NodeProbeResult>>
+    //     probe factory so the orchestrator never holds a baked-in WiFiNode reference.
+    //     PollNotifier is registered as a Singleton even though Phase 2 has no subscribers — Phase 5
+    //     adds Dashboard subscribers; raising the event from day 1 makes Phase 5 additive only.
+    builder.Services.AddSingleton<OpenWrtAdapterCache>();
+    builder.Services.AddSingleton<PollNotifier>();
+    builder.Services.AddSingleton<PollOrchestrator>();
+    builder.Services.AddTransient<ISshSession, RealSshSession>();
+    builder.Services.AddTransient<NodePoller>();
+    // B3 LOCK -- probe factory is the SOLE way the orchestrator drives a poll. No
+    // Func<WiFiNode, NodePoller> exists in DI; PollOrchestrator's primary-ctor takes this Func
+    // directly, never a NodePoller factory.
+    builder.Services.AddSingleton<Func<WiFiNode, CancellationToken, Task<NodeProbeResult>>>(sp => (node, ct) =>
+    {
+        var poller = ActivatorUtilities.CreateInstance<NodePoller>(sp, node);
+        return poller.PollAsync(ct);
+    });
+    // PollingHostedService consumes a runCycleAsync delegate (not PollOrchestrator directly) so the
+    // host stays unit-testable. The runtime delegate resolves PollOrchestrator from the host scope.
+    builder.Services.AddSingleton<Func<CancellationToken, Task>>(sp => ct =>
+        sp.GetRequiredService<PollOrchestrator>().RunCycleAsync(ct));
+
     // 6. Bootstrap order (registration order = StartAsync order — Pitfall 10):
-    //    Migrations -> D-12 probe (consumes INodeRepo) -> AppSettings warm-up (consumes IAppSettingsRepo).
-    //    Phase 2 will add PollingHostedService AFTER these three — DO NOT add a fourth here.
+    //    Migrations -> D-12 probe -> AppSettings warm-up -> Polling.
+    //    Phase 2 closes Phase 1's "DO NOT add a fourth here" reservation by adding
+    //    PollingHostedService LAST.
     builder.Services.AddHostedService<MigrationsHostedService>();
     // Registered after MigrationsHostedService (schema must exist before the D-12 probe queries
     // WiFiNodes via INodeRepo) and before AppSettingsBootstrapHostedService (must fail-fast
@@ -67,6 +95,7 @@ try
     // observes a partially-bootstrapped app). D-12 / Pitfall 10.
     builder.Services.AddHostedService<DataProtectionHealthHostedService>(); // D-12
     builder.Services.AddHostedService<AppSettingsBootstrapHostedService>();
+    builder.Services.AddHostedService<PollingHostedService>();              // 4th — Phase 2
 
     // 7. (Phase 1 has no health-check endpoint, no Razor components, no auth — those are Phases 3, 6.)
 

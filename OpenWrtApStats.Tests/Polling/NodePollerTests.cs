@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.Sockets;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -273,6 +274,79 @@ public sealed class NodePollerTests
             var failed = Assert.IsType<NodeProbeResult.Failed>(result);
             Assert.Equal("auth-failed", failed.Reason);
             Assert.DoesNotContain(capLogger.Messages, m => m.Contains(secret, StringComparison.Ordinal));
+        }
+        finally { try { Directory.Delete(fixtureDir, true); } catch { } }
+    }
+
+    [Fact]
+    public async Task AlgoNegotiation_TranslatesToAlgoNegotiateFailedReason()
+    {
+        // Branch coverage: SshConnectionException with "negotiate" in the message exercises the
+        // ContainsAlgoNegotiationKeyword filter + algo-negotiate-failed translation.
+        var ct = TestContext.Current.CancellationToken;
+        var fixtureDir = BuildSyntheticFixtureDir("algo-negotiate");
+        try
+        {
+            var fake = new FakeSshSession(fixtureDir)
+            {
+                ThrowOnConnect = () => new SshConnectionException("could not negotiate any algorithm")
+            };
+            var node = new WiFiNode { Id = 200, Hostname = "ap-algo", Username = "root", Password = "Y2lwaGVydGV4dA==" };
+            var dpp = new ConstantPlaintextProtectionProvider("dummy");
+            var poller = new NodePoller(node, fake, new OpenWrtAdapterCache(), dpp, NullLogger<NodePoller>.Instance);
+
+            var result = await poller.PollAsync(ct);
+
+            var failed = Assert.IsType<NodeProbeResult.Failed>(result);
+            Assert.Equal("algo-negotiate-failed", failed.Reason);
+        }
+        finally { try { Directory.Delete(fixtureDir, true); } catch { } }
+    }
+
+    [Fact]
+    public async Task SocketException_TranslatesToNetworkErrorReason()
+    {
+        // Branch coverage: SocketException -> "network-error" translation.
+        var ct = TestContext.Current.CancellationToken;
+        var fixtureDir = BuildSyntheticFixtureDir("net-error");
+        try
+        {
+            var fake = new FakeSshSession(fixtureDir)
+            {
+                ThrowOnConnect = () => new SocketException((int)System.Net.Sockets.SocketError.ConnectionRefused)
+            };
+            var node = new WiFiNode { Id = 201, Hostname = "ap-net", Username = "root", Password = "Y2lwaGVydGV4dA==" };
+            var dpp = new ConstantPlaintextProtectionProvider("dummy");
+            var poller = new NodePoller(node, fake, new OpenWrtAdapterCache(), dpp, NullLogger<NodePoller>.Instance);
+
+            var result = await poller.PollAsync(ct);
+
+            var failed = Assert.IsType<NodeProbeResult.Failed>(result);
+            Assert.Equal("network-error", failed.Reason);
+        }
+        finally { try { Directory.Delete(fixtureDir, true); } catch { } }
+    }
+
+    [Fact]
+    public async Task GenericException_TranslatesToProbeFailedReason()
+    {
+        // Branch coverage: any other Exception -> "probe-failed" translation (top-level catch).
+        var ct = TestContext.Current.CancellationToken;
+        var fixtureDir = BuildSyntheticFixtureDir("generic-error");
+        try
+        {
+            var fake = new FakeSshSession(fixtureDir)
+            {
+                ThrowOnConnect = () => new InvalidOperationException("synthetic non-SSH failure")
+            };
+            var node = new WiFiNode { Id = 202, Hostname = "ap-generic", Username = "root", Password = "Y2lwaGVydGV4dA==" };
+            var dpp = new ConstantPlaintextProtectionProvider("dummy");
+            var poller = new NodePoller(node, fake, new OpenWrtAdapterCache(), dpp, NullLogger<NodePoller>.Instance);
+
+            var result = await poller.PollAsync(ct);
+
+            var failed = Assert.IsType<NodeProbeResult.Failed>(result);
+            Assert.Equal("probe-failed", failed.Reason);
         }
         finally { try { Directory.Delete(fixtureDir, true); } catch { } }
     }

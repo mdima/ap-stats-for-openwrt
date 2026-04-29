@@ -102,4 +102,64 @@ public sealed class OpenWrtOutputParserTests
         Assert.All(networks, n => Assert.Equal(n.MacAddress.ToUpperInvariant(), n.MacAddress));
         Assert.Equal("AA:BB:CC:DD:EE:0F", networks[0].MacAddress);
     }
+
+    [Fact]
+    public void ParseIwDevSummary_SyntheticInput_EmitsUppercaseMac_AndIfaceName()
+    {
+        // Synthetic-input regression for the iw fallback parser (POLL-12 fallback path). Closes the
+        // ParseIwDevSummary line/branch coverage gap during the Plan 02-04 fixture-pending window.
+        // The recognition key for Interface lines is "Interface " (no leading whitespace) per
+        // OpenWrtOutputParser.IwDevInterfaceKey -- subsequent attribute lines may be indented but
+        // are matched on TrimStart-then-StartsWith for "addr "/"ssid ".
+        const string raw = "Interface wlan0\n" +
+                           "\taddr aa:bb:cc:dd:ee:11\n" +
+                           "\tssid IwTestNet\n" +
+                           "\ttype AP\n" +
+                           "\tchannel 6\n";
+        var networks = OpenWrtOutputParser.ParseIwDevSummary(raw, NullLogger.Instance);
+        Assert.NotEmpty(networks);
+        Assert.Equal("AA:BB:CC:DD:EE:11", networks[0].MacAddress);
+        Assert.Equal("IwTestNet", networks[0].SSID);
+        Assert.Equal("wlan0", networks[0].IfaceName);
+    }
+
+    [Fact]
+    public void ParseIwDevStations_SyntheticInput_EmitsStationWithUppercaseMacAndRSS()
+    {
+        // Synthetic-input regression for the iw station parser (POLL-12 fallback path). Closes the
+        // ParseIwDevStations line/branch coverage gap during the Plan 02-04 fixture-pending window.
+        const string raw = "Station 11:22:33:44:55:01 (on wlan0)\n" +
+                           "\tsignal:\t-45 dBm\n" +
+                           "\ttx bitrate: 54.0 MBit/s\n";
+        var stations = OpenWrtOutputParser.ParseIwDevStations(raw, wiFiNetworkId: 42, NullLogger.Instance);
+        Assert.NotEmpty(stations);
+        Assert.Equal("11:22:33:44:55:01", stations[0].MacAddress);
+        Assert.Equal(42, stations[0].WiFiNetworkId);
+        Assert.Equal(-45, stations[0].RSS);
+    }
+
+    [Fact]
+    public void ParseIwDevStations_EmptyInput_ReturnsEmpty()
+    {
+        // D-05 empty rule.
+        var stations = OpenWrtOutputParser.ParseIwDevStations("", wiFiNetworkId: 1, NullLogger.Instance);
+        Assert.Empty(stations);
+    }
+
+    [Fact]
+    public void ParseIwDevStations_MultipleStations_EmitsAll()
+    {
+        // Branch coverage: tests the "if (cur is not null) result.Add(cur);" path between blocks
+        // and the trailing flush after the loop.
+        const string raw = "Station aa:bb:cc:dd:ee:01 (on wlan0)\n" +
+                           "\tsignal:\t-40 dBm\n" +
+                           "Station aa:bb:cc:dd:ee:02 (on wlan0)\n" +
+                           "\tsignal:\t-60 dBm\n";
+        var stations = OpenWrtOutputParser.ParseIwDevStations(raw, wiFiNetworkId: 7, NullLogger.Instance);
+        Assert.Equal(2, stations.Count);
+        Assert.Equal("AA:BB:CC:DD:EE:01", stations[0].MacAddress);
+        Assert.Equal("AA:BB:CC:DD:EE:02", stations[1].MacAddress);
+        Assert.Equal(-40, stations[0].RSS);
+        Assert.Equal(-60, stations[1].RSS);
+    }
 }
