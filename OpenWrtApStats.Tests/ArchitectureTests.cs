@@ -15,6 +15,8 @@ namespace OpenWrtApStats.Tests;
 /// <c>MigrationsHostedService</c> is a tightly-scoped carve-out (one full type name, NOT a
 /// namespace) reserved for the migration pipeline owner — Phase 1 has not authored that
 /// service yet, so the carve-out is documented but inert.
+/// <c>PollOrchestrator</c> is the Phase 2 carve-out (single-DB-writer; coordinator transaction;
+/// PER-04 binding).
 /// </para>
 /// </summary>
 public sealed class ArchitectureTests
@@ -32,6 +34,11 @@ public sealed class ArchitectureTests
         //      arrives). There is no repo seam below the migration system itself.
         const string migrationsHostedServiceFullName = "OpenWrtApStats.Services.Bootstrap.MigrationsHostedService";
 
+        // Carve-out 3 (Phase 2): PollOrchestrator owns the per-cycle coordinator transaction and
+        // MUST inject IDbContextFactory<DatabaseContext> directly to call BeginTransactionAsync over
+        // the caller-owned repo overloads. This is the Phase 2 PER-04 carve-out (D-04 binding).
+        const string pollOrchestratorFullName = "OpenWrtApStats.Services.Polling.PollOrchestrator";
+
         // Whitelist: ONLY the repositories namespace.
         // ROADMAP §Phase 1 Success Criterion 5: "Repositories are the only code that touches DbContext."
         // PER-04 (verbatim REQUIREMENTS): "A repository layer encapsulates all DB access; no DbContext is
@@ -43,6 +50,8 @@ public sealed class ArchitectureTests
             .Where(t => t.FullName != dbContextFullName)
             // Special-case MigrationsHostedService by FULL TYPE NAME (owner of the migration pipeline).
             .Where(t => t.FullName != migrationsHostedServiceFullName)
+            // Special-case PollOrchestrator by FULL TYPE NAME (owner of the per-cycle coordinator transaction).
+            .Where(t => t.FullName != pollOrchestratorFullName)
             // Exclude compiler-generated / nested non-public helper types that aren't part of
             // the user-facing API (anonymous types, async state machines, closure classes).
             .Where(t => !t.IsNested || t.IsPublic)
