@@ -1,7 +1,0 @@
-<Project>
-  <PropertyGroup>
-    <!-- Tests inherit nullable/implicit-usings from repo Directory.Build.props
-         but explicitly do NOT treat warnings as errors. -->
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-  </PropertyGroup>
-</Project>
