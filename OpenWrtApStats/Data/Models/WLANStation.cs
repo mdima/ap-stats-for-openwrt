@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
 namespace OpenWrtApStats.Data.Models;
@@ -44,4 +45,14 @@ public class WLANStation
     public DateTime LastPollDate { get; set; }
 
     public WiFiNetwork? Network { get; set; }
+
+    /// <summary>
+    /// Transient (NOT persisted) BSSID carrier used by the parser/NodePoller/orchestrator handoff
+    /// (B4 LOCK; sister of <see cref="WiFiNetwork.IfaceName"/>). NodePoller stamps each emitted
+    /// station with the iface's BSSID; the orchestrator resolves <c>Bssid</c> →
+    /// <c>WiFiNetworkId</c> AFTER <c>networkRepo.UpsertManyAsync</c> assigns DB IDs. <c>[NotMapped]</c>
+    /// so EF ignores it — the production schema is unaffected; no migration is generated.
+    /// </summary>
+    [NotMapped]
+    public string? Bssid { get; set; }
 }

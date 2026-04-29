@@ -19,13 +19,24 @@ internal sealed class FakeSshSession(string fixtureDir) : ISshSession
     /// <summary>Override the captured fingerprint surfaced via onHostKeyAccepted (default fake fingerprint otherwise).</summary>
     public string CapturedFingerprintToReport { get; set; } = "FAKE+SHA256+FINGERPRINT+1234567890abcdef";
 
-    public Task ConnectAsync(WiFiNode node, string plaintextPassword, string? expectedFingerprint,
+    /// <summary>
+    /// Optional simulated delay in <see cref="ConnectAsync"/> — POLL-04 timeout-test hook (Plan 02-03).
+    /// When set, ConnectAsync awaits this delegate before invoking <paramref name="onHostKeyAccepted"/>.
+    /// </summary>
+    public Func<CancellationToken, Task>? ConnectDelay { get; set; }
+
+    /// <summary>
+    /// Optional simulated delay in <see cref="DisposeAsync"/> — POLL-14 dispose-hang test hook (Plan 02-03).
+    /// </summary>
+    public Func<Task>? DisposeDelay { get; set; }
+
+    public async Task ConnectAsync(WiFiNode node, string plaintextPassword, string? expectedFingerprint,
         Action<string>? onHostKeyAccepted, CancellationToken ct)
     {
+        if (ConnectDelay is { } d) await d(ct);
         if (ThrowOnConnect is { } f) throw f();
         // First-connect TOFU simulation: invoke callback with a fake fingerprint when caller passes null.
         if (expectedFingerprint is null) onHostKeyAccepted?.Invoke(CapturedFingerprintToReport);
-        return Task.CompletedTask;
     }
 
     public Task<string> RunCommandAsync(string command, CancellationToken ct) =>
@@ -40,7 +51,10 @@ internal sealed class FakeSshSession(string fixtureDir) : ISshSession
         return Task.FromResult((exit, stdout, ""));
     }
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public async ValueTask DisposeAsync()
+    {
+        if (DisposeDelay is { } d) await d();
+    }
 
     private string LoadFixture(string command)
     {
