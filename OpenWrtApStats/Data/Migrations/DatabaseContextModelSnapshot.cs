@@ -140,6 +140,10 @@ namespace OpenWrtApStats.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("HostKeyFingerprint")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Hostname")
                         .IsRequired()
                         .HasMaxLength(255)
