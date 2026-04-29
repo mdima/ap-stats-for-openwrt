@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>OpenWrtApStats.Tools.FixtureCapture</RootNamespace>
+    <!-- Tooling project — opt out of the repo-root TreatWarningsAsErrors gate so a benign
+         informational warning during a one-off live capture doesn't block the operator. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\OpenWrtApStats\OpenWrtApStats.csproj" />
+  </ItemGroup>
+</Project>
