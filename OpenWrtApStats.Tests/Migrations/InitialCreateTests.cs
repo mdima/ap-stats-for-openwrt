@@ -61,29 +61,61 @@ public sealed class InitialCreateTests(SqliteInMemoryFixture fixture) : IClassFi
     public async Task WLANStations_MacAddress_IsUnique()
     {
         // PER-02 — same MAC across rows must fail.
+        // Microsoft.Data.Sqlite enables PRAGMA foreign_keys=ON by default, so we must seed
+        // a parent WiFiNode + WiFiNetwork row before inserting any WLANStation. The original
+        // version of this test claimed FK was unenforced on a pre-opened connection — that
+        // claim is false (the provider applies foreign_keys=ON regardless of who opened the
+        // connection), so the first SaveChanges blew up on FK before the unique-index check
+        // ever fired. The test is now structured around real referential integrity and
+        // exercises ONLY the PER-02 unique-MAC invariant on the second insert.
         var ct = TestContext.Current.CancellationToken;
-        var mac = $"AA:BB:CC:DD:EE:{Random.Shared.Next(0, 255):X2}";
+        var nodeHost = $"node-{Guid.NewGuid():N}";
+        var net1Mac = $"BB:CC:DD:EE:FF:{Random.Shared.Next(0, 256):X2}";
+        var net2Mac = $"CC:DD:EE:FF:00:{Random.Shared.Next(0, 256):X2}";
+        var stationMac = $"AA:BB:CC:DD:EE:{Random.Shared.Next(0, 256):X2}";
 
+        // Seed: one WiFiNode hosting two distinct WiFiNetworks (different MAC pairs so the
+        // PER-03 composite-unique index doesn't fire).
+        int net1Id, net2Id;
         await using (var db = _fixture.CreateContext())
         {
-            // The :memory: SQLite connection is pre-opened by the fixture, so EF's default
-            // PRAGMA foreign_keys=ON is not applied — the FK to WiFiNetworks is therefore
-            // unenforced here. That is fine: this test exercises the UNIQUE INDEX on
-            // MacAddress, which fires regardless of FK enforcement (PER-02 binding).
+            var node = new WiFiNode
+            {
+                Hostname = nodeHost,
+                Username = "operator",
+                Password = string.Empty
+            };
+            db.WiFiNodes.Add(node);
+            await db.SaveChangesAsync(ct);
+
+            var net1 = new WiFiNetwork { WiFiNodeId = node.Id, SSID = "ssid-1", MacAddress = net1Mac };
+            var net2 = new WiFiNetwork { WiFiNodeId = node.Id, SSID = "ssid-2", MacAddress = net2Mac };
+            db.WiFiNetworks.AddRange(net1, net2);
+            await db.SaveChangesAsync(ct);
+
+            net1Id = net1.Id;
+            net2Id = net2.Id;
+        }
+
+        // Insert one station against net1 — should succeed.
+        await using (var db = _fixture.CreateContext())
+        {
             db.WLANStations.Add(new WLANStation
             {
-                MacAddress = mac,
-                WiFiNetworkId = 1
+                MacAddress = stationMac,
+                WiFiNetworkId = net1Id
             });
             await db.SaveChangesAsync(ct);
         }
 
+        // Insert a second station with the SAME MAC against net2 — must fail on the
+        // unique index on WLANStations.MacAddress (PER-02 binding).
         await using (var db2 = _fixture.CreateContext())
         {
             db2.WLANStations.Add(new WLANStation
             {
-                MacAddress = mac,
-                WiFiNetworkId = 2
+                MacAddress = stationMac,
+                WiFiNetworkId = net2Id
             });
             await Assert.ThrowsAsync<DbUpdateException>(() => db2.SaveChangesAsync(ct));
         }
