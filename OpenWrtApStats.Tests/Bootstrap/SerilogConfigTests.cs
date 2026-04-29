@@ -18,16 +18,16 @@ public sealed class SerilogConfigTests(TempDirectoryFixture temp) : IClassFixtur
     private static string ProgramSource()
     {
         // Walk up from the test bin to find the Program.cs source file. The test runner can be
-        // launched from various CWDs (repo root, tests dir, bin dir) so we anchor on
-        // AppContext.BaseDirectory and walk upwards looking for src/OpenWrtApStats/Program.cs.
+        // launched from various CWDs (repo root, project dir, bin dir) so we anchor on
+        // AppContext.BaseDirectory and walk upwards looking for OpenWrtApStats/Program.cs.
         var dir = AppContext.BaseDirectory;
         for (int i = 0; i < 10; i++)
         {
-            var candidate = Path.Combine(dir, "src", "OpenWrtApStats", "Program.cs");
+            var candidate = Path.Combine(dir, "OpenWrtApStats", "Program.cs");
             if (File.Exists(candidate)) return File.ReadAllText(candidate);
             dir = Path.GetFullPath(Path.Combine(dir, ".."));
         }
-        throw new FileNotFoundException("Could not locate src/OpenWrtApStats/Program.cs from test bin");
+        throw new FileNotFoundException("Could not locate OpenWrtApStats/Program.cs from test bin");
     }
 
     [Fact]

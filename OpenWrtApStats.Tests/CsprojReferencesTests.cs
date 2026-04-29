@@ -25,7 +25,7 @@ public sealed class CsprojReferencesTests
         for (int i = 0; i < 10; i++)
         {
             var candidate = Path.Combine(
-                dir, "tests", "OpenWrtApStats.Tests", "OpenWrtApStats.Tests.csproj");
+                dir, "OpenWrtApStats.Tests", "OpenWrtApStats.Tests.csproj");
             if (File.Exists(candidate)) return candidate;
             dir = Path.GetFullPath(Path.Combine(dir, ".."));
         }
