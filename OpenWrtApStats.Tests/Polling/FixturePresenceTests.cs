@@ -6,11 +6,11 @@ public sealed class FixturePresenceTests
 {
     /// <summary>
     /// CI-04 binding: at least one fixture folder must declare `provenance: live-capture` in its
-    /// SOURCE.md. Plan 02-02 ships skeleton folders with `provenance: SKELETON-PENDING-CAPTURE`
-    /// — the test is deliberately skipped in this plan. Plan 02-04 lands the operator-captured
-    /// fixture, removes the [Skip = ...] argument, and the test flips green.
+    /// SOURCE.md. Plan 02-04 landed the operator-captured real-device fixture
+    /// (openwrt-23.05-SNAPSHOT/SOURCE.md declares `provenance: live-capture`); this test is now
+    /// active and passing — CI-04 is closed.
     /// </summary>
-    [Fact(Skip = "Plan 02-04 lands real-device fixture; remove this Skip argument when fixture lands.")]
+    [Fact]
     public void RealDeviceFixture_Exists()
     {
         var root = Path.Combine("Fixtures", "ssh-output");

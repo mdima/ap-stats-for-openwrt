@@ -55,8 +55,10 @@ public sealed class NodePollerTests
         var dir = Path.Combine(Path.GetTempPath(), $"npt-{prefix}-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
-        // command -v iwinfo
-        var probeFilename = "command--v-iwinfo.txt";
+        // command -v iwinfo. Plan 02-04 W4-LOCK extension: filenames now collapse runs of '-'
+        // and replace ':' (Windows-safe), so "command -v iwinfo" maps to "command-v-iwinfo.txt"
+        // (single internal dash) rather than the older "command--v-iwinfo.txt" double-dash form.
+        var probeFilename = "command-v-iwinfo.txt";
         if (iwinfoExits127)
         {
             File.WriteAllText(Path.Combine(dir, probeFilename), "");
@@ -154,8 +156,9 @@ public sealed class NodePollerTests
             Assert.Equal("iw", cache.TryGet(node.Id));
 
             // Second poll on same node — even if probe would now report exit 0, the cache stays "iw".
-            File.WriteAllText(Path.Combine(fixtureDir, "command--v-iwinfo.txt.exit"), "0");
-            File.WriteAllText(Path.Combine(fixtureDir, "command--v-iwinfo.txt"), "/usr/sbin/iwinfo\n");
+            // Filenames track the W4-LOCK extension (single dash for "command -v iwinfo").
+            File.WriteAllText(Path.Combine(fixtureDir, "command-v-iwinfo.txt.exit"), "0");
+            File.WriteAllText(Path.Combine(fixtureDir, "command-v-iwinfo.txt"), "/usr/sbin/iwinfo\n");
             // Also need a fresh fake session (Pollr may dispose the existing one).
             var fake2 = new FakeSshSession(fixtureDir);
             var poller2 = new NodePoller(node, fake2, cache, dpp, NullLogger<NodePoller>.Instance);

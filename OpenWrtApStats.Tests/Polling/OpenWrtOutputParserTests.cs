@@ -8,7 +8,12 @@ public sealed class OpenWrtOutputParserTests
 {
     public static TheoryData<string> AllVersionFolders() => new()
     {
-        Path.Combine("Fixtures", "ssh-output", "openwrt-23.05.5"),
+        // Plan 02-04 update: openwrt-23.05-SNAPSHOT replaces the original 23.05.5 slot. The
+        // operator's real OpenWRT AP runs `DISTRIB_RELEASE='23.05-SNAPSHOT'` (a snapshot build of
+        // the 23.05 branch), and the FixtureCapture tool derives folder names from the AP's
+        // actual DISTRIB_RELEASE. The 23.05.5 skeleton folder was deleted in Task 4 W8 LOCK
+        // cleanup since no fixture content ever landed there.
+        Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT"),
         Path.Combine("Fixtures", "ssh-output", "openwrt-22.03.7"),
         Path.Combine("Fixtures", "ssh-output", "openwrt-21.02.7"),
     };
