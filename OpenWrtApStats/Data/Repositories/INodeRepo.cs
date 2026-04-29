@@ -33,4 +33,14 @@ public interface INodeRepo
 
     Task UpdateOnlineAsync(int nodeId, DateTime lastPoll, CancellationToken ct = default);
     Task UpdateOnlineAsync(DatabaseContext db, int nodeId, DateTime lastPoll, CancellationToken ct = default);
+
+    /// <summary>
+    /// Caller-owned. Used by <c>PollOrchestrator</c> on first-connect TOFU (D-02) to persist the
+    /// captured fingerprint inside the same coordinator transaction as the rest of the cycle's
+    /// writes. Repo-owned overload is intentionally NOT exposed — committing a fingerprint
+    /// outside the coordinator would violate Pitfall 6's single-writer constraint. CR-02-safe:
+    /// uses single-property <c>ExecuteUpdateAsync</c>, never <c>db.WiFiNodes.Update(entity)</c>
+    /// (which would clobber the encrypted <c>Password</c>).
+    /// </summary>
+    Task SetHostKeyFingerprintAsync(DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default);
 }

@@ -85,4 +85,13 @@ public sealed class NodeRepo(IDbContextFactory<DatabaseContext> factory) : INode
                 .SetProperty(n => n.Status,       Status.Online)
                 .SetProperty(n => n.LastPollDate, lastPoll), ct);
     }
+
+    // ── D-02 TOFU: caller-owned single-property update; CR-02-safe ──────────
+    // Uses ExecuteUpdateAsync on the HostKeyFingerprint column ONLY. Never
+    // db.WiFiNodes.Update(entity) — that would attach a stub with default
+    // Password="" and clobber the encrypted ciphertext (CR-02, Phase 4 binding).
+    public Task SetHostKeyFingerprintAsync(DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default) =>
+        db.WiFiNodes
+            .Where(n => n.Id == nodeId)
+            .ExecuteUpdateAsync(s => s.SetProperty(n => n.HostKeyFingerprint, fingerprint), ct);
 }

@@ -195,4 +195,98 @@ public sealed class NodeRepoTests(SqliteInMemoryFixture fixture) : IClassFixture
         await repo.AddAsync(node, ct);
         Assert.True(await repo.AnyEncryptedPasswordsAsync(ct));
     }
+
+    // ── D-02 SetHostKeyFingerprintAsync (caller-owned-only, CR-02-safe) ─────
+    [Fact]
+    public async Task SetHostKeyFingerprintAsync_CallerOwned_DoesNotCommit()
+    {
+        // D-02 caller-owned semantics: the method participates in the caller's transaction.
+        // If the caller does not commit, the change must not survive.
+        var ct = TestContext.Current.CancellationToken;
+        var repo = new NodeRepo(new TestDbContextFactory(_fixture.Options));
+
+        // Seed
+        int nodeId;
+        await using (var seed = _fixture.CreateContext())
+        {
+            var node = new WiFiNode { Hostname = $"node-{Guid.NewGuid():N}", Username = "root", Password = "" };
+            seed.WiFiNodes.Add(node);
+            await seed.SaveChangesAsync(ct);
+            nodeId = node.Id;
+        }
+
+        // Act inside a transaction that we deliberately do NOT commit.
+        await using (var ownedDb = _fixture.CreateContext())
+        await using (var tx = await ownedDb.Database.BeginTransactionAsync(ct))
+        {
+            await repo.SetHostKeyFingerprintAsync(ownedDb, nodeId, "fingerprint-XYZ", ct);
+            // No SaveChangesAsync. No CommitAsync. Tx rolls back on dispose.
+        }
+
+        // Assert: column was NOT updated (caller-owned does not commit on its own).
+        await using var verify = _fixture.CreateContext();
+        var node2 = await verify.WiFiNodes.AsNoTracking().FirstAsync(n => n.Id == nodeId, ct);
+        Assert.Null(node2.HostKeyFingerprint);
+    }
+
+    [Fact]
+    public async Task SetHostKeyFingerprintAsync_CallerOwned_CommitsWhenCallerSavesAndCommits()
+    {
+        // D-02 happy path: caller saves + commits, fingerprint persists.
+        var ct = TestContext.Current.CancellationToken;
+        var repo = new NodeRepo(new TestDbContextFactory(_fixture.Options));
+
+        int nodeId;
+        await using (var seed = _fixture.CreateContext())
+        {
+            var node = new WiFiNode { Hostname = $"node-{Guid.NewGuid():N}", Username = "root", Password = "" };
+            seed.WiFiNodes.Add(node);
+            await seed.SaveChangesAsync(ct);
+            nodeId = node.Id;
+        }
+
+        await using (var ownedDb = _fixture.CreateContext())
+        await using (var tx = await ownedDb.Database.BeginTransactionAsync(ct))
+        {
+            await repo.SetHostKeyFingerprintAsync(ownedDb, nodeId, "fingerprint-COMMITTED", ct);
+            await ownedDb.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+        }
+
+        await using var verify = _fixture.CreateContext();
+        var node2 = await verify.WiFiNodes.AsNoTracking().FirstAsync(n => n.Id == nodeId, ct);
+        Assert.Equal("fingerprint-COMMITTED", node2.HostKeyFingerprint);
+    }
+
+    [Fact]
+    public async Task SetHostKeyFingerprintAsync_DoesNotClobberPassword_CR02Safe()
+    {
+        // CR-02 safety: single-property ExecuteUpdateAsync MUST NOT touch the encrypted Password.
+        // (db.WiFiNodes.Update(entity) would clobber Password from a default value — we never go that path.)
+        var ct = TestContext.Current.CancellationToken;
+        var repo = new NodeRepo(new TestDbContextFactory(_fixture.Options));
+
+        int nodeId;
+        const string ciphertext = "ciphertext-blob-xyz";
+        await using (var seed = _fixture.CreateContext())
+        {
+            var node = new WiFiNode { Hostname = $"node-{Guid.NewGuid():N}", Username = "root", Password = ciphertext };
+            seed.WiFiNodes.Add(node);
+            await seed.SaveChangesAsync(ct);
+            nodeId = node.Id;
+        }
+
+        await using (var ownedDb = _fixture.CreateContext())
+        await using (var tx = await ownedDb.Database.BeginTransactionAsync(ct))
+        {
+            await repo.SetHostKeyFingerprintAsync(ownedDb, nodeId, "FP1", ct);
+            await ownedDb.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+        }
+
+        await using var verify = _fixture.CreateContext();
+        var node2 = await verify.WiFiNodes.AsNoTracking().FirstAsync(n => n.Id == nodeId, ct);
+        Assert.Equal(ciphertext, node2.Password);            // CR-02 safety
+        Assert.Equal("FP1",      node2.HostKeyFingerprint);   // happy path
+    }
 }
