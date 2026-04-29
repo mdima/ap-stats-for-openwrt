@@ -65,8 +65,15 @@ internal sealed class FakeSshSession(string fixtureDir) : ISshSession
         return File.ReadAllText(path);
     }
 
-    /// <summary>Convert e.g. "iwinfo wlan0 assoclist" → "iwinfo-wlan0-assoclist.txt". LOCKED — must match the
-    /// committed fixture filenames AND the (Plan 02-04) capture tool's output filenames.</summary>
+    /// <summary>Convert e.g. "iwinfo wlan0 assoclist" -> "iwinfo-wlan0-assoclist.txt". LOCKED — must match the
+    /// committed fixture filenames AND the (Plan 02-04) capture tool's output filenames.
+    /// Plan 02-04 extension: also replaces ':' (forbidden in Windows filenames) and collapses runs of dashes,
+    /// so e.g. "cat /etc/openwrt_release" -> "cat-etc-openwrt_release.txt" and
+    /// "iw dev wlan0 station get AA:BB:CC:DD:EE:01" -> "iw-dev-wlan0-station-get-AA-BB-CC-DD-EE-01.txt".</summary>
     private static string ToFilename(string command)
-        => command.Trim().Replace(' ', '-').Replace('/', '-') + ".txt";
+    {
+        var s = command.Trim().Replace(' ', '-').Replace('/', '-').Replace(':', '-');
+        while (s.Contains("--", StringComparison.Ordinal)) s = s.Replace("--", "-");
+        return s.Trim('-') + ".txt";
+    }
 }

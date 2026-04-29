@@ -220,7 +220,18 @@ static async Task CaptureCore(string fixtureDir, string command, string content,
 }
 
 static string ToFilename(string command)
-    => command.Trim().Replace(' ', '-').Replace('/', '-') + ".txt";
+{
+    // W4 LOCK extended in Plan 02-04: also replace ':' (forbidden in Windows filenames per
+    // https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file#naming-conventions)
+    // and collapse runs of dashes so leading-slash + space combos produce clean output:
+    //   "cat /etc/openwrt_release" -> "cat-etc-openwrt_release.txt"
+    //   "iw dev wlan0 station get AA:BB:CC:DD:EE:01" -> "iw-dev-wlan0-station-get-AA-BB-CC-DD-EE-01.txt"
+    // FakeSshSession.ToFilename mirrors this logic exactly so fixtures captured by this tool can be
+    // replayed verbatim by the parser tests.
+    var s = command.Trim().Replace(' ', '-').Replace('/', '-').Replace(':', '-');
+    while (s.Contains("--", StringComparison.Ordinal)) s = s.Replace("--", "-");
+    return s.Trim('-') + ".txt";
+}
 
 static Dictionary<string, string> ParseEnv(string path)
 {
