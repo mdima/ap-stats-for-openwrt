@@ -179,4 +179,39 @@ public sealed class StationRepoTests(SqliteInMemoryFixture fixture) : IClassFixt
         var clearedFetched = await repo.GetByMacAsync(mac, ct);
         Assert.Null(clearedFetched!.Name);
     }
+
+    [Fact]
+    public async Task UpsertCycleAsync_CR01_DifferentMacCases_TreatedAsDistinctRows()
+    {
+        // CR-01 closure proof: post-D-07, the repo dedup is case-STRICT (StringComparer.Ordinal).
+        // Callers MUST uppercase upstream — the parser (Plan 02-02) does. If a future caller
+        // forgets, this test fails honestly: two rows where the operator expected one, instead
+        // of silent collapse-and-data-loss.
+        var ct = TestContext.Current.CancellationToken;
+        var repo = CreateRepo();
+        var (_, net1Id, _) = await SeedNodeWithTwoNetworksAsync(ct);
+
+        var upperMac = $"DD:01:02:03:04:{Random.Shared.Next(0, 255):X2}";
+        var lowerMac = upperMac.ToLowerInvariant();
+
+        await using (var ownedDb = _fixture.CreateContext())
+        await using (var tx = await ownedDb.Database.BeginTransactionAsync(ct))
+        {
+            await repo.UpsertCycleAsync(ownedDb, new[]
+            {
+                new WLANStation { MacAddress = upperMac, WiFiNetworkId = net1Id, LastPollDate = DateTime.UtcNow },
+                new WLANStation { MacAddress = lowerMac, WiFiNetworkId = net1Id, LastPollDate = DateTime.UtcNow },
+            }, ct);
+            await ownedDb.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+        }
+
+        await using var verify = _fixture.CreateContext();
+        var rows = await verify.WLANStations
+            .Where(s => s.MacAddress == upperMac || s.MacAddress == lowerMac)
+            .ToListAsync(ct);
+        Assert.Equal(2, rows.Count);
+        Assert.Single(rows, r => r.MacAddress == upperMac);
+        Assert.Single(rows, r => r.MacAddress == lowerMac);
+    }
 }

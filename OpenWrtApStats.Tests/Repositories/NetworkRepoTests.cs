@@ -124,4 +124,35 @@ public sealed class NetworkRepoTests(SqliteInMemoryFixture fixture) : IClassFixt
         var after = (await repo.GetByNodeAsync(nodeId, ct)).Single(n => n.MacAddress == mac);
         Assert.True(after.Enabled);
     }
+
+    [Fact]
+    public async Task UpsertManyAsync_CR01_DifferentBssidCases_TreatedAsDistinctRows()
+    {
+        // CR-01 sister-site (NetworkRepo.cs case-STRICT BSSID dedup post-D-07). Callers
+        // (parser → orchestrator) uppercase upstream; the repo no longer silently merges.
+        var ct = TestContext.Current.CancellationToken;
+        var repo = CreateRepo();
+        var nodeId = await SeedNodeAsync(ct);
+
+        var upperBssid = $"FF:EE:DD:CC:BB:{Random.Shared.Next(0, 255):X2}";
+        var lowerBssid = upperBssid.ToLowerInvariant();
+
+        await using (var ownedDb = _fixture.CreateContext())
+        await using (var tx = await ownedDb.Database.BeginTransactionAsync(ct))
+        {
+            await repo.UpsertManyAsync(ownedDb, nodeId, new[]
+            {
+                new WiFiNetwork { MacAddress = upperBssid, SSID = "TEST", WiFiNodeId = nodeId },
+                new WiFiNetwork { MacAddress = lowerBssid, SSID = "TEST", WiFiNodeId = nodeId },
+            }, ct);
+            await ownedDb.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+        }
+
+        await using var verify = _fixture.CreateContext();
+        var rows = await verify.WiFiNetworks
+            .Where(n => n.WiFiNodeId == nodeId && (n.MacAddress == upperBssid || n.MacAddress == lowerBssid))
+            .ToListAsync(ct);
+        Assert.Equal(2, rows.Count);
+    }
 }

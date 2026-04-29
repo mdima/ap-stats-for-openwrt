@@ -8,6 +8,8 @@ namespace OpenWrtApStats.Data.Repositories;
 /// dual-overload pattern (D-07) routes repo-owned through caller-owned. UpsertCycle
 /// preserves the operator-assigned <see cref="WLANStation.Name"/> across cycles
 /// (DASH-14 forward-compat).
+/// Phase 2 D-07 / CR-01 closure: case-strict MAC dedup — callers MUST uppercase upstream
+/// (parser does, per <c>OpenWrtOutputParser</c> Plan 02-02).
 /// </summary>
 public sealed class StationRepo(IDbContextFactory<DatabaseContext> factory) : IStationRepo
 {
@@ -54,12 +56,12 @@ public sealed class StationRepo(IDbContextFactory<DatabaseContext> factory) : IS
     public async Task UpsertCycleAsync(DatabaseContext db, IEnumerable<WLANStation> live, CancellationToken ct = default)
     {
         var liveList = live.ToList();
-        var macs = liveList.Select(s => s.MacAddress).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var macs = liveList.Select(s => s.MacAddress).ToHashSet(StringComparer.Ordinal);   // D-07 / CR-01 closure: callers uppercase upstream
 
         var existing = await db.WLANStations
             .Where(s => macs.Contains(s.MacAddress))
             .ToListAsync(ct);
-        var existingByMac = existing.ToDictionary(s => s.MacAddress, StringComparer.OrdinalIgnoreCase);
+        var existingByMac = existing.ToDictionary(s => s.MacAddress, StringComparer.Ordinal);          // D-07 / CR-01 closure
 
         foreach (var probe in liveList)
         {

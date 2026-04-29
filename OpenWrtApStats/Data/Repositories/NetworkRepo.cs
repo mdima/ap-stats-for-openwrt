@@ -8,6 +8,8 @@ namespace OpenWrtApStats.Data.Repositories;
 /// dual-overload pattern (D-07) routes repo-owned through caller-owned. Re-discovery
 /// preserves the operator-toggled <c>Enabled</c> flag (WLAN-03 forward-compat) and
 /// does NOT delete WLANs that disappeared from the latest probe.
+/// Phase 2 D-07 / CR-01 sister-site closure: case-strict BSSID dedup — callers MUST
+/// uppercase upstream (parser does, per <c>OpenWrtOutputParser</c> Plan 02-02).
 /// </summary>
 public sealed class NetworkRepo(IDbContextFactory<DatabaseContext> factory) : INetworkRepo
 {
@@ -50,7 +52,7 @@ public sealed class NetworkRepo(IDbContextFactory<DatabaseContext> factory) : IN
         var existing = await db.WiFiNetworks
             .Where(n => n.WiFiNodeId == wiFiNodeId)
             .ToListAsync(ct);
-        var existingByMac = existing.ToDictionary(n => n.MacAddress, StringComparer.OrdinalIgnoreCase);
+        var existingByMac = existing.ToDictionary(n => n.MacAddress, StringComparer.Ordinal);          // D-07 / CR-01 sister-site closure
 
         foreach (var probe in discoveredList)
         {
