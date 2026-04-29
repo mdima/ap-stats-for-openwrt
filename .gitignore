@@ -491,3 +491,7 @@ TestResults/
 coverage.cobertura.xml
 
 # IMPORTANT: do NOT exclude Data/Migrations/*.cs — EF migrations are committed source code.
+
+# OpenWRT live-capture credentials (D-10) — operator-supplied per-machine; NEVER commit
+*.local.env
+**/.live-credentials.local.env
