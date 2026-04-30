@@ -49,7 +49,7 @@ public sealed class HostedServiceRegistrationOrderTests
         builder.Services.AddSingleton<PollNotifier>();
         builder.Services.AddSingleton<PollOrchestrator>();
         builder.Services.AddTransient<ISshSession, RealSshSession>();
-        builder.Services.AddTransient<NodePoller>();
+        // GAP-02-A: NodePoller is intentionally NOT registered. Mirrors Program.cs.
         builder.Services.AddSingleton<Func<WiFiNode, CancellationToken, Task<NodeProbeResult>>>(
             sp => (n, ct) => Task.FromResult<NodeProbeResult>(new NodeProbeResult.Failed(n.Id, "test-stub")));
         builder.Services.AddSingleton<Func<CancellationToken, Task>>(

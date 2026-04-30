@@ -70,7 +70,12 @@ try
     builder.Services.AddSingleton<PollNotifier>();
     builder.Services.AddSingleton<PollOrchestrator>();
     builder.Services.AddTransient<ISshSession, RealSshSession>();
-    builder.Services.AddTransient<NodePoller>();
+    // NodePoller is INTENTIONALLY NOT in the DI container. Its primary-ctor takes
+    // a runtime WiFiNode positional arg that is not a DI service; registering it
+    // would cause WebApplicationBuilder's eager service-provider validation
+    // (Development default) to abort with "Unable to resolve WiFiNode" — see
+    // GAP-02-A in 02-HUMAN-UAT.md. NodePoller is constructed per-cycle via
+    // ActivatorUtilities.CreateInstance below, which works without registration.
     // B3 LOCK -- probe factory is the SOLE way the orchestrator drives a poll. No
     // Func<WiFiNode, NodePoller> exists in DI; PollOrchestrator's primary-ctor takes this Func
     // directly, never a NodePoller factory.
