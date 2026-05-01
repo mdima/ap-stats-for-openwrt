@@ -52,6 +52,12 @@ public interface INodeRepo
     /// detect a key-ring/DB mismatch — keeps DbContext access exclusive to repositories per PER-04.</summary>
     Task<bool> AnyEncryptedPasswordsAsync(CancellationToken ct = default);
 
+    /// <summary>
+    /// ONB-01 auto-redirect predicate. Returns true if any WiFiNode row exists.
+    /// Single AsNoTracking().AnyAsync() — avoids loading full node list for a boolean check.
+    /// </summary>
+    Task<bool> AnyAsync(CancellationToken ct = default);
+
     // ── Cycle-shaped (D-07 dual flavors — used by Phase 2 orchestrator) ─────
     /// <summary>Repo-owned scope. Used by smoke tests and one-off callers.</summary>
     Task MarkAllOfflineAsync(CancellationToken ct = default);

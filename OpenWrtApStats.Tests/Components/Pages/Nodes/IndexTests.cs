@@ -28,6 +28,7 @@ public sealed class IndexTests
         public Task ClearAllHostKeyFingerprintsAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task ClearHostKeyFingerprintAsync(int nodeId, CancellationToken ct = default) => Task.CompletedTask;
         public Task<bool> AnyEncryptedPasswordsAsync(CancellationToken ct = default) => Task.FromResult(_nodes.Any(n => !string.IsNullOrEmpty(n.Password)));
+        public Task<bool> AnyAsync(CancellationToken ct = default) => Task.FromResult(_nodes.Count > 0);
         public Task MarkAllOfflineAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkAllOfflineAsync(OpenWrtApStats.Data.DatabaseContext db, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpdateOnlineAsync(int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;

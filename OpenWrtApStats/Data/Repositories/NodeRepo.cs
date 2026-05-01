@@ -85,6 +85,12 @@ public sealed class NodeRepo(IDbContextFactory<DatabaseContext> factory) : INode
             .AnyAsync(n => !string.IsNullOrEmpty(n.Password), ct);
     }
 
+    public async Task<bool> AnyAsync(CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        return await db.WiFiNodes.AsNoTracking().AnyAsync(ct);
+    }
+
     // ── Cycle-shaped: repo-owned overloads delegate to caller-owned ─────────
     public async Task MarkAllOfflineAsync(CancellationToken ct = default)
     {

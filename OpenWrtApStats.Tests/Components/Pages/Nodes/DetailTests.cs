@@ -37,6 +37,7 @@ public sealed class DetailTests
         public Task UpdatePasswordAsync(int id, string p, CancellationToken ct = default) => Task.CompletedTask;
         public Task ClearAllHostKeyFingerprintsAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task<bool> AnyEncryptedPasswordsAsync(CancellationToken ct = default) => Task.FromResult(false);
+        public Task<bool> AnyAsync(CancellationToken ct = default) => Task.FromResult(false);
         public Task MarkAllOfflineAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkAllOfflineAsync(OpenWrtApStats.Data.DatabaseContext db, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpdateOnlineAsync(int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;

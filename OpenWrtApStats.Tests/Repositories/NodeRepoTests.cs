@@ -200,6 +200,34 @@ public sealed class NodeRepoTests(SqliteInMemoryFixture fixture) : IClassFixture
         Assert.True(await repo.AnyEncryptedPasswordsAsync(ct));
     }
 
+    // ── ONB-01 AnyAsync predicate ────────────────────────────────────────────
+    [Fact]
+    public async Task AnyAsync_FalseWhenNoNodes()
+    {
+        // Class fixture is shared — we cannot guarantee zero nodes exist.
+        // Assert consistency: AnyAsync must agree with GetAllAsync.
+        var ct = TestContext.Current.CancellationToken;
+        var repo = CreateRepo();
+        var existing = await repo.GetAllAsync(ct);
+        var expectedAny = existing.Count > 0;
+        Assert.Equal(expectedAny, await repo.AnyAsync(ct));
+    }
+
+    [Fact]
+    public async Task AnyAsync_TrueAfterAddAsync()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var repo = CreateRepo();
+        var node = new WiFiNode
+        {
+            Hostname = $"any-async-test-{Guid.NewGuid():N}",
+            Username = "root",
+            Password = ""
+        };
+        await repo.AddAsync(node, ct);
+        Assert.True(await repo.AnyAsync(ct));
+    }
+
     // ── D-02 SetHostKeyFingerprintAsync (caller-owned-only, CR-02-safe) ─────
     [Fact]
     public async Task SetHostKeyFingerprintAsync_CallerOwned_DoesNotCommit()
