@@ -156,11 +156,11 @@
         w.Enabled = enabled;
         _savedFlashId = w.Id;
         await InvokeAsync(StateHasChanged);
-        _ = Task.Run(async () =>
+        _ = InvokeAsync(async () =>
         {
             await Task.Delay(2000);
             _savedFlashId = null;
-            await InvokeAsync(StateHasChanged);
+            StateHasChanged();   // already on circuit thread via InvokeAsync (WR-02)
         });
     }
 
