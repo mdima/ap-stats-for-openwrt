@@ -101,10 +101,14 @@ public sealed class AppSettingsServiceTests(SqliteInMemoryFixture fixture) : ICl
     [Fact]
     public async Task SetWizardDismissedAsync_RoundtripTrue()
     {
+        // Defensive: shared fixture means a prior test may have left WizardDismissed=true
+        // (see WarmAsync_LoadsCurrentDbState above). Round-trip both directions to verify
+        // the setter independently of starting state.
         var ct = TestContext.Current.CancellationToken;
         var svc = CreateService();
         await svc.WarmAsync(ct);
-        Assert.False(svc.WizardDismissed);   // default false before first write
+        await svc.SetWizardDismissedAsync(false, ct);
+        Assert.False(svc.WizardDismissed);
         await svc.SetWizardDismissedAsync(true, ct);
         Assert.True(svc.WizardDismissed);
     }

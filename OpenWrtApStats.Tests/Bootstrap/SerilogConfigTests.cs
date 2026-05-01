@@ -42,10 +42,13 @@ public sealed class SerilogConfigTests(TempDirectoryFixture temp) : IClassFixtur
     [Fact]
     public void FileSink_HasDailyRolling_AndSevenDayRetention()
     {
-        // INF-05 — file sink: /logs/openwrt-ap-stats-.log, daily, 7-day retention,
-        // CompactJsonFormatter, async-wrapped (source-text invariant).
+        // INF-05 — file sink: <logsRoot>/openwrt-ap-stats-.log, daily, 7-day retention,
+        // CompactJsonFormatter, async-wrapped (source-text invariant). logsRoot defaults to
+        // "/logs" but is overridable via the LOGS_ROOT env var for local Windows dev.
         var src = ProgramSource();
-        Assert.Contains("/logs/openwrt-ap-stats-.log", src);
+        Assert.Contains("LOGS_ROOT", src);
+        Assert.Contains("\"/logs\"", src);
+        Assert.Contains("/openwrt-ap-stats-.log", src);
         Assert.Contains("RollingInterval.Day", src);
         Assert.Contains("retainedFileCountLimit: 7", src);
         Assert.Contains("CompactJsonFormatter", src);

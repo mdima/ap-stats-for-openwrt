@@ -1,9 +1,10 @@
-@* App.razor — Blazor root host. D-06: @rendermode InteractiveServer is applied per-component
-   to <HeadOutlet> and <Routes> below; AddInteractiveServerRenderMode is wired in Program.cs
-   so the global default render mode applies to every routed page. UI-SPEC §Vendoring step 7+8
-   locks the <link> order (Source Sans 3 → Bootstrap Icons → AdminLTE) and <script> order
-   (AdminLTE first, then blazor.web.js). Pitfall 2 (Login.razor static-SSR opt-out)
-   is handled at the page level via [ExcludeFromInteractiveRouting] in Plan 03-03. *@
+@* App.razor — Blazor root host. D-06: render mode is per-request, conditional on the
+   matched endpoint. Pages with [ExcludeFromInteractiveRouting] (Login, Password) render
+   static SSR; everything else renders InteractiveServer. The unconditional InteractiveServer
+   pattern would let the client-side Router run on excluded pages and replace them with a
+   "Not found" fallback after pre-render. UI-SPEC §Vendoring step 7+8 locks the <link> order
+   (Source Sans 3 → Bootstrap Icons → AdminLTE) and <script> order (AdminLTE first, then
+   blazor.web.js). *@
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -15,11 +16,19 @@
     <link rel="stylesheet" href="/lib/adminlte/css/adminlte.min.css" />
     <link rel="stylesheet" href="app.css" />
     <link rel="icon" type="image/x-icon" href="favicon.ico" />
-    <HeadOutlet @rendermode="RenderMode.InteractiveServer" />
+    <HeadOutlet @rendermode="@PageRenderMode" />
 </head>
 <body class="layout-fixed sidebar-expand-lg bg-body-tertiary">
-    <Routes @rendermode="RenderMode.InteractiveServer" />
+    <Routes @rendermode="@PageRenderMode" />
     <script src="/lib/adminlte/js/adminlte.min.js"></script>
     <script src="_framework/blazor.web.js"></script>
 </body>
 </html>
+
+@code {
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    private IComponentRenderMode? PageRenderMode
+        => HttpContext.AcceptsInteractiveRouting() ? RenderMode.InteractiveServer : null;
+}

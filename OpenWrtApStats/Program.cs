@@ -24,6 +24,11 @@ try
 
     var builder = WebApplication.CreateBuilder(args);
 
+    // DATA_ROOT / LOGS_ROOT env vars allow local Windows dev to redirect storage without
+    // touching Docker deployment (unset → /data and /logs as before, D-13 still holds for prod).
+    var dataRoot = Environment.GetEnvironmentVariable("DATA_ROOT") ?? "/data";
+    var logsRoot = Environment.GetEnvironmentVariable("LOGS_ROOT") ?? "/logs";
+
     // 2. Promote Serilog to the host's primary logger.
     //    Two-stage init means appsettings.json overrides are applied here while
     //    the bootstrap logger above still catches any earlier startup exceptions.
@@ -36,22 +41,22 @@ try
         .WriteTo.Console()
         .WriteTo.Async(a => a.File(
             formatter: new CompactJsonFormatter(),
-            path: "/logs/openwrt-ap-stats-.log",            // hardcoded per D-13; trailing hyphen mandatory (INF-04, INF-05)
+            path: $"{logsRoot}/openwrt-ap-stats-.log",       // D-13: no appsettings indirection; override via LOGS_ROOT env var
             rollingInterval: RollingInterval.Day,
-            retainedFileCountLimit: 7,                       // INF-05 — REQUIREMENTS-pinned 7 wins over STACK.md's 14
+            retainedFileCountLimit: 7,                        // INF-05 — REQUIREMENTS-pinned 7 wins over STACK.md's 14
             shared: false)));
 
     // 3. EF Core — factory only, NEVER scoped DbContext (PER-05; PITFALL: captive dependency).
     builder.Services.AddDbContextFactory<DatabaseContext>(options =>
-        options.UseSqlite("Data Source=/data/OpenWRT-AP-Stats.db;Cache=Shared;Pooling=True"));
+        options.UseSqlite($"Data Source={dataRoot}/OpenWRT-AP-Stats.db;Cache=Shared;Pooling=True"));
 
     // 4. ASP.NET Data Protection — file-system key ring + verbatim application name (D-02 / SEC-03).
     //    On Linux/WSL2 keys are NOT encrypted at rest (DPAPI is Windows-only) —
     //    the /data volume is the encryption boundary (acceptable per threat model).
     builder.Services.AddDataProtection()
-        .PersistKeysToFileSystem(new DirectoryInfo("/data/keys"))   // SEC-02
-        .SetApplicationName("OpenWrtApStats")                       // SEC-03, D-02 — VERBATIM string
-        .SetDefaultKeyLifetime(TimeSpan.FromDays(90));              // framework default — RESEARCH Pattern 3 §3
+        .PersistKeysToFileSystem(new DirectoryInfo($"{dataRoot}/keys"))  // SEC-02
+        .SetApplicationName("OpenWrtApStats")                            // SEC-03, D-02 — VERBATIM string
+        .SetDefaultKeyLifetime(TimeSpan.FromDays(90));                   // framework default — RESEARCH Pattern 3 §3
 
     // 5. Repositories (Transient — RESEARCH lifetimes table) + Settings service (Singleton — D-11).
     //    Repository registrations come first because AppSettingsService consumes IAppSettingsRepo
@@ -203,6 +208,44 @@ try
     {
         await settings.SetWizardDismissedAsync(true, ctx.RequestAborted);
         return Microsoft.AspNetCore.Http.Results.Redirect("/");
+    }).AllowAnonymous();
+
+    // Step 1 password submission — auth needs the HTTP response pipeline, not the Blazor circuit.
+    // Password.razor is a normal InteractiveServer page; this endpoint handles the POST.
+    app.MapPost("/setup/submit-password", async (
+        OpenWrtApStats.Services.Auth.IUIPasswordHasher hasher,
+        IAppSettingsService settings,
+        HttpContext ctx) =>
+    {
+        var form   = ctx.Request.Form;
+        var action = form["action"].ToString();
+
+        if (action != "set")
+            return Microsoft.AspNetCore.Http.Results.Redirect("/setup/nodes");
+
+        var password = form["Password"].ToString();
+        var confirm  = form["ConfirmPassword"].ToString();
+
+        if (string.IsNullOrEmpty(password))
+            return Microsoft.AspNetCore.Http.Results.Redirect(
+                "/setup/password?Error=" + Uri.EscapeDataString("Password is required."));
+
+        if (password != confirm)
+            return Microsoft.AspNetCore.Http.Results.Redirect(
+                "/setup/password?Error=" + Uri.EscapeDataString("Passwords do not match."));
+
+        var hash = hasher.Hash(password);
+        await settings.SetUIPasswordHashAsync(hash, ctx.RequestAborted);
+
+        var claims   = new[] { new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, "operator") };
+        var identity = new System.Security.Claims.ClaimsIdentity(
+            claims,
+            Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme);
+        await ctx.SignInAsync(
+            Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme,
+            new System.Security.Claims.ClaimsPrincipal(identity));
+
+        return Microsoft.AspNetCore.Http.Results.Redirect("/setup/nodes");
     }).AllowAnonymous();   // wizard skip must be reachable regardless of auth state
 
     app.MapRazorComponents<OpenWrtApStats.Components.App>()
