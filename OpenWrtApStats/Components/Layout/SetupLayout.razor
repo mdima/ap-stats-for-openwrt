@@ -1,0 +1,34 @@
+@inherits LayoutComponentBase
+@using OpenWrtApStats.Components.Shared
+
+<PageTitle>OpenWRT-AP-Stats — Setup</PageTitle>
+
+<div class="login-page bg-body-secondary">
+    <div class="setup-wizard-box mx-auto" style="max-width: 720px; padding: 20px 0;">
+        <div class="login-logo mb-4">
+            <a href="/"><strong>OpenWRT</strong>-AP-Stats</a>
+        </div>
+
+        <WizardBreadcrumb CurrentStep="@CurrentStep" />
+
+        <div class="card">
+            <div class="card-body">
+                @Body
+            </div>
+        </div>
+
+        <div class="text-center mt-3">
+            @* Skip-for-now is rendered as a form POST so it works on both static-SSR (Step 1)
+               and InteractiveServer (Steps 2/3) without a circuit. D-08. *@
+            <form method="post" action="/setup/skip">
+                <AntiforgeryToken />
+                <button type="submit" class="btn btn-link text-body-secondary">Skip for now</button>
+            </form>
+            <small class="text-body-secondary">You can always finish setup later from the dashboard.</small>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public int CurrentStep { get; set; } = 1;
+}
