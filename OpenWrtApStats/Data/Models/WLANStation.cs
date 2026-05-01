@@ -5,9 +5,10 @@ using Microsoft.EntityFrameworkCore;
 namespace OpenWrtApStats.Data.Models;
 
 /// <summary>
-/// A wireless client currently associated with one of the monitored WLANs. PER-02 binds
-/// <see cref="MacAddress"/> as the stable identity (a station can hop WLANs over time);
-/// the class-level unique index reconciles cross-WLAN re-discovery to one logical station.
+/// A wireless client currently associated with one of the monitored WLANs. MAC is the stable
+/// identity (PER-02). The cross-WLAN unique index reconciles re-discovery to one logical
+/// station; FK is nullable post-NODE-04 (dissociation contract — historical observation rows
+/// survive node deletion).
 /// </summary>
 [Index(nameof(MacAddress), IsUnique = true)]
 public class WLANStation
@@ -15,13 +16,15 @@ public class WLANStation
     public int Id { get; set; }
 
     /// <summary>
-    /// Current WLAN association. Non-nullable per <c>seed/datamodel.md</c> (PER-01 binding).
-    /// The coordinator-transaction pattern (mark-Offline-then-upsert atomically inside one
-    /// outer transaction) eliminates any transient window where this FK would temporarily
-    /// point at "no network" — the concern is solved architecturally, not by relaxing the
-    /// schema.
+    /// Current WLAN association. Nullable since NODE-04 (Phase 3): deleting a WiFiNode
+    /// cascades its WiFiNetworks (DeleteBehavior.Cascade) AND dissociates its WLANStations
+    /// (DeleteBehavior.SetNull) — historical observation rows survive with FK = NULL rather
+    /// than being deleted along with the network. The coordinator-transaction pattern
+    /// (mark-Offline-then-upsert atomically inside one outer transaction) still owns the
+    /// polling-cycle invariant — null FK only appears when the parent WiFiNetwork was
+    /// destroyed by NODE-04 cascade, NOT during a poll cycle.
     /// </summary>
-    public int WiFiNetworkId { get; set; }
+    public int? WiFiNetworkId { get; set; }
 
     [Required, MaxLength(17)]
     public string MacAddress { get; set; } = string.Empty;

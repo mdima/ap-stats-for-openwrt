@@ -82,7 +82,7 @@ namespace OpenWrtApStats.Data.Migrations
                     b.Property<double>("TxBitrate")
                         .HasColumnType("REAL");
 
-                    b.Property<int>("WiFiNetworkId")
+                    b.Property<int?>("WiFiNetworkId")
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
@@ -175,8 +175,7 @@ namespace OpenWrtApStats.Data.Migrations
                     b.HasOne("OpenWrtApStats.Data.Models.WiFiNetwork", "Network")
                         .WithMany()
                         .HasForeignKey("WiFiNetworkId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Network");
                 });

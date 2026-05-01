@@ -104,14 +104,17 @@ public sealed class PollOrchestrator(
             var allStations = results.OfType<NodeProbeResult.Success>().SelectMany(r => r.Stations).ToList();
             foreach (var s in allStations)
             {
-                if (s.WiFiNetworkId != 0) continue;     // already set by caller
+                // "Resolved" = a non-null, non-zero FK. NODE-04 (Plan 03-04) made WiFiNetworkId
+                // nullable to support post-deletion historical observation rows; in this
+                // pre-persist orchestrator path null AND 0 both mean "not yet resolved".
+                if (s.WiFiNetworkId is not null and not 0) continue;     // already set by caller
                 if (s.Bssid is null) continue;          // no carrier — parser bug; orchestrator skips
                 if (!stationToNodeId.TryGetValue(s, out var owningNodeId)) continue;
                 if (bssidLookup.TryGetValue((owningNodeId, s.Bssid.ToUpperInvariant()), out var netId))
                     s.WiFiNetworkId = netId;
             }
             // Drop stations whose WiFiNetworkId could not be resolved (orphaned).
-            allStations = allStations.Where(s => s.WiFiNetworkId != 0).ToList();
+            allStations = allStations.Where(s => s.WiFiNetworkId is not null and not 0).ToList();
 
             // 6. Orchestrator-side dedup (D-08 / CR-03 closure). StringComparer.Ordinal: parser uppercased.
             var deduped = allStations

@@ -24,5 +24,23 @@ public sealed class DatabaseContext(DbContextOptions<DatabaseContext> options) :
             Key      = "PollingIntervalSeconds",
             IntValue = 30
         });
+
+        // NODE-04 (Phase 3) — explicit FK delete behavior:
+        //   • WiFiNode → WiFiNetwork: DeleteBehavior.Cascade (required navigation; matches
+        //     EF Core 10 default but pinned explicitly to make the contract loud).
+        //   • WiFiNetwork → WLANStation: DeleteBehavior.SetNull (dissociation; preserves
+        //     historical observation rows). Requires WLANStation.WiFiNetworkId to be
+        //     nullable (int?).
+        modelBuilder.Entity<WiFiNetwork>()
+            .HasOne(w => w.Node)
+            .WithMany()
+            .HasForeignKey(w => w.WiFiNodeId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<WLANStation>()
+            .HasOne(s => s.Network)
+            .WithMany()
+            .HasForeignKey(s => s.WiFiNetworkId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }
