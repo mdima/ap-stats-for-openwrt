@@ -41,7 +41,12 @@ public class WLANStation
 
     public double TxBitrate { get; set; }
     public double RxBitrate { get; set; }
-    public int RSS { get; set; }
+    /// <summary>
+    /// Received Signal Strength in dBm. Null means the parser did not find an RSS value
+    /// for this station (absent from output). Zero is a valid signal level and must NOT
+    /// be used as a sentinel — CR-03.
+    /// </summary>
+    public int? RSS { get; set; }
 
     public Status Status { get; set; } = Status.Offline;
 

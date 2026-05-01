@@ -125,12 +125,13 @@ public static class OpenWrtOutputParser
                         Status = Status.Online,
                     };
                     // RSS may also be on the same line: "AA:BB:..  -45 dBm"
+                    // Only assign when parse succeeds — null means absent, not zero (CR-03).
                     var dbmIdx = line.IndexOf(" dBm", StringComparison.Ordinal);
                     if (dbmIdx > 0)
                     {
                         var seg = line.Substring(0, dbmIdx);
-                        int.TryParse(FirstSignedNumber(seg), out var rss);
-                        cur.RSS = rss;
+                        if (int.TryParse(FirstSignedNumber(seg), out var rss))
+                            cur.RSS = rss;
                     }
                 }
                 else if (cur is not null)
@@ -245,8 +246,9 @@ public static class OpenWrtOutputParser
                     var line = rawLine.TrimStart();
                     if (line.StartsWith("signal:", StringComparison.Ordinal))
                     {
-                        int.TryParse(FirstSignedNumber(line), out var rss);
-                        cur.RSS = rss;
+                        // Only assign when parse succeeds — null means absent, not zero (CR-03).
+                        if (int.TryParse(FirstSignedNumber(line), out var rss))
+                            cur.RSS = rss;
                     }
                 }
             }

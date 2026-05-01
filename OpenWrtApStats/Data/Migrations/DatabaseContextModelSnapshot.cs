@@ -70,7 +70,7 @@ namespace OpenWrtApStats.Data.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("RSS")
+                    b.Property<int?>("RSS")
                         .HasColumnType("INTEGER");
 
                     b.Property<double>("RxBitrate")

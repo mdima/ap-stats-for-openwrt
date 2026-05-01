@@ -176,7 +176,7 @@ else
                 Ip: s.IPAddress,
                 Ssid: net.Ssid,
                 ApHostname: net.ApHostname,
-                Rss: s.RSS == 0 ? (int?)null : s.RSS,
+                Rss: s.RSS,   // int? — null means absent, never sentinel-zero (CR-03)
                 LastSeen: s.LastPollDate,
                 StationStatus: s.Status));
         }
