@@ -2,6 +2,7 @@ using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using OpenWrtApStats.Data.Models;
 using OpenWrtApStats.Data.Repositories;
+using OpenWrtApStats.Services.Settings;
 using OpenWrtApStats.Services.Vendor;
 using Xunit;
 using Dashboard = OpenWrtApStats.Components.Pages.Dashboard;
@@ -10,7 +11,7 @@ namespace OpenWrtApStats.Tests.Components.Pages;
 
 /// <summary>
 /// Dashboard.razor bUnit tests. Covers the three render branches:
-///   - DASH-09 (zero nodes empty state)
+///   - DASH-09 (zero nodes empty state, conditional CTA per D-09/ONB-06)
 ///   - DASH-10 (nodes exist but every WLAN disabled empty state, plural + singular)
 ///   - DASH-13 (vendor column via IOuiLookup, known + unknown fallback)
 /// Plus DASH-11 deferred placeholder + forward-compat anchor presence (T-3-06-04 mitigation).
@@ -74,8 +75,21 @@ public sealed class DashboardTests
         public string? GetVendor(string macAddress) => Vendors.TryGetValue(macAddress, out var v) ? v : null;
     }
 
+    private sealed class StubSettings : IAppSettingsService
+    {
+        public StubSettings(bool wizardDismissed = false) { WizardDismissed = wizardDismissed; }
+        public int     PollingIntervalSeconds { get; } = 30;
+        public string? UIPasswordHash         { get; } = null;
+        public bool    WizardDismissed        { get; }
+        public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default) => Task.CompletedTask;
+        public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public event Action<IAppSettingsService>? Changed { add { } remove { } }
+    }
+
     private static (BunitContext ctx, StubNodeRepo nodes, StubNetworkRepo nets, StubStationRepo stations, StubOuiLookup oui)
-        Build(IEnumerable<WiFiNode> nodes, IEnumerable<WLANStation> stations, bool anyEnabled, Dictionary<int, List<WiFiNetwork>>? networkMap = null)
+        Build(IEnumerable<WiFiNode> nodes, IEnumerable<WLANStation> stations, bool anyEnabled, Dictionary<int, List<WiFiNetwork>>? networkMap = null, bool wizardDismissed = false)
     {
         var ctx = new BunitContext();
         var nr = new StubNodeRepo(nodes);
@@ -86,10 +100,12 @@ public sealed class DashboardTests
         }
         var sr = new StubStationRepo(stations);
         var oui = new StubOuiLookup();
+        var settings = new StubSettings(wizardDismissed);
         ctx.Services.AddSingleton<INodeRepo>(nr);
         ctx.Services.AddSingleton<INetworkRepo>(nws);
         ctx.Services.AddSingleton<IStationRepo>(sr);
         ctx.Services.AddSingleton<IOuiLookup>(oui);
+        ctx.Services.AddSingleton<IAppSettingsService>(settings);
         return (ctx, nr, nws, sr, oui);
     }
 
@@ -97,7 +113,8 @@ public sealed class DashboardTests
     [Fact]
     public void ZeroNodes_RendersDash09EmptyState_WithCtaToNodesAdd()
     {
-        var (ctx, _, _, _, _) = Build(Array.Empty<WiFiNode>(), Array.Empty<WLANStation>(), anyEnabled: false);
+        // WizardDismissed=true: Phase 3 original CTA preserved (Add your first OpenWRT node).
+        var (ctx, _, _, _, _) = Build(Array.Empty<WiFiNode>(), Array.Empty<WLANStation>(), anyEnabled: false, wizardDismissed: true);
         using (ctx)
         {
             var cut = ctx.Render<Dashboard>();
@@ -215,12 +232,47 @@ public sealed class DashboardTests
     public void Dashboard_ContainsAllRequiredForwardCompatAnchors()
     {
         var source = ReadDashboardSource();
-        Assert.Contains("TODO(phase-04): retarget to /setup once wizard exists", source);
+        // NOTE: TODO(phase-04) anchor was removed in Plan 04-05 (D-09 CTA wired).
         Assert.Contains("TODO(phase-05): wrap <tbody> in <Virtualize>", source);
         Assert.Contains("TODO(phase-05): RSSI cell", source);
         Assert.Contains("TODO(phase-05): subscribe to PollNotifier", source);
         Assert.Contains("TODO(phase-05): add search input above table", source);
         Assert.Contains("TODO(phase-05): SSID/AP filter chips row", source);
+    }
+
+    // ── DASH-09 D-09 conditional CTA (ONB-06) ─────────────────────────────
+    [Fact]
+    public void ZeroNodes_WizardNotDismissed_RendersContinueSetupCta()
+    {
+        var (ctx, _, _, _, _) = Build(
+            Array.Empty<WiFiNode>(),
+            Array.Empty<WLANStation>(),
+            anyEnabled: false,
+            wizardDismissed: false);
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            Assert.Contains("Continue setup", cut.Markup);
+            Assert.Contains("href=\"/setup/password\"", cut.Markup);
+            Assert.DoesNotContain("Add your first OpenWRT node", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public void ZeroNodes_WizardDismissed_RendersAddYourFirstNodeCta()
+    {
+        var (ctx, _, _, _, _) = Build(
+            Array.Empty<WiFiNode>(),
+            Array.Empty<WLANStation>(),
+            anyEnabled: false,
+            wizardDismissed: true);
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            Assert.Contains("Add your first OpenWRT node", cut.Markup);
+            Assert.Contains("href=\"/Nodes/Add\"", cut.Markup);
+            Assert.DoesNotContain("Continue setup", cut.Markup);
+        }
     }
 
     /// <summary>
