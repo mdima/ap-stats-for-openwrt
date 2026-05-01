@@ -90,4 +90,25 @@ public sealed class ArchitectureTests
             }
         }
     }
+
+    /// <summary>
+    /// D-09 CR-02 architectural proof. Any method named "UpdateAsync" with a
+    /// <see cref="OpenWrtApStats.Data.Models.WiFiNode"/> parameter would re-track the whole row
+    /// and clobber the encrypted Password from a stub's default value. <c>UpdateMetadataAsync</c>
+    /// + <c>UpdatePasswordAsync</c> replace it with single-property
+    /// <c>ExecuteUpdateAsync</c> shapes. This test makes any future re-introduction
+    /// of the dangerous shape provably loud.
+    /// </summary>
+    [Fact]
+    public void INodeRepo_HasNoUpdateAsyncWiFiNodeMethod()
+    {
+        var methods = typeof(OpenWrtApStats.Data.Repositories.INodeRepo).GetMethods();
+        var violators = methods
+            .Where(m => m.Name == "UpdateAsync"
+                     && m.GetParameters().Any(p => p.ParameterType == typeof(OpenWrtApStats.Data.Models.WiFiNode)))
+            .Select(m => $"{m.DeclaringType?.Name}.{m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name))})")
+            .ToList();
+
+        Assert.Empty(violators);
+    }
 }

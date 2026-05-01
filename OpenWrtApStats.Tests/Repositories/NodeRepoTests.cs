@@ -34,14 +34,18 @@ public sealed class NodeRepoTests(SqliteInMemoryFixture fixture) : IClassFixture
     }
 
     [Fact]
-    public async Task UpdateAsync_MutatesPersistedRow()
+    public async Task UpdateMetadataAsync_MutatesPersistedRow()
     {
+        // D-09 closure (CR-02-safe): UpdateAsync(WiFiNode) is REMOVED — Phase 3 callers go
+        // through UpdateMetadataAsync (multi-SetProperty Hostname+Username).
         var ct = TestContext.Current.CancellationToken;
         var repo = CreateRepo();
         var node = new WiFiNode { Hostname = $"ap-{Guid.NewGuid():N}", Username = "root", Password = "" };
         await repo.AddAsync(node, ct);
-        node.Hostname = "renamed-" + node.Hostname;
-        await repo.UpdateAsync(node, ct);
+
+        var newHostname = "renamed-" + node.Hostname;
+        await repo.UpdateMetadataAsync(node.Id, newHostname, node.Username, ct);
+
         var fetched = await repo.GetByIdAsync(node.Id, ct);
         Assert.StartsWith("renamed-", fetched!.Hostname);
     }
