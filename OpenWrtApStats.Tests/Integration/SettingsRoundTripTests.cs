@@ -32,9 +32,13 @@ public sealed class SettingsRoundTripTests(SmokeFactoryFixture factory) : IClass
 
         var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
-        // Pre-condition: anonymous → 200 on a protected page.
+        // Pre-condition: anonymous → not auth-blocked (200 or 302 to /setup/password, NOT /Login).
+        // Phase 4: WizardRedirectMiddleware may redirect GET / to /setup/password in first-run state.
         var pre = await client.GetAsync("/", ct);
-        Assert.Equal(System.Net.HttpStatusCode.OK, pre.StatusCode);
+        if (pre.StatusCode is System.Net.HttpStatusCode.Redirect or System.Net.HttpStatusCode.Found)
+            Assert.DoesNotContain("/Login", pre.Headers.Location?.ToString() ?? "");
+        else
+            Assert.Equal(System.Net.HttpStatusCode.OK, pre.StatusCode);
 
         try
         {
@@ -76,9 +80,13 @@ public sealed class SettingsRoundTripTests(SmokeFactoryFixture factory) : IClass
         // Action: clear the password.
         await settings.SetUIPasswordHashAsync(null, ct);
 
-        // Post-condition: anonymous → 200.
+        // Post-condition: anonymous → not auth-blocked (200 or 302 to /setup/password, NOT /Login).
+        // Phase 4: WizardRedirectMiddleware may redirect GET / to /setup/password in first-run state.
         var post = await client.GetAsync("/", ct);
-        Assert.Equal(System.Net.HttpStatusCode.OK, post.StatusCode);
+        if (post.StatusCode is System.Net.HttpStatusCode.Redirect or System.Net.HttpStatusCode.Found)
+            Assert.DoesNotContain("/Login", post.Headers.Location?.ToString() ?? "");
+        else
+            Assert.Equal(System.Net.HttpStatusCode.OK, post.StatusCode);
     }
 
     [Fact]

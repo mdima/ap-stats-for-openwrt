@@ -5,6 +5,7 @@ using OpenWrtApStats.Data;
 using OpenWrtApStats.Data.Models;
 using OpenWrtApStats.Data.Repositories;
 using OpenWrtApStats.Services.Bootstrap;
+using OpenWrtApStats.Services.Onboarding;
 using OpenWrtApStats.Services.Polling;
 using OpenWrtApStats.Services.Polling.Ssh;
 using OpenWrtApStats.Services.Settings;
@@ -178,6 +179,10 @@ try
     app.UseSerilogRequestLogging();
     app.UseStaticFiles();           // serves /lib/adminlte/* /lib/bootstrap-icons/* /lib/source-sans-3/* /app.css /favicon.ico
     app.UseAntiforgery();
+    // D-07: Auto-redirect first-run operator to the onboarding wizard.
+    // Placed after UseStaticFiles (assets bypass it) and after UseAntiforgery,
+    // but BEFORE UseAuthentication so anonymous GET / is handled before the auth pipeline.
+    app.UseMiddleware<WizardRedirectMiddleware>();
     app.UseAuthentication();        // reads "OpenWrtApStats.Auth" cookie
     app.UseAuthorization();         // applies fallback ConditionalAuthRequirement
     app.UseRateLimiter();           // sees rewritten IP (Pitfall 4)
@@ -187,6 +192,16 @@ try
     app.MapPost("/Logout", async (HttpContext ctx) =>
     {
         await ctx.SignOutAsync(Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme);
+        return Microsoft.AspNetCore.Http.Results.Redirect("/");
+    });
+
+    // D-08: "Skip for now" POST handler. Sets WizardDismissed = true and redirects to dashboard.
+    // Works from all three wizard steps (even Step 1 static SSR via the SetupLayout form POST).
+    app.MapPost("/setup/skip", async (
+        IAppSettingsService settings,
+        HttpContext ctx) =>
+    {
+        await settings.SetWizardDismissedAsync(true, ctx.RequestAborted);
         return Microsoft.AspNetCore.Http.Results.Redirect("/");
     });
 
