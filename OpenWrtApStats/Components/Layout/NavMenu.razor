@@ -1,0 +1,27 @@
+@inject NavigationManager Nav
+
+@* NavMenu.razor — sidebar nav per UI-SPEC §MainLayout step 2 (lines 80-87).
+   Active rule: aria-current="page" derived from NavigationManager.Uri ONLY, never via
+   JS DOM mutation (STACK.md §"Don't manipulate sidebar/menu DOM from Blazor"). *@
+
+<ul class="nav sidebar-menu flex-column" role="menu">
+    <li class="nav-item">
+        <NavLink class="nav-link" href="/" Match="NavLinkMatch.All">
+            <i class="bi bi-speedometer me-2"></i>
+            <span class="nav-text">Dashboard</span>
+        </NavLink>
+    </li>
+    <li class="nav-item">
+        <NavLink class="nav-link" href="/Nodes">
+            <i class="bi bi-router me-2"></i>
+            <span class="nav-text">Nodes</span>
+        </NavLink>
+    </li>
+    <li class="nav-item">
+        <NavLink class="nav-link" href="/Settings">
+            <i class="bi bi-gear me-2"></i>
+            <span class="nav-text">Settings</span>
+        </NavLink>
+    </li>
+    @* Item 4 reserved for Phase 4 wizard hint (when /setup exists). *@
+</ul>

@@ -102,10 +102,19 @@ try
     builder.Services.AddHostedService<AppSettingsBootstrapHostedService>();
     builder.Services.AddHostedService<PollingHostedService>();              // 4th — Phase 2
 
-    // 7. (Phase 1 has no health-check endpoint, no Razor components, no auth — those are Phases 3, 6.)
+    // 7. Razor components (Phase 3 starts here). Auth + ratelimit + forwarded headers are
+    //    added in Plan 03-03; this Plan 03-01 only lights up the Razor seam so the smoke
+    //    spike (AdminLteAssetSmokeTests) can boot the host without 404s on the placeholder
+    //    Index.razor route. D-06: AddInteractiveServerComponents + AddInteractiveServerRenderMode.
+    builder.Services.AddRazorComponents()
+        .AddInteractiveServerComponents();
 
     var app = builder.Build();
     app.UseSerilogRequestLogging();   // harmless in Phase 1 (no routes); emits at request time once Phase 3 binds endpoints
+    app.UseStaticFiles();             // serves /lib/adminlte/* /lib/bootstrap-icons/* /lib/source-sans-3/* /app.css /favicon.ico
+    app.UseAntiforgery();
+    app.MapRazorComponents<OpenWrtApStats.Components.App>()
+        .AddInteractiveServerRenderMode();
 
     await app.RunAsync();
 }
@@ -120,3 +129,9 @@ finally
 }
 
 return 0;
+
+// Plan 03-01 Task 3: WebApplicationFactory<Program> needs Program to be a named, accessible
+// type. Top-level statements emit it as internal-partial; making it public-partial here is
+// the canonical opt-in for ASP.NET Core integration testing per
+// https://learn.microsoft.com/en-us/aspnet/core/test/integration-tests.
+public partial class Program { }

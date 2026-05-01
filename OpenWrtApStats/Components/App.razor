@@ -1,0 +1,25 @@
+@* App.razor — Blazor root host. D-06: @rendermode InteractiveServer is applied per-component
+   to <HeadOutlet> and <Routes> below; AddInteractiveServerRenderMode is wired in Program.cs
+   so the global default render mode applies to every routed page. UI-SPEC §Vendoring step 7+8
+   locks the <link> order (Source Sans 3 → Bootstrap Icons → AdminLTE) and <script> order
+   (AdminLTE first, then blazor.web.js). Pitfall 2 (Login.razor static-SSR opt-out)
+   is handled at the page level via [ExcludeFromInteractiveRouting] in Plan 03-03. *@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <link rel="stylesheet" href="/lib/source-sans-3/index.css" />
+    <link rel="stylesheet" href="/lib/bootstrap-icons/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="/lib/adminlte/css/adminlte.min.css" />
+    <link rel="stylesheet" href="app.css" />
+    <link rel="icon" type="image/x-icon" href="favicon.ico" />
+    <HeadOutlet @rendermode="RenderMode.InteractiveServer" />
+</head>
+<body class="layout-fixed sidebar-expand-lg bg-body-tertiary">
+    <Routes @rendermode="RenderMode.InteractiveServer" />
+    <script src="/lib/adminlte/js/adminlte.min.js"></script>
+    <script src="_framework/blazor.web.js"></script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+@* ConfirmationModal.razor — UI-SPEC §Confirmation Modal Pattern. Bound IsOpen +
+   CSS classes — NOT Bootstrap.Modal JS interop (RESEARCH §Pitfall 6 recommendation).
+   Backdrop is data-bs-backdrop="static"; Escape does NOT dismiss (data-bs-keyboard="false").
+   This component is the load-bearing test surface for D-20 smoke checkpoint #3. *@
+
+<div class="modal fade @(IsOpen ? "show" : "")"
+     style="display: @(IsOpen ? "block" : "none");"
+     tabindex="-1"
+     role="dialog"
+     aria-modal="@IsOpen.ToString().ToLowerInvariant()"
+     aria-hidden="@((!IsOpen).ToString().ToLowerInvariant())"
+     data-bs-backdrop="static"
+     data-bs-keyboard="false">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">@Title</h5>
+                <button type="button" class="btn-close" aria-label="Close" @onclick="HandleCancel"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex">
+                    <i class="bi bi-exclamation-triangle-fill text-warning me-3" style="font-size: 2rem;" aria-hidden="true"></i>
+                    <div>@Body</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" @onclick="HandleCancel">Cancel</button>
+                <button type="button" class="btn btn-danger" @onclick="HandleConfirm">@ConfirmLabel</button>
+            </div>
+        </div>
+    </div>
+</div>
+@if (IsOpen)
+{
+    <div class="modal-backdrop fade show"></div>
+}
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public EventCallback<bool> IsOpenChanged { get; set; }
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter, EditorRequired] public RenderFragment Body { get; set; } = default!;
+    [Parameter, EditorRequired] public string ConfirmLabel { get; set; } = "";
+    [Parameter] public EventCallback OnConfirm { get; set; }
+
+    private async Task HandleCancel()
+    {
+        IsOpen = false;
+        if (IsOpenChanged.HasDelegate) await IsOpenChanged.InvokeAsync(false);
+    }
+
+    private async Task HandleConfirm()
+    {
+        if (OnConfirm.HasDelegate) await OnConfirm.InvokeAsync();
+        IsOpen = false;
+        if (IsOpenChanged.HasDelegate) await IsOpenChanged.InvokeAsync(false);
+    }
+}

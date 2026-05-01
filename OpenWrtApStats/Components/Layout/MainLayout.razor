@@ -1,0 +1,62 @@
+@inherits LayoutComponentBase
+
+@* MainLayout.razor — AdminLTE 4 fixed-sidebar chrome. UI-SPEC §MainLayout (lines 64-94).
+   The Phase 6 anchor comment lives between sidebar-toggle and user-menu; do not move. *@
+
+<nav class="app-header navbar navbar-expand bg-body">
+    <div class="container-fluid">
+        <ul class="navbar-nav">
+            <li class="nav-item">
+                <button class="nav-link" type="button" data-lte-toggle="sidebar" aria-label="Toggle sidebar">
+                    <i class="bi bi-list" aria-hidden="true"></i>
+                </button>
+            </li>
+        </ul>
+        <!-- Phase 6: Live/Paused indicator slot -->
+        <ul class="navbar-nav ms-auto">
+            @* User-menu slot — Plan 03-03 fills in <AuthorizeView> with Sign out link.
+               Stub for now to keep the smoke spike able to render this layout. *@
+        </ul>
+    </div>
+</nav>
+
+<aside class="app-sidebar bg-body-secondary shadow" data-bs-theme="dark">
+    <div class="sidebar-brand">
+        <a href="/" class="brand-link">
+            <img class="brand-image opacity-75 shadow"
+                 src="/lib/adminlte/img/AdminLTELogo.png"
+                 alt="OpenWRT-AP-Stats" />
+            <span class="brand-text fw-light">OpenWRT-AP-Stats</span>
+        </a>
+    </div>
+    <div class="sidebar-wrapper">
+        <NavMenu />
+    </div>
+</aside>
+
+<main class="app-main">
+    <div class="app-content-header">
+        <div class="container-fluid">
+            <h3 class="mb-0">@PageTitle</h3>
+        </div>
+    </div>
+    <div class="app-content">
+        <div class="container-fluid">
+            @Body
+        </div>
+    </div>
+</main>
+
+<footer class="app-footer">
+    <div class="container-fluid d-flex justify-content-between">
+        <span><strong>OpenWRT-AP-Stats</strong> v@(typeof(MainLayout).Assembly.GetName().Version?.ToString(3) ?? "1.0.0")</span>
+        <span>Self-hosted dashboard</span>
+    </div>
+</footer>
+
+@code {
+    // PageTitle is rendered in the app-content-header h3. Pages set it via <PageHeader Title="..." />
+    // which uses a CascadingValue/SectionOutlet pattern in a future plan; for the smoke spike
+    // we render a static placeholder so MainLayoutTests can assert structure.
+    [CascadingParameter] private string? PageTitle { get; set; }
+}

@@ -1,0 +1,10 @@
+@* Routes.razor — Blazor router. D-06: AddInteractiveServerRenderMode is applied
+   globally via App.razor's @rendermode directives on <Routes> and <HeadOutlet>;
+   individual pages may opt out via [ExcludeFromInteractiveRouting] (e.g.,
+   Login.razor in Plan 03-03 per Pitfall 2). *@
+<Router AppAssembly="@typeof(Routes).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
+        <FocusOnNavigate RouteData="@routeData" Selector="h1, h3" />
+    </Found>
+</Router>

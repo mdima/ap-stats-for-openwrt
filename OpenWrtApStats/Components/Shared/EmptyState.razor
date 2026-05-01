@@ -1,0 +1,21 @@
+@* EmptyState.razor — reusable empty-state per UI-SPEC §Empty-State Visual Pattern.
+   Used by DASH-09, DASH-10, Nodes Index zero-state, Node Detail no-WLAN-yet.
+   Single 4rem muted icon + heading + body + ONE primary CTA. *@
+
+<div class="text-center py-5">
+    <i class="bi @IconClass" style="font-size: 4rem;" aria-hidden="true"></i>
+    <h4 class="mt-3">@Heading</h4>
+    <p class="text-body-secondary mb-4">@Body</p>
+    <a class="btn btn-primary" href="@CtaHref">
+        <i class="bi @CtaIconClass me-2"></i>@CtaLabel
+    </a>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string IconClass { get; set; } = "";
+    [Parameter, EditorRequired] public string Heading { get; set; } = "";
+    [Parameter, EditorRequired] public string Body { get; set; } = "";
+    [Parameter, EditorRequired] public string CtaLabel { get; set; } = "";
+    [Parameter, EditorRequired] public string CtaHref { get; set; } = "";
+    [Parameter, EditorRequired] public string CtaIconClass { get; set; } = "";
+}
