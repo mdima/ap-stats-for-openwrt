@@ -1,0 +1,137 @@
+@page "/Nodes"
+
+@inject INodeRepo Nodes
+@inject NavigationManager Nav
+
+@* /Nodes — list of WiFiNodes with hostname / username / status badge / last-polled
+   timestamp / actions (Edit / Detail / Delete). Empty state mirrors DASH-09 per
+   UI-SPEC §Nodes Index (lines 318-329). *@
+
+<PageHeader Title="Nodes">
+    <HeaderActions>
+        <a class="btn btn-primary" href="/Nodes/Add">
+            <i class="bi bi-plus-lg me-2"></i>Add node
+        </a>
+    </HeaderActions>
+</PageHeader>
+
+@if (!string.IsNullOrEmpty(_savedToast))
+{
+    <div class="alert alert-success" role="alert">@_savedToast</div>
+}
+
+@if (_nodes is null)
+{
+    <p class="text-body-secondary">Loading…</p>
+}
+else if (_nodes.Count == 0)
+{
+    <EmptyState IconClass="bi-router-fill"
+                Heading="No access points yet"
+                Body="Add your first OpenWRT access point to start monitoring connected stations."
+                CtaLabel="Add your first OpenWRT node"
+                CtaHref="/Nodes/Add"
+                CtaIconClass="bi-plus-lg" />
+}
+else
+{
+    <div class="card">
+        <div class="card-body">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Hostname</th>
+                        <th>Username</th>
+                        <th>Status</th>
+                        <th>Last polled</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var n in _nodes)
+                    {
+                        <tr>
+                            <td><code class="font-monospace">@n.Hostname</code></td>
+                            <td>@n.Username</td>
+                            <td><StatusBadge Status="n.Status" /></td>
+                            <td>@RelativeTime(n.LastPollDate)</td>
+                            <td>
+                                <a class="btn btn-sm btn-outline-secondary" href="@($"/Nodes/{n.Id}/Edit")" title="Edit node">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                                <a class="btn btn-sm btn-outline-secondary" href="@($"/Nodes/{n.Id}")" title="View WLANs">
+                                    <i class="bi bi-box-arrow-up-right"></i>
+                                </a>
+                                <button type="button" class="btn btn-sm btn-outline-danger" title="Delete node"
+                                        @onclick="@(() => OpenDelete(n))">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+<ConfirmationModal IsOpen="_deleteModalOpen"
+                   IsOpenChanged="@((bool v) => _deleteModalOpen = v)"
+                   Title="Delete this node?"
+                   ConfirmLabel="Delete node"
+                   OnConfirm="@HandleDeleteConfirmedAsync">
+    <Body>
+        This will remove "<strong>@(_pendingDelete?.Hostname ?? "")</strong>" from the polling list.
+        The node's discovered WLANs will be deleted; previously-seen stations will lose their association
+        with this node but will not be deleted.
+    </Body>
+</ConfirmationModal>
+
+@code {
+    private IReadOnlyList<WiFiNode>? _nodes;
+    private bool _deleteModalOpen;
+    private WiFiNode? _pendingDelete;
+    private string? _savedToast;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _nodes = await Nodes.GetAllAsync();
+
+        // Pull a "Node saved" toast from the URL query if Add/Edit redirected with ?saved=1.
+        var qs = new Uri(Nav.Uri).Query;
+        if (qs.Contains("saved=1", StringComparison.Ordinal))
+        {
+            _savedToast = "Node saved.";
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(5000);
+                _savedToast = null;
+                await InvokeAsync(StateHasChanged);
+            });
+        }
+    }
+
+    private void OpenDelete(WiFiNode n)
+    {
+        _pendingDelete = n;
+        _deleteModalOpen = true;
+    }
+
+    private async Task HandleDeleteConfirmedAsync()
+    {
+        if (_pendingDelete is null) return;
+        await Nodes.DeleteAsync(_pendingDelete.Id);
+        _pendingDelete = null;
+        _nodes = await Nodes.GetAllAsync();
+    }
+
+    private static string RelativeTime(DateTime t)
+    {
+        if (t == default) return "Never";
+        var d = DateTime.UtcNow - t.ToUniversalTime();
+        if (d.TotalSeconds < 60) return "just now";
+        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes}m ago";
+        if (d.TotalHours < 24) return $"{(int)d.TotalHours}h ago";
+        return $"{(int)d.TotalDays}d ago";
+    }
+}

@@ -1,0 +1,81 @@
+@page "/Nodes/{Id:int}/Edit"
+@using Microsoft.AspNetCore.DataProtection
+
+@inject INodeRepo Nodes
+@inject IDataProtectionProvider Dpp
+@inject NavigationManager Nav
+
+@* /Nodes/{id}/Edit — NODE-03 + D-08 (leave-blank-password). UI-SPEC §Node Edit lines
+   360-376. Pre-fills hostname + username; password ALWAYS empty regardless of stored
+   ciphertext (D-08 / SEC-01: never decrypt the existing ciphertext on the Edit page).
+   Save semantics: always UpdateMetadataAsync; UpdatePasswordAsync only when form
+   Password is non-empty. *@
+
+<PageHeader Title="Edit node" />
+
+@if (_existing is null)
+{
+    <p class="text-body-secondary">Loading…</p>
+}
+else
+{
+    <div class="card">
+        <div class="card-header"><h5 class="card-title mb-0">Edit access point</h5></div>
+        <div class="card-body">
+            @if (!string.IsNullOrEmpty(_pageError))
+            {
+                <div class="alert alert-danger" role="alert">@_pageError</div>
+            }
+            <_NodeForm Model="_model" IsEdit="true" ExistingNodeId="@Id" OnSave="HandleSaveAsync" />
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private WiFiNode? _existing;
+    private NodeFormModel _model = new();
+    private string? _pageError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _existing = await Nodes.GetByIdAsync(Id);
+        if (_existing is null)
+        {
+            Nav.NavigateTo("/Nodes");
+            return;
+        }
+        // D-08: pre-fill hostname + username; password ALWAYS empty. NEVER decrypt the
+        // existing ciphertext (the Edit page must not even briefly hold plaintext per SEC-01).
+        _model = new NodeFormModel
+        {
+            Hostname = _existing.Hostname,
+            Username = _existing.Username,
+            Password = ""    // intentional — never pre-filled
+        };
+    }
+
+    private async Task HandleSaveAsync(NodeFormModel form)
+    {
+        if (string.IsNullOrEmpty(form.Hostname) || string.IsNullOrEmpty(form.Username))
+        {
+            _pageError = "Hostname and username are required.";
+            return;
+        }
+        _pageError = null;
+
+        // D-09 split: always update metadata; only re-encrypt + UpdatePassword when non-empty.
+        await Nodes.UpdateMetadataAsync(Id, form.Hostname.Trim(), form.Username.Trim());
+
+        if (!string.IsNullOrEmpty(form.Password))
+        {
+            var protector = Dpp.CreateProtector("node-creds");
+            var encrypted = protector.Protect(form.Password);
+            await Nodes.UpdatePasswordAsync(Id, encrypted);
+        }
+        // else: empty password = no Password change (D-08 / T-3-04-02 mitigation).
+
+        Nav.NavigateTo("/Nodes?saved=1", forceLoad: false);
+    }
+}

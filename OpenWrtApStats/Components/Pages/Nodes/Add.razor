@@ -1,0 +1,54 @@
+@page "/Nodes/Add"
+@using Microsoft.AspNetCore.DataProtection
+
+@inject INodeRepo Nodes
+@inject IDataProtectionProvider Dpp
+@inject NavigationManager Nav
+
+@* /Nodes/Add — NODE-01 + NODE-02 (Test Connection). UI-SPEC §Node Add lines 332-358.
+   Save encrypts the password through the same "node-creds" Data Protection purpose chain
+   that Phase 2 production uses, then persists via INodeRepo.AddAsync. *@
+
+<PageHeader Title="Add node" />
+
+<div class="card">
+    <div class="card-header"><h5 class="card-title mb-0">New access point</h5></div>
+    <div class="card-body">
+        @if (!string.IsNullOrEmpty(_pageError))
+        {
+            <div class="alert alert-danger" role="alert">@_pageError</div>
+        }
+        <_NodeForm Model="_model" IsEdit="false" OnSave="HandleSaveAsync" />
+    </div>
+</div>
+
+@code {
+    private NodeFormModel _model = new();
+    private string? _pageError;
+
+    private async Task HandleSaveAsync(NodeFormModel form)
+    {
+        // Add-path: Password is REQUIRED (UI-SPEC §Node Add Validation: "Password is required.").
+        if (string.IsNullOrEmpty(form.Password))
+        {
+            _pageError = "Password is required.";
+            return;
+        }
+        _pageError = null;
+
+        // Encrypt through the same "node-creds" purpose chain Phase 2 production uses.
+        var protector = Dpp.CreateProtector("node-creds");
+        var encrypted = protector.Protect(form.Password);
+
+        var node = new WiFiNode
+        {
+            Hostname = form.Hostname!.Trim(),
+            Username = form.Username!.Trim(),
+            Password = encrypted,
+            Status = OpenWrtApStats.Data.Models.Status.Offline,
+            HostKeyFingerprint = null   // first poll captures the TOFU fingerprint (Phase 2 D-02)
+        };
+        await Nodes.AddAsync(node);
+        Nav.NavigateTo("/Nodes?saved=1", forceLoad: false);
+    }
+}
