@@ -1,10 +1,12 @@
 @page "/"
 @using OpenWrtApStats.Services.Vendor
+@using OpenWrtApStats.Services.Settings
 
 @inject INodeRepo Nodes
 @inject INetworkRepo Networks
 @inject IStationRepo Stations
 @inject IOuiLookup Oui
+@inject IAppSettingsService Settings
 
 @* Dashboard.razor — Phase 3 static-snapshot dashboard. UI-SPEC §Dashboard (lines 297-316).
    Closes DASH-09 (zero-nodes empty state), DASH-10 (nodes-but-no-WLANs-enabled empty state),
@@ -22,14 +24,16 @@
 }
 else if (_nodeCount == 0)
 {
-    @* DASH-09 zero-nodes empty state. UI-SPEC §Dashboard DASH-09 lines 310-312. *@
-    @* TODO(phase-04): retarget to /setup once wizard exists *@
+    @* DASH-09 zero-nodes empty state. D-09 (Phase 4): CTA conditional on WizardDismissed.
+       Closed TODO(phase-04) marker — Phase 4 D-09. *@
     <EmptyState IconClass="bi-router-fill"
                 Heading="No access points yet"
-                Body="Add your first OpenWRT access point to start monitoring connected stations."
-                CtaLabel="Add your first OpenWRT node"
-                CtaHref="/Nodes/Add"
-                CtaIconClass="bi-plus-lg" />
+                Body="@(_wizardDismissed
+                    ? "Add your first OpenWRT access point to start monitoring connected stations."
+                    : "Your access points are not configured yet. Continue the setup wizard to get started.")"
+                CtaLabel="@(_wizardDismissed ? "Add your first OpenWRT node" : "Continue setup")"
+                CtaHref="@(_wizardDismissed ? "/Nodes/Add" : "/setup/password")"
+                CtaIconClass="@(_wizardDismissed ? "bi-plus-lg" : "bi-arrow-right-circle")" />
 }
 else if (!_anyEnabledWlan)
 {
@@ -110,6 +114,7 @@ else
     private int _nodeCount;
     private bool _anyEnabledWlan;
     private int _firstNodeId;
+    private bool _wizardDismissed;
     private List<DashboardRow> _rows = new();
 
     private string DashTenBody =>
@@ -121,6 +126,8 @@ else
         // (Phase 5 binding). All reads via repositories per PER-04.
         var allNodes = await Nodes.GetAllAsync();
         _nodeCount = allNodes.Count;
+        // D-09: read WizardDismissed from singleton snapshot — no DB call.
+        _wizardDismissed = Settings.WizardDismissed;
 
         if (_nodeCount > 0)
         {
