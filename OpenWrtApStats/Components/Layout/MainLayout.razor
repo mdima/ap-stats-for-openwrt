@@ -15,8 +15,27 @@
         @* Phase 6: Live/Paused indicator slot *@
         <span class="d-none" data-phase6-anchor="Phase 6: Live/Paused indicator slot"></span>
         <ul class="navbar-nav ms-auto">
-            @* User-menu slot — Plan 03-03 fills in <AuthorizeView> with Sign out link.
-               Stub for now to keep the smoke spike able to render this layout. *@
+            <AuthorizeView>
+                <Authorized>
+                    <li class="nav-item dropdown user-menu">
+                        <span class="nav-link">
+                            <i class="bi bi-person-circle me-1" aria-hidden="true"></i>
+                            <span>Operator</span>
+                        </span>
+                    </li>
+                    <li class="nav-item">
+                        <form action="/Logout" method="post" class="d-inline">
+                            <AntiforgeryToken />
+                            <button type="submit" class="btn btn-outline-danger btn-sm">
+                                <i class="bi bi-box-arrow-right me-1"></i>Sign out
+                            </button>
+                        </form>
+                    </li>
+                </Authorized>
+                <NotAuthorized>
+                    @* D-01: anonymous mode (UIPasswordHash null/empty) — user-menu HIDDEN. *@
+                </NotAuthorized>
+            </AuthorizeView>
         </ul>
     </div>
 </nav>

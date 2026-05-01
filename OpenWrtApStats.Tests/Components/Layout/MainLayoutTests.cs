@@ -1,4 +1,5 @@
 using Bunit;
+using Bunit.TestDoubles;
 using Microsoft.AspNetCore.Components;
 using OpenWrtApStats.Components.Layout;
 using Xunit;
@@ -16,6 +17,10 @@ public sealed class MainLayoutTests
     public void Renders_AdminLte_Chrome_With_Phase6_Anchor()
     {
         using var ctx = new Bunit.BunitContext();
+        // Plan 03-03 added <AuthorizeView> to MainLayout's user-menu — register the bUnit
+        // test-authorization stack so AuthorizationPolicyProvider/AuthenticationStateProvider
+        // can be resolved. Default state = unauthorized → user-menu hidden (anonymous mode).
+        ctx.AddAuthorization();
         // MainLayout inherits LayoutComponentBase, which exposes the slot as `Body` not
         // `ChildContent`. bUnit's AddChildContent looks for [Parameter] ChildContent on the
         // component, so we have to bind Body explicitly via Add(p => p.Body, ...).
