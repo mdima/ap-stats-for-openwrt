@@ -23,6 +23,7 @@ public sealed class IndexTests
     {
         public string? UIPasswordHash { get; set; }
         public int PollingIntervalSeconds { get; set; } = 30;
+        public bool WizardDismissed => false;
         public bool ChangedFiredOnSetPassword;
         public bool ChangedFiredOnSetInterval;
 
@@ -38,6 +39,7 @@ public sealed class IndexTests
             ChangedFiredOnSetPassword = true;
             return Task.CompletedTask;
         }
+        public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default) => Task.CompletedTask;
         public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }

@@ -97,4 +97,27 @@ public sealed class AppSettingsServiceTests(SqliteInMemoryFixture fixture) : ICl
         await svc.SetUIPasswordHashAsync(null, ct);
         Assert.Null(svc.UIPasswordHash);
     }
+
+    [Fact]
+    public async Task SetWizardDismissedAsync_RoundtripTrue()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var svc = CreateService();
+        await svc.WarmAsync(ct);
+        Assert.False(svc.WizardDismissed);   // default false before first write
+        await svc.SetWizardDismissedAsync(true, ct);
+        Assert.True(svc.WizardDismissed);
+    }
+
+    [Fact]
+    public async Task SetWizardDismissedAsync_Changed_FiresOnce()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var svc = CreateService();
+        await svc.WarmAsync(ct);
+        var fires = 0;
+        svc.Changed += _ => Interlocked.Increment(ref fires);
+        await svc.SetWizardDismissedAsync(true, ct);
+        Assert.Equal(1, fires);
+    }
 }

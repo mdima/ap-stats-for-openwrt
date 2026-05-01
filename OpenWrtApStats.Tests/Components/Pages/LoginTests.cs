@@ -20,8 +20,10 @@ public sealed class LoginTests
     {
         public string? UIPasswordHash { get; set; }
         public int PollingIntervalSeconds => 30;
+        public bool WizardDismissed => false;
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default) { UIPasswordHash = hash; return Task.CompletedTask; }
+        public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default) => Task.CompletedTask;
         public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }

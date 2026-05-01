@@ -16,13 +16,15 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
     // Well-known keys — never strings in callers (D-11)
     private const string KeyPollingInterval = "PollingIntervalSeconds";
     private const string KeyUIPasswordHash  = "UIPasswordHash";
+    private const string KeyWizardDismissed = "WizardDismissed";
 
     // Immutable snapshot; replaced atomically via Interlocked.Exchange.
-    private sealed record Snapshot(int PollingIntervalSeconds, string? UIPasswordHash);
-    private Snapshot _current = new(30, null); // safe defaults until WarmAsync runs
+    private sealed record Snapshot(int PollingIntervalSeconds, string? UIPasswordHash, bool WizardDismissed);
+    private Snapshot _current = new(30, null, false); // safe defaults until WarmAsync runs
 
     public int     PollingIntervalSeconds => Volatile.Read(ref _current).PollingIntervalSeconds;
     public string? UIPasswordHash         => Volatile.Read(ref _current).UIPasswordHash;
+    public bool    WizardDismissed        => Volatile.Read(ref _current).WizardDismissed;
 
     public event Action<IAppSettingsService>? Changed;
 
@@ -31,7 +33,8 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
         var rows = await repo.GetAllAsync(ct);
         var snap = new Snapshot(
             PollingIntervalSeconds: rows.TryGetValue(KeyPollingInterval, out var pi) ? pi.IntValue ?? 30 : 30,
-            UIPasswordHash:         rows.TryGetValue(KeyUIPasswordHash,  out var uh) ? uh.StringValue : null);
+            UIPasswordHash:         rows.TryGetValue(KeyUIPasswordHash,  out var uh) ? uh.StringValue : null,
+            WizardDismissed:        rows.TryGetValue(KeyWizardDismissed, out var wd) ? wd.BoolValue ?? false : false);
         Interlocked.Exchange(ref _current, snap);
     }
 
@@ -40,6 +43,9 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
 
     public Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default)
         => UpsertAndRefreshAsync(KeyUIPasswordHash, stringValue: hash, ct: ct);
+
+    public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default)
+        => UpsertAndRefreshAsync(KeyWizardDismissed, boolValue: dismissed, ct: ct);
 
     private async Task UpsertAndRefreshAsync(
         string key,

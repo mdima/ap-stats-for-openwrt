@@ -12,9 +12,11 @@ public interface IAppSettingsService
 {
     int     PollingIntervalSeconds { get; }
     string? UIPasswordHash         { get; }
+    bool    WizardDismissed        { get; }
 
     Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default);
     Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default);
+    Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default);
 
     /// <summary>Called once by AppSettingsBootstrapHostedService after migrations complete.</summary>
     Task WarmAsync(CancellationToken ct = default);
