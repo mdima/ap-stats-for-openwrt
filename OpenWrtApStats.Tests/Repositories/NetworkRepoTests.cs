@@ -155,4 +155,34 @@ public sealed class NetworkRepoTests(SqliteInMemoryFixture fixture) : IClassFixt
             .ToListAsync(ct);
         Assert.Equal(2, rows.Count);
     }
+
+    [Fact]
+    public async Task AnyEnabledAsync_MatchesUnderlyingDb()
+    {
+        // Defensive form (matches AppSettingsServiceTests.ReservedKeys_StateMatchesUnderlyingDb):
+        // class-scoped fixture is shared across tests, so assert the contract relative to
+        // whatever the DB currently holds — order-agnostic.
+        var ct = TestContext.Current.CancellationToken;
+        var nets = CreateRepo();
+
+        await using var db = _fixture.CreateContext();
+        var expected = await db.WiFiNetworks.AsNoTracking().AnyAsync(w => w.Enabled, ct);
+        Assert.Equal(expected, await nets.AnyEnabledAsync(ct));
+    }
+
+    [Fact]
+    public async Task AnyEnabledAsync_AfterAddingEnabledNetwork_ReturnsTrue()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var nets = CreateRepo();
+        var nodes = new NodeRepo(new TestDbContextFactory(_fixture.Options));
+        var n = new WiFiNode { Hostname = $"n-{Guid.NewGuid():N}", Username = "root", Password = "" };
+        await nodes.AddAsync(n, ct);
+        await nets.UpsertManyAsync(n.Id, new[]
+        {
+            new WiFiNetwork { MacAddress = "DD:EE:FF:00:00:01", SSID = "enabled", Enabled = true }
+        }, ct);
+
+        Assert.True(await nets.AnyEnabledAsync(ct));
+    }
 }
