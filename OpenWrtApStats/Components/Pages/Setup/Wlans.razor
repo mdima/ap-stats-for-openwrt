@@ -1,0 +1,173 @@
+@page "/setup/wlans"
+@layout SetupLayout
+@using OpenWrtApStats.Data.Models
+@using OpenWrtApStats.Data.Repositories
+@using OpenWrtApStats.Services.Nodes
+@using OpenWrtApStats.Services.Settings
+
+@inject INodeRepo Nodes
+@inject INetworkRepo Networks
+@inject IWlanDiscoveryService Discovery
+@inject IAppSettingsService Settings
+@inject NavigationManager Nav
+
+@* /setup/wlans — Step 3 of the onboarding wizard. Parallel WLAN discovery across all
+   added nodes. Per-node spinner while in flight; inline table of discovered WLANs with
+   per-row instant-write toggle (D-13). Zero-WLAN advisory when all nodes return empty (D-16).
+   Finish button sets WizardDismissed and navigates to dashboard (D-08 / ONB-05).
+   Re-entry guard: only discovers nodes not already in _alreadyDiscovered (D-15). *@
+
+<h3 class="card-title mb-1">Select WLANs to monitor</h3>
+<small class="text-body-secondary">
+    Discovery ran for each access point you added. Untick any WLANs you don't want to monitor — your choice is saved instantly.
+</small>
+
+@* Per-node discovery sections *@
+@foreach (var node in _allNodes)
+{
+    <div class="mt-4">
+        <h5 class="card-title d-flex align-items-center">
+            @if (_nodeDiscovering.Contains(node.Id))
+            {
+                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                <span>Discovering WLANs…</span>
+            }
+            else if (_nodeOutcomes.TryGetValue(node.Id, out var headOutcome) && headOutcome is not DiscoveryOutcome.Success)
+            {
+                <i class="bi bi-exclamation-circle-fill text-danger me-2"></i>
+                <span>@node.Hostname</span>
+            }
+            else if (_alreadyDiscovered.Contains(node.Id))
+            {
+                <i class="bi bi-check-circle-fill text-success me-2"></i>
+                <span>@node.Hostname</span>
+            }
+            else
+            {
+                <span>@node.Hostname</span>
+            }
+        </h5>
+
+        @if (_nodeOutcomes.TryGetValue(node.Id, out var nodeOutcome) && nodeOutcome is not DiscoveryOutcome.Success)
+        {
+            <div class="alert alert-danger alert-dismissible">
+                <button type="button" class="btn-close" @onclick="() => _nodeOutcomes.Remove(node.Id)"></button>
+                @nodeOutcome.UserMessage
+            </div>
+        }
+        else if (_nodeNetworks.TryGetValue(node.Id, out var nets) && nets.Count > 0)
+        {
+            <table class="table table-sm table-hover mb-2">
+                <thead>
+                    <tr>
+                        <th>SSID</th>
+                        <th>BSSID</th>
+                        <th>Channel</th>
+                        <th>Enabled</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var w in nets)
+                    {
+                        <tr>
+                            <td>@w.SSID</td>
+                            <td><code>@w.MacAddress</code></td>
+                            <td>@w.Channel</td>
+                            <td>
+                                <div class="d-flex align-items-center gap-2">
+                                    <input class="form-check-input" type="checkbox" role="switch"
+                                           checked="@w.Enabled"
+                                           @onchange="@((Microsoft.AspNetCore.Components.ChangeEventArgs e) => HandleEnabledToggleAsync(w, (bool)(e.Value ?? false)))" />
+                                    @if (_savedFlashId == w.Id)
+                                    {
+                                        <small class="text-success">Saved</small>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+}
+
+@* Zero-WLAN advisory — D-16 *@
+@if (_discoveryComplete && _allNodes.Count > 0 && !_anyWlansDiscovered)
+{
+    <div class="alert alert-warning mt-3">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+        No WLANs were discovered. You can re-run discovery from each node's detail page later.
+    </div>
+}
+
+<hr class="my-4" />
+<div class="d-flex justify-content-end">
+    <button type="button" class="btn btn-primary" @onclick="HandleFinishAsync">
+        <i class="bi bi-check-lg me-2"></i>Finish
+    </button>
+</div>
+
+@code {
+    private List<WiFiNode> _allNodes = new();
+    private readonly HashSet<int> _nodeDiscovering = new();
+    private readonly HashSet<int> _alreadyDiscovered = new();
+    private readonly Dictionary<int, DiscoveryOutcome> _nodeOutcomes = new();
+    private readonly Dictionary<int, List<WiFiNetwork>> _nodeNetworks = new();
+    private int? _savedFlashId;
+    private bool _discoveryComplete;
+
+    private bool _anyWlansDiscovered =>
+        _nodeNetworks.Values.Any(nets => nets.Count > 0);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _allNodes = (await Nodes.GetAllAsync()).ToList();
+        var tasks = _allNodes
+            .Where(n => !_alreadyDiscovered.Contains(n.Id))
+            .Select(n => DiscoverNodeAsync(n.Id))
+            .ToList();
+        await Task.WhenAll(tasks);
+        _discoveryComplete = true;
+    }
+
+    private async Task DiscoverNodeAsync(int nodeId)
+    {
+        _nodeDiscovering.Add(nodeId);
+        await InvokeAsync(StateHasChanged);   // Pitfall 7 — show spinner
+        try
+        {
+            var outcome = await Discovery.DiscoverAsync(nodeId, CancellationToken.None);
+            _nodeOutcomes[nodeId] = outcome;
+            _alreadyDiscovered.Add(nodeId);
+            _nodeNetworks[nodeId] = (await Networks.GetByNodeAsync(nodeId)).ToList();
+        }
+        finally
+        {
+            _nodeDiscovering.Remove(nodeId);
+            await InvokeAsync(StateHasChanged);   // Pitfall 7 — hide spinner, show results
+        }
+    }
+
+    // D-13 instant-write per-row — copy verbatim from Detail.razor
+    private async Task HandleEnabledToggleAsync(WiFiNetwork w, bool enabled)
+    {
+        await Networks.SetEnabledAsync(w.Id, enabled);
+        w.Enabled = enabled;
+        _savedFlashId = w.Id;
+        await InvokeAsync(StateHasChanged);
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(2000);
+            _savedFlashId = null;
+            await InvokeAsync(StateHasChanged);
+        });
+    }
+
+    // D-08: Finish sets WizardDismissed = true and navigates to dashboard (ONB-05)
+    private async Task HandleFinishAsync()
+    {
+        await Settings.SetWizardDismissedAsync(true);
+        Nav.NavigateTo("/", forceLoad: false);
+    }
+}
