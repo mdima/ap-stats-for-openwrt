@@ -25,12 +25,19 @@ public sealed class WizardRedirectTests(SmokeFactoryFixture factory)
         await settings.SetUIPasswordHashAsync(null, ct);
         await settings.SetWizardDismissedAsync(false, ct);
         // The integration test DB starts with zero nodes (SmokeFactoryFixture uses a fresh in-memory DB)
-
-        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
-            { AllowAutoRedirect = false });
-        var resp = await client.GetAsync("/", ct);
-        Assert.Equal(System.Net.HttpStatusCode.Redirect, resp.StatusCode);
-        Assert.EndsWith("/setup/password", resp.Headers.Location?.ToString() ?? "");
+        try
+        {
+            var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+                { AllowAutoRedirect = false });
+            var resp = await client.GetAsync("/", ct);
+            Assert.Equal(System.Net.HttpStatusCode.Redirect, resp.StatusCode);
+            Assert.EndsWith("/setup/password", resp.Headers.Location?.ToString() ?? "");
+        }
+        finally
+        {
+            // Reset to defaults so subsequent tests start from a clean state (WR-04).
+            await settings.SetWizardDismissedAsync(false, ct);
+        }
     }
 
     [Fact]
