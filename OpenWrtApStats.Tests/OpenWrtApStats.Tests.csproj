@@ -35,6 +35,11 @@
          EF Core 10.0.7 brings it transitively, but pinning here is honest and survives any
          future EF dependency changes. -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.7" />
+    <!-- Phase 3: WebApplicationFactory<Program> integration host. First use is Plan 03-01's
+         AdminLteAssetSmokeTests; reused by Plan 03-03 AuthGate/RateLimit, Plan 03-04 Nodes
+         page tests, Plan 03-05 Settings round-trip. Microsoft Learn confirms 10.0.x is the
+         matching framework version for net10.0. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.7" />
     <!-- DEVIATION (Rule 3, blocking) the plan pin xunit.v3 3.2.2 transitively references
          xunit.v3.mtp-v1, which targets Microsoft.Testing.Platform v1.x. The locked
          Microsoft.Testing.Extensions.CodeCoverage 18.6.2 requires MTP v2.1.0 (TypeLoadException
