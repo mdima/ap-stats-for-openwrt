@@ -1,0 +1,199 @@
+@page "/"
+@using OpenWrtApStats.Services.Vendor
+
+@inject INodeRepo Nodes
+@inject INetworkRepo Networks
+@inject IStationRepo Stations
+@inject IOuiLookup Oui
+
+@* Dashboard.razor — Phase 3 static-snapshot dashboard. UI-SPEC §Dashboard (lines 297-316).
+   Closes DASH-09 (zero-nodes empty state), DASH-10 (nodes-but-no-WLANs-enabled empty state),
+   DASH-13 (vendor column via OUI lookup). Phase 5 layers Virtualize + search/sort/filter +
+   PollNotifier subscription additively at the marked TODO anchors. *@
+
+<PageHeader Title="Dashboard" />
+
+@* TODO(phase-05): add search input above table *@
+@* TODO(phase-05): SSID/AP filter chips row *@
+
+@if (_loading)
+{
+    <p class="text-body-secondary">Loading…</p>
+}
+else if (_nodeCount == 0)
+{
+    @* DASH-09 zero-nodes empty state. UI-SPEC §Dashboard DASH-09 lines 310-312. *@
+    @* TODO(phase-04): retarget to /setup once wizard exists *@
+    <EmptyState IconClass="bi-router-fill"
+                Heading="No access points yet"
+                Body="Add your first OpenWRT access point to start monitoring connected stations."
+                CtaLabel="Add your first OpenWRT node"
+                CtaHref="/Nodes/Add"
+                CtaIconClass="bi-plus-lg" />
+}
+else if (!_anyEnabledWlan)
+{
+    @* DASH-10 nodes-but-all-WLANs-disabled empty state. UI-SPEC §Dashboard DASH-10 lines 313-315. *@
+    <EmptyState IconClass="bi-wifi-off"
+                Heading="No WLANs are being monitored"
+                Body="@DashTenBody"
+                CtaLabel="Enable a WLAN"
+                CtaHref="@($"/Nodes/{_firstNodeId}")"
+                CtaIconClass="bi-wifi" />
+}
+else
+{
+    @* Static-snapshot table (D-22). Phase 5 layers Virtualize / search / sort / filter / live push additively. *@
+    <div class="card">
+        <div class="card-body">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>MAC</th>
+                        <th>Vendor</th>
+                        <th>IP</th>
+                        <th>SSID</th>
+                        <th>AP</th>
+                        <th>RSSI</th>
+                        <th>Last seen</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                @* TODO(phase-05): wrap <tbody> in <Virtualize> *@
+                <tbody>
+                    @* TODO(phase-05): subscribe to PollNotifier; replace OnInitializedAsync read with InvokeAsync(StateHasChanged) on RaiseAsync *@
+                    @if (_rows.Count == 0)
+                    {
+                        @* DASH-11 deferred (Phase 5 binding) — placeholder muted row per UI-SPEC §Dashboard DASH-11 line 316. *@
+                        <tr>
+                            <td colspan="9" class="text-center text-body-secondary py-4">
+                                No stations associated.
+                            </td>
+                        </tr>
+                    }
+                    else
+                    {
+                        @foreach (var row in _rows)
+                        {
+                            <tr>
+                                <td>@(string.IsNullOrEmpty(row.Name) ? row.Mac : row.Name)</td>
+                                <td><code class="font-monospace">@row.Mac</code></td>
+                                <td>
+                                    @if (!string.IsNullOrEmpty(row.Vendor))
+                                    {
+                                        @row.Vendor
+                                    }
+                                    else
+                                    {
+                                        <span class="text-body-secondary">Unknown vendor</span>
+                                    }
+                                </td>
+                                <td>@(string.IsNullOrEmpty(row.Ip) ? "—" : row.Ip)</td>
+                                <td>@row.Ssid</td>
+                                <td>@row.ApHostname</td>
+                                @* TODO(phase-05): RSSI cell — wrap in <RssiCell> bar component *@
+                                <td>@(row.Rss is { } r ? $"{r} dBm" : "—")</td>
+                                <td>@RelativeTime(row.LastSeen)</td>
+                                <td><StatusBadge Status="row.StationStatus" /></td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private int _nodeCount;
+    private bool _anyEnabledWlan;
+    private int _firstNodeId;
+    private List<DashboardRow> _rows = new();
+
+    private string DashTenBody =>
+        $"You have {_nodeCount} access point{(_nodeCount == 1 ? "" : "s")} configured, but every WLAN is disabled. Enable at least one WLAN to start seeing connected stations.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // D-22 static-snapshot — read at OnInitializedAsync ONLY. No PollNotifier subscription
+        // (Phase 5 binding). All reads via repositories per PER-04.
+        var allNodes = await Nodes.GetAllAsync();
+        _nodeCount = allNodes.Count;
+
+        if (_nodeCount > 0)
+        {
+            _firstNodeId = allNodes.OrderBy(n => n.Id).First().Id;
+            _anyEnabledWlan = await Networks.AnyEnabledAsync();   // single AsNoTracking AnyAsync (Plan 03-02)
+        }
+
+        if (_anyEnabledWlan)
+        {
+            _rows = await BuildRowsAsync(allNodes);
+        }
+
+        _loading = false;
+    }
+
+    private async Task<List<DashboardRow>> BuildRowsAsync(IReadOnlyList<WiFiNode> allNodes)
+    {
+        // Build a (WiFiNetworkId → (SSID, NodeHostname, Enabled)) lookup. We need every node's
+        // networks because stations can span any WLAN on any node. N node calls is acceptable for
+        // the small-scale Phase 3 deployment (Phase 5 may optimize via INetworkRepo.GetAllAsync if
+        // it exists). Threat: T-3-06-02 (DoS) — accepted per plan.
+        var networkLookup = new Dictionary<int, (string Ssid, string ApHostname, bool Enabled)>();
+        foreach (var n in allNodes)
+        {
+            var networks = await Networks.GetByNodeAsync(n.Id);
+            foreach (var w in networks)
+            {
+                networkLookup[w.Id] = (w.SSID, n.Hostname, w.Enabled);
+            }
+        }
+
+        // Pull all stations + project to DashboardRow.
+        var stations = await Stations.GetAllAsync();
+        var rows = new List<DashboardRow>(stations.Count);
+        foreach (var s in stations)
+        {
+            // Station may have null FK after NODE-04 cascade dissociation — skip if no association.
+            if (s.WiFiNetworkId is not int netId) continue;
+            if (!networkLookup.TryGetValue(netId, out var net)) continue;
+            if (!net.Enabled) continue;   // only show stations on Enabled WLANs
+
+            rows.Add(new DashboardRow(
+                Name: s.Name,
+                Mac: s.MacAddress,
+                Vendor: Oui.GetVendor(s.MacAddress),
+                Ip: s.IPAddress,
+                Ssid: net.Ssid,
+                ApHostname: net.ApHostname,
+                Rss: s.RSS == 0 ? (int?)null : s.RSS,
+                LastSeen: s.LastPollDate,
+                StationStatus: s.Status));
+        }
+        return rows;
+    }
+
+    private static string RelativeTime(DateTime t)
+    {
+        if (t == default) return "Never";
+        var d = DateTime.UtcNow - t.ToUniversalTime();
+        if (d.TotalSeconds < 60) return "just now";
+        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes}m ago";
+        if (d.TotalHours < 24) return $"{(int)d.TotalHours}h ago";
+        return $"{(int)d.TotalDays}d ago";
+    }
+
+    private sealed record DashboardRow(
+        string? Name,
+        string Mac,
+        string? Vendor,
+        string? Ip,
+        string Ssid,
+        string ApHostname,
+        int? Rss,
+        DateTime LastSeen,
+        Status StationStatus);
+}
