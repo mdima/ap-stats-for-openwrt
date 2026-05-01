@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using OpenWrtApStats.Data;
@@ -89,6 +90,65 @@ try
     builder.Services.AddSingleton<Func<CancellationToken, Task>>(sp => ct =>
         sp.GetRequiredService<PollOrchestrator>().RunCycleAsync(ct));
 
+    // 5c. Phase 3 — Cookie auth + conditional fallback policy + rate limiter +
+    //     ForwardedHeaders + UI password hasher + OUI lookup + UI services.
+    //     RESEARCH §Code Examples §1; Pitfalls 3 + 4 + 8 + 9 binding.
+    builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(opts =>
+    {
+        opts.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+                              | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+        opts.KnownIPNetworks.Clear();  // D-04 — operator's job to harden if exposed publicly (KnownNetworks is deprecated in .NET 10 — ASPDEPR005)
+        opts.KnownProxies.Clear();
+    });
+
+    builder.Services.AddAuthentication(Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme)
+        .AddCookie(o =>
+        {
+            o.Cookie.Name = "OpenWrtApStats.Auth";   // D-05 verbatim
+            o.Cookie.HttpOnly = true;
+            o.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+            o.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest;
+            o.LoginPath = "/Login";
+            o.LogoutPath = "/Logout";
+            o.ExpireTimeSpan = TimeSpan.FromDays(7);
+            o.SlidingExpiration = true;
+        });
+
+    builder.Services.AddCascadingAuthenticationState();
+    builder.Services.AddAuthorization(o =>
+    {
+        o.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+            .AddRequirements(new OpenWrtApStats.Services.Auth.ConditionalAuthRequirement())
+            .Build();
+    });
+    builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler,
+        OpenWrtApStats.Services.Auth.ConditionalAuthHandler>();
+
+    builder.Services.AddRateLimiter(opts =>
+    {
+        opts.AddPolicy("LoginPolicy", ctx =>
+            System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: ctx.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+                factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 5,                                    // SEC-06 / D-03
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+        opts.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    });
+
+    // SEC-04 password hasher; DASH-13 OUI singleton; D-07 + D-12 UI services.
+    builder.Services.AddTransient<OpenWrtApStats.Services.Auth.IUIPasswordHasher,
+                                  OpenWrtApStats.Services.Auth.UIPasswordHasher>();
+    builder.Services.AddSingleton<OpenWrtApStats.Services.Vendor.IOuiLookup,
+                                  OpenWrtApStats.Services.Vendor.OuiLookup>();
+    builder.Services.AddTransient<OpenWrtApStats.Services.Nodes.ITestConnectionService,
+                                  OpenWrtApStats.Services.Nodes.TestConnectionService>();
+    builder.Services.AddTransient<OpenWrtApStats.Services.Nodes.IWlanDiscoveryService,
+                                  OpenWrtApStats.Services.Nodes.WlanDiscoveryService>();
+
     // 6. Bootstrap order (registration order = StartAsync order — Pitfall 10):
     //    Migrations -> D-12 probe -> AppSettings warm-up -> Polling.
     //    Phase 2 closes Phase 1's "DO NOT add a fourth here" reservation by adding
@@ -110,9 +170,26 @@ try
         .AddInteractiveServerComponents();
 
     var app = builder.Build();
-    app.UseSerilogRequestLogging();   // harmless in Phase 1 (no routes); emits at request time once Phase 3 binds endpoints
-    app.UseStaticFiles();             // serves /lib/adminlte/* /lib/bootstrap-icons/* /lib/source-sans-3/* /app.css /favicon.ico
+
+    // Middleware pipeline — order is LOAD-BEARING (RESEARCH §Pitfall 4):
+    // UseForwardedHeaders MUST run before UseAuthentication (so cookie sees the rewritten
+    // RemoteIpAddress) AND before UseRateLimiter (so the partition key is correct).
+    app.UseForwardedHeaders();
+    app.UseSerilogRequestLogging();
+    app.UseStaticFiles();           // serves /lib/adminlte/* /lib/bootstrap-icons/* /lib/source-sans-3/* /app.css /favicon.ico
     app.UseAntiforgery();
+    app.UseAuthentication();        // reads "OpenWrtApStats.Auth" cookie
+    app.UseAuthorization();         // applies fallback ConditionalAuthRequirement
+    app.UseRateLimiter();           // sees rewritten IP (Pitfall 4)
+
+    // /Logout — minimal endpoint; SignOut + redirect (RESEARCH §Open Question #1 recommendation).
+    // The user-menu form posts the antiforgery token; we validate it by default.
+    app.MapPost("/Logout", async (HttpContext ctx) =>
+    {
+        await ctx.SignOutAsync(Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme);
+        return Microsoft.AspNetCore.Http.Results.Redirect("/");
+    });
+
     app.MapRazorComponents<OpenWrtApStats.Components.App>()
         .AddInteractiveServerRenderMode();
 

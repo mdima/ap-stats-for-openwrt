@@ -22,6 +22,7 @@ namespace OpenWrtApStats.Tests.Integration;
 /// AuthGateTests integration suite).
 /// </para>
 /// </summary>
+[Collection("Integration")]
 public sealed class AdminLteAssetSmokeTests(SmokeFactoryFixture factory) : IClassFixture<SmokeFactoryFixture>
 {
     private readonly SmokeFactoryFixture _factory = factory;

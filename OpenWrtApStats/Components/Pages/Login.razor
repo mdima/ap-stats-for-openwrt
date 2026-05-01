@@ -2,7 +2,10 @@
 @layout LoginLayout
 @attribute [AllowAnonymous]
 @attribute [ExcludeFromInteractiveRouting]
-@* Pitfall 2: opt out of D-06 global InteractiveServer — sign-in needs static SSR roundtrip *@
+@attribute [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("LoginPolicy")]
+@* Pitfall 2: opt out of D-06 global InteractiveServer — sign-in needs static SSR roundtrip
+   Pitfall 3: rate limit attached at the page route level via [EnableRateLimiting] — covers
+   both GET and POST traffic to /Login per SEC-06 / D-03 (5/IP/min). *@
 @using System.Security.Claims
 @using Microsoft.AspNetCore.Authentication
 @using Microsoft.AspNetCore.Authentication.Cookies
