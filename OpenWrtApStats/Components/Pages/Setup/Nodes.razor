@@ -1,0 +1,176 @@
+@page "/setup/nodes"
+@layout SetupLayout
+@using Microsoft.AspNetCore.DataProtection
+@using OpenWrtApStats.Components.Pages.Nodes
+@using OpenWrtApStats.Data.Models
+@using OpenWrtApStats.Data.Repositories
+@using OpenWrtApStats.Services.Settings
+
+@inject INodeRepo NodeRepo
+@inject IDataProtectionProvider Dpp
+@inject NavigationManager Nav
+
+@* /setup/nodes — Step 2 of the onboarding wizard. Operator adds one or more access points.
+   Reuses _NodeForm verbatim (Test Connection included). The Continue button is gated on
+   at least one saved node (D-11 / ONB-03). Removing a node calls INodeRepo.DeleteAsync
+   and refreshes the list. Password encryption uses the same "node-creds" Data Protection
+   purpose chain as /Nodes/Add (T-04-03-01 mitigation). *@
+
+<h3 class="card-title mb-1">Add your access points</h3>
+
+@* Saved nodes table — only rendered when at least one node has been added *@
+@if (_savedNodes.Count > 0)
+{
+    <h5 class="card-title mt-3">Your access points</h5>
+    <table class="table table-sm table-hover mb-3">
+        <thead>
+            <tr>
+                <th>Hostname</th>
+                <th>Username</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var node in _savedNodes)
+            {
+                <tr>
+                    <td>@node.Hostname</td>
+                    <td>@node.Username</td>
+                    <td>
+                        @if (node.Status == Status.Online)
+                        {
+                            <span class="badge text-bg-success">Online</span>
+                        }
+                        else
+                        {
+                            <span class="badge text-bg-secondary">Offline</span>
+                        }
+                    </td>
+                    <td>
+                        @{
+                            var capturedId = node.Id;
+                        }
+                        <button class="btn btn-sm btn-outline-danger"
+                                aria-label="Remove this node"
+                                title="Remove this node"
+                                @onclick="() => HandleRemoveAsync(capturedId)"
+                                disabled="@_removing">
+                            @if (_removingId == capturedId)
+                            {
+                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-trash"></i>
+                            }
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<hr class="my-4" />
+<h5 class="card-title">@(_savedNodes.Count == 0 ? "Add your first access point" : "Add another access point")</h5>
+
+@if (_pageError is not null)
+{
+    <div class="alert alert-danger alert-dismissible mb-3">
+        <button type="button" class="btn-close" @onclick="() => _pageError = null"></button>
+        @_pageError
+    </div>
+}
+
+<_NodeForm Model="_model" IsEdit="false" OnSave="HandleSaveAsync" />
+
+<hr class="my-4" />
+<div class="d-flex justify-content-between align-items-center">
+    @if (_savedNodes.Count == 0)
+    {
+        <small class="text-body-secondary">Add at least one access point to continue.</small>
+    }
+    else
+    {
+        <span></span>
+    }
+    <button type="button"
+            class="btn btn-primary"
+            data-testid="continue-btn"
+            disabled="@(_savedNodes.Count == 0)"
+            @onclick="HandleContinueAsync">
+        <i class="bi bi-arrow-right me-2"></i>Continue
+    </button>
+</div>
+
+@code {
+    private List<WiFiNode> _savedNodes = new();
+    private NodeFormModel _model = new();
+    private string? _pageError;
+    private bool _removing;
+    private int? _removingId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _savedNodes = (await NodeRepo.GetAllAsync()).ToList();
+    }
+
+    // internal for bUnit testability via InternalsVisibleTo (OpenWrtApStats.csproj)
+    internal async Task HandleSaveAsync(NodeFormModel form)
+    {
+        if (string.IsNullOrEmpty(form.Password))
+        {
+            _pageError = "Password is required.";
+            return;
+        }
+        _pageError = null;
+
+        // T-04-03-01: same "node-creds" purpose string as /Nodes/Add (Phase 3) — CR-02-safe.
+        var protector = Dpp.CreateProtector("node-creds");
+        var encrypted = protector.Protect(form.Password);
+
+        var node = new WiFiNode
+        {
+            Hostname = form.Hostname!.Trim(),
+            Username = form.Username!.Trim(),
+            Password = encrypted,
+            Status = Status.Offline,
+            HostKeyFingerprint = null
+        };
+        await NodeRepo.AddAsync(node);
+
+        // D-13a: reset form, reload saved-nodes list
+        _model = new NodeFormModel();
+        _savedNodes = (await NodeRepo.GetAllAsync()).ToList();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // Test seams: exposed as internal so bUnit tests can invoke handlers directly
+    internal Task HandleSaveForTestAsync(NodeFormModel form) => HandleSaveAsync(form);
+    internal Task HandleRemoveForTestAsync(int nodeId) => HandleRemoveAsync(nodeId);
+
+    private async Task HandleRemoveAsync(int nodeId)
+    {
+        _removing = true;
+        _removingId = nodeId;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            await NodeRepo.DeleteAsync(nodeId);
+            _savedNodes = (await NodeRepo.GetAllAsync()).ToList();
+        }
+        finally
+        {
+            _removing = false;
+            _removingId = null;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void HandleContinueAsync()
+    {
+        if (_savedNodes.Count == 0) return;
+        Nav.NavigateTo("/setup/wlans");
+    }
+}

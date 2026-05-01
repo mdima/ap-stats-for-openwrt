@@ -1,6 +1,8 @@
 @inherits LayoutComponentBase
 @using OpenWrtApStats.Components.Shared
 
+@inject NavigationManager Nav
+
 <PageTitle>OpenWRT-AP-Stats — Setup</PageTitle>
 
 <div class="login-page bg-body-secondary">
@@ -30,5 +32,10 @@
 </div>
 
 @code {
-    [Parameter] public int CurrentStep { get; set; } = 1;
+    // Route-detection approach: SetupLayout infers the breadcrumb step from the URI
+    // so InteractiveServer pages (Steps 2+3) don't need to pass a layout parameter.
+    // Step 1 = /setup/password (default), Step 2 = /setup/nodes, Step 3 = /setup/wlans.
+    private int CurrentStep => Nav.Uri.Contains("/setup/nodes", StringComparison.OrdinalIgnoreCase) ? 2
+                              : Nav.Uri.Contains("/setup/wlans", StringComparison.OrdinalIgnoreCase)  ? 3
+                              : 1;
 }
