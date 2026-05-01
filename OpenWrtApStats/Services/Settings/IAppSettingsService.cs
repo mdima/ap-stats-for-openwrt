@@ -12,11 +12,9 @@ public interface IAppSettingsService
 {
     int     PollingIntervalSeconds { get; }
     string? UIPasswordHash         { get; }
-    string? SshKnownHostsCacheJson { get; }
 
     Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default);
     Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default);
-    Task SetSshKnownHostsCacheJsonAsync(string? json, CancellationToken ct = default);
 
     /// <summary>Called once by AppSettingsBootstrapHostedService after migrations complete.</summary>
     Task WarmAsync(CancellationToken ct = default);

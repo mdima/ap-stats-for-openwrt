@@ -16,15 +16,13 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
     // Well-known keys — never strings in callers (D-11)
     private const string KeyPollingInterval = "PollingIntervalSeconds";
     private const string KeyUIPasswordHash  = "UIPasswordHash";
-    private const string KeySshKnownHosts   = "SshKnownHostsCacheJson";
 
     // Immutable snapshot; replaced atomically via Interlocked.Exchange.
-    private sealed record Snapshot(int PollingIntervalSeconds, string? UIPasswordHash, string? SshKnownHostsCacheJson);
-    private Snapshot _current = new(30, null, null); // safe defaults until WarmAsync runs
+    private sealed record Snapshot(int PollingIntervalSeconds, string? UIPasswordHash);
+    private Snapshot _current = new(30, null); // safe defaults until WarmAsync runs
 
     public int     PollingIntervalSeconds => Volatile.Read(ref _current).PollingIntervalSeconds;
     public string? UIPasswordHash         => Volatile.Read(ref _current).UIPasswordHash;
-    public string? SshKnownHostsCacheJson => Volatile.Read(ref _current).SshKnownHostsCacheJson;
 
     public event Action<IAppSettingsService>? Changed;
 
@@ -33,8 +31,7 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
         var rows = await repo.GetAllAsync(ct);
         var snap = new Snapshot(
             PollingIntervalSeconds: rows.TryGetValue(KeyPollingInterval, out var pi) ? pi.IntValue ?? 30 : 30,
-            UIPasswordHash:         rows.TryGetValue(KeyUIPasswordHash,  out var uh) ? uh.StringValue : null,
-            SshKnownHostsCacheJson: rows.TryGetValue(KeySshKnownHosts,   out var sh) ? sh.StringValue : null);
+            UIPasswordHash:         rows.TryGetValue(KeyUIPasswordHash,  out var uh) ? uh.StringValue : null);
         Interlocked.Exchange(ref _current, snap);
     }
 
@@ -43,9 +40,6 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
 
     public Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default)
         => UpsertAndRefreshAsync(KeyUIPasswordHash, stringValue: hash, ct: ct);
-
-    public Task SetSshKnownHostsCacheJsonAsync(string? json, CancellationToken ct = default)
-        => UpsertAndRefreshAsync(KeySshKnownHosts, stringValue: json, ct: ct);
 
     private async Task UpsertAndRefreshAsync(
         string key,

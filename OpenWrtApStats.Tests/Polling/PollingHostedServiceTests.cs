@@ -49,7 +49,6 @@ public sealed class PollingHostedServiceTests
     {
         public int PollingIntervalSeconds { get; set; } = pollingIntervalSeconds;
         public string? UIPasswordHash => null;
-        public string? SshKnownHostsCacheJson => null;
         public event Action<IAppSettingsService>? Changed;
 
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default)
@@ -60,7 +59,6 @@ public sealed class PollingHostedServiceTests
         }
 
         public Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default) => Task.CompletedTask;
-        public Task SetSshKnownHostsCacheJsonAsync(string? json, CancellationToken ct = default) => Task.CompletedTask;
         public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 
