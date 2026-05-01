@@ -14,10 +14,12 @@ namespace OpenWrtApStats.Services.Onboarding;
 /// </summary>
 internal sealed class WizardRedirectMiddleware(
     RequestDelegate next,
-    INodeRepo nodeRepo,
     IAppSettingsService settings)
 {
-    public async Task InvokeAsync(HttpContext context)
+    // INodeRepo is transient — inject via InvokeAsync so ASP.NET Core resolves it
+    // from the per-request DI scope rather than capturing it at construction time
+    // (construction is effectively singleton for conventional middleware). Fixes CR-02.
+    public async Task InvokeAsync(HttpContext context, INodeRepo nodeRepo)
     {
         // Only intercept GET /
         if (context.Request.Method.Equals("GET", StringComparison.OrdinalIgnoreCase)
