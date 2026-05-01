@@ -203,7 +203,7 @@ try
     {
         await settings.SetWizardDismissedAsync(true, ctx.RequestAborted);
         return Microsoft.AspNetCore.Http.Results.Redirect("/");
-    });
+    }).AllowAnonymous();   // wizard skip must be reachable regardless of auth state
 
     app.MapRazorComponents<OpenWrtApStats.Components.App>()
         .AddInteractiveServerRenderMode();
