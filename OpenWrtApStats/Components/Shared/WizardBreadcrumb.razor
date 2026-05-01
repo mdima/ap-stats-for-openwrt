@@ -36,12 +36,8 @@
 
     <span class="text-body-secondary mx-2">&rsaquo;</span>
 
-    @* Step 3: WLANs *@
-    @if (CurrentStep > 3)
-    {
-        <a href="/setup/wlans" class="text-primary">3 WLANs</a>
-    }
-    else if (CurrentStep == 3)
+    @* Step 3: WLANs — no "completed" state; it is always the last step (WR-03) *@
+    @if (CurrentStep == 3)
     {
         <span class="fw-semibold text-body">3 WLANs</span>
     }
