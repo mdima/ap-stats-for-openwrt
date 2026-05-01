@@ -99,7 +99,7 @@
             class="btn btn-primary"
             data-testid="continue-btn"
             disabled="@(_savedNodes.Count == 0)"
-            @onclick="HandleContinueAsync">
+            @onclick="HandleContinue">
         <i class="bi bi-arrow-right me-2"></i>Continue
     </button>
 </div>
@@ -168,7 +168,7 @@
         }
     }
 
-    private void HandleContinueAsync()
+    private void HandleContinue()
     {
         if (_savedNodes.Count == 0) return;
         Nav.NavigateTo("/setup/wlans");
