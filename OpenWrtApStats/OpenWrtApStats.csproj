@@ -22,4 +22,9 @@
     <PackageReference Include="Serilog.Sinks.Async" Version="2.1.0" />
     <PackageReference Include="SSH.NET" Version="2025.1.0" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- DASH-13 / D-21: IEEE OUI registry snapshot loaded by OuiLookup at startup. -->
+    <EmbeddedResource Include="Data/Resources/oui.csv" />
+  </ItemGroup>
 </Project>
