@@ -75,4 +75,23 @@ public sealed class NetworkRepo(IDbContextFactory<DatabaseContext> factory) : IN
         // Note: WLANs that disappeared from re-discovery are NOT deleted here per WLAN-03.
         // Phase 3 will mark them Enabled=false on absence. Phase 1 only ships the upsert path.
     }
+
+    // ── D-15 Phase 3: absent-WLAN handling for discovery's transaction ──────
+    public async Task MarkAbsentDisabledAsync(
+        int wiFiNodeId,
+        IReadOnlyCollection<string> presentMacs,
+        CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.WiFiNetworks
+            .Where(n => n.WiFiNodeId == wiFiNodeId && !presentMacs.Contains(n.MacAddress))
+            .ExecuteUpdateAsync(s => s.SetProperty(n => n.Enabled, false), ct);
+    }
+
+    // ── DASH-10 Phase 3: dashboard empty-state detection ────────────────────
+    public async Task<bool> AnyEnabledAsync(CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        return await db.WiFiNetworks.AsNoTracking().AnyAsync(n => n.Enabled, ct);
+    }
 }

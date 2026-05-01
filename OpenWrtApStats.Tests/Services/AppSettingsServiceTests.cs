@@ -70,23 +70,20 @@ public sealed class AppSettingsServiceTests(SqliteInMemoryFixture fixture) : ICl
     [Fact]
     public async Task ReservedKeys_StateMatchesUnderlyingDb()
     {
-        // D-09 reserved keys (UIPasswordHash, SshKnownHostsCacheJson) are not pre-seeded by
-        // the InitialCreate migration. Sibling tests may have written to them within the
-        // class-scoped fixture; assert that the snapshot matches whatever is currently in
-        // the DB (so the test passes regardless of execution order).
+        // D-09 reserved key (UIPasswordHash) is not pre-seeded by InitialCreate. D-19
+        // purged SshKnownHostsCacheJson from the IAppSettingsService surface; only the
+        // UIPasswordHash assertion remains.
         var ct = TestContext.Current.CancellationToken;
         var svc = CreateService();
         await svc.WarmAsync(ct);
 
         await using var db = _fixture.CreateContext();
-        var dbRows = await db.AppSettings.AsNoTracking()
-            .Where(r => r.Key == "UIPasswordHash" || r.Key == "SshKnownHostsCacheJson")
-            .ToDictionaryAsync(r => r.Key, ct);
+        var dbRow = await db.AppSettings.AsNoTracking()
+            .Where(r => r.Key == "UIPasswordHash")
+            .FirstOrDefaultAsync(ct);
 
-        var expectedUI = dbRows.TryGetValue("UIPasswordHash", out var ui) ? ui.StringValue : null;
-        var expectedHosts = dbRows.TryGetValue("SshKnownHostsCacheJson", out var sh) ? sh.StringValue : null;
+        var expectedUI = dbRow?.StringValue;
         Assert.Equal(expectedUI, svc.UIPasswordHash);
-        Assert.Equal(expectedHosts, svc.SshKnownHostsCacheJson);
     }
 
     [Fact]

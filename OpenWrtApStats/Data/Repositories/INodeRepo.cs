@@ -15,8 +15,37 @@ public interface INodeRepo
     Task<IReadOnlyList<WiFiNode>> GetAllAsync(CancellationToken ct = default);
     Task<WiFiNode?> GetByIdAsync(int id, CancellationToken ct = default);
     Task AddAsync(WiFiNode node, CancellationToken ct = default);
-    Task UpdateAsync(WiFiNode node, CancellationToken ct = default);
     Task DeleteAsync(int id, CancellationToken ct = default);
+
+    /// <summary>
+    /// CR-02 closure (D-09 / RESEARCH §Pitfall 5). Updates Hostname + Username only via
+    /// single-statement <c>ExecuteUpdateAsync</c> — never touches Password or HostKeyFingerprint.
+    /// Repo-owned only: the Edit-Node UI is a one-shot operation outside any coordinator
+    /// transaction. Replaces the deleted <c>UpdateAsync(WiFiNode)</c> shape that re-tracked
+    /// the whole row and clobbered the encrypted Password from a stub's default value.
+    /// D-10: this surface preserves HostKeyFingerprint on hostname/username edit — TOFU identity is row Id, not hostname.
+    /// </summary>
+    Task UpdateMetadataAsync(int id, string hostname, string username, CancellationToken ct = default);
+
+    /// <summary>
+    /// CR-02 closure (D-09). Updates Password only via single-statement <c>ExecuteUpdateAsync</c>.
+    /// Caller passes the already-encrypted ciphertext (Data Protection "node-creds" purpose).
+    /// Empty-password "no change" semantics live at the UI layer (D-08): callers MUST NOT
+    /// invoke this method with empty <paramref name="encryptedPassword"/>.
+    /// </summary>
+    Task UpdatePasswordAsync(int id, string encryptedPassword, CancellationToken ct = default);
+
+    /// <summary>
+    /// D-18 SET-03 bulk path. Sets <c>HostKeyFingerprint = null</c> on every <see cref="WiFiNode"/>.
+    /// CR-02-safe: single-property <c>ExecuteUpdateAsync</c> — never touches Password.
+    /// </summary>
+    Task ClearAllHostKeyFingerprintsAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// D-18 SET-03 per-node path. Single-row variant of <see cref="ClearAllHostKeyFingerprintsAsync"/>.
+    /// Used by the per-node Re-trust button on /Nodes/{id}.
+    /// </summary>
+    Task ClearHostKeyFingerprintAsync(int nodeId, CancellationToken ct = default);
 
     /// <summary>D-12 probe seam: returns true if any WiFiNode has a non-empty Password
     /// (encrypted credential blob). Used by DataProtectionHealthHostedService at bootstrap to

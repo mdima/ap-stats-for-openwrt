@@ -32,13 +32,6 @@ public sealed class NodeRepo(IDbContextFactory<DatabaseContext> factory) : INode
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task UpdateAsync(WiFiNode node, CancellationToken ct = default)
-    {
-        await using var db = await factory.CreateDbContextAsync(ct);
-        db.WiFiNodes.Update(node);
-        await db.SaveChangesAsync(ct);
-    }
-
     public async Task DeleteAsync(int id, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
@@ -46,6 +39,43 @@ public sealed class NodeRepo(IDbContextFactory<DatabaseContext> factory) : INode
         if (entity is null) return;
         db.WiFiNodes.Remove(entity);
         await db.SaveChangesAsync(ct);
+    }
+
+    // ── D-09 CR-02 closure (Phase 3): split metadata + password updates ─────
+    // PATTERN: single-property ExecuteUpdateAsync. NEVER db.WiFiNodes.Update(entity)
+    // — that would re-track the whole row and clobber un-set columns from defaults.
+    public async Task UpdateMetadataAsync(int id, string hostname, string username, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.WiFiNodes
+            .Where(n => n.Id == id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(n => n.Hostname, hostname)
+                .SetProperty(n => n.Username, username), ct);
+    }
+
+    public async Task UpdatePasswordAsync(int id, string encryptedPassword, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.WiFiNodes
+            .Where(n => n.Id == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(n => n.Password, encryptedPassword), ct);
+    }
+
+    // ── D-18 (Phase 3): SET-03 known-hosts cache clear ──────────────────────
+    public async Task ClearAllHostKeyFingerprintsAsync(CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.WiFiNodes
+            .ExecuteUpdateAsync(s => s.SetProperty(n => n.HostKeyFingerprint, (string?)null), ct);
+    }
+
+    public async Task ClearHostKeyFingerprintAsync(int nodeId, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.WiFiNodes
+            .Where(n => n.Id == nodeId)
+            .ExecuteUpdateAsync(s => s.SetProperty(n => n.HostKeyFingerprint, (string?)null), ct);
     }
 
     public async Task<bool> AnyEncryptedPasswordsAsync(CancellationToken ct = default)
