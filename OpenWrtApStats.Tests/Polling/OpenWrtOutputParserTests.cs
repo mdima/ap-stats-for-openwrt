@@ -184,4 +184,36 @@ public sealed class OpenWrtOutputParserTests
         Assert.Equal(expectedMac, stations[0].MacAddress);
         Assert.Equal(expectedRss, stations[0].RSS);
     }
+
+    [Fact]
+    public void ParseIwinfoAssocList_PopulatesTxAndRxBitrate_FromContinuationLines()
+    {
+        // Real iwinfo assoclist format. RX/TX continuation lines start with a tab and the
+        // recognition key "RX:" / "TX:" followed by the bitrate in MBit/s.
+        const string raw =
+            "02:00:5F:AA:BB:01  -45 dBm / -95 dBm (SNR 50)  100 ms ago\n" +
+            "\tRX: 144.4 MBit/s, MCS 7, 20MHz                  31337 Pkts.\n" +
+            "\tTX: 86.7 MBit/s, MCS 5, 20MHz                  12345 Pkts.\n" +
+            "\texpected throughput: 100.0 MBit/s\n";
+        var stations = OpenWrtOutputParser.ParseIwinfoAssocList(raw, wiFiNetworkId: 1, NullLogger.Instance);
+        Assert.Single(stations);
+        Assert.Equal(144.4, stations[0].RxBitrate);
+        Assert.Equal(86.7,  stations[0].TxBitrate);
+    }
+
+    [Fact]
+    public void ParseIwDevStations_PopulatesTxAndRxBitrate_FromBlockLines()
+    {
+        // Real iw dev wlanX station dump format — block leader + indented "tx bitrate:" /
+        // "rx bitrate:" lines with tab-separated values in MBit/s.
+        const string raw =
+            "Station 02:00:12:23:52:61 (on wlan0)\n" +
+            "\tsignal:  \t-45 dBm\n" +
+            "\ttx bitrate:\t1300.0 MBit/s\n" +
+            "\trx bitrate:\t100.0 MBit/s\n";
+        var stations = OpenWrtOutputParser.ParseIwDevStations(raw, wiFiNetworkId: 7, NullLogger.Instance);
+        Assert.Single(stations);
+        Assert.Equal(1300.0, stations[0].TxBitrate);
+        Assert.Equal(100.0,  stations[0].RxBitrate);
+    }
 }

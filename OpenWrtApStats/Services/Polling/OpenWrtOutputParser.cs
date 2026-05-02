@@ -139,16 +139,21 @@ public static class OpenWrtOutputParser
                 }
                 else if (cur is not null)
                 {
-                    // Continuation lines (RX:/TX: tokens). Bitrate parsing is reserved for Plan 02-04
-                    // fixture-driven refinement — empty bodies here keep the per-line tolerance contract
-                    // honest while leaving the recognition keys present (B7/B8 lock).
+                    // Continuation lines: "\tRX: 144.4 MBit/s, MCS 7, 20MHz   31337 Pkts."
+                    //                     "\tTX: 144.4 MBit/s, MCS 7, 20MHz   12345 Pkts."
+                    // Extract the first decimal number after the recognition key. B7/B8 lock —
+                    // recognition keys remain present in the source for grep contracts.
                     if (line.Contains("RX:", StringComparison.Ordinal))
                     {
-                        // RX bitrate placeholder — refined in Plan 02-04 with real fixture samples.
+                        var rxIdx = line.IndexOf("RX:", StringComparison.Ordinal);
+                        if (FirstDecimalBeforeMbitS(line.Substring(rxIdx + 3)) is { } rx)
+                            cur.RxBitrate = rx;
                     }
                     if (line.Contains("TX:", StringComparison.Ordinal))
                     {
-                        // TX bitrate placeholder — refined in Plan 02-04 with real fixture samples.
+                        var txIdx = line.IndexOf("TX:", StringComparison.Ordinal);
+                        if (FirstDecimalBeforeMbitS(line.Substring(txIdx + 3)) is { } tx)
+                            cur.TxBitrate = tx;
                     }
                 }
             }
@@ -253,6 +258,17 @@ public static class OpenWrtOutputParser
                         if (int.TryParse(FirstSignedNumber(line), out var rss))
                             cur.RSS = rss;
                     }
+                    else if (line.StartsWith("tx bitrate:", StringComparison.Ordinal))
+                    {
+                        // "tx bitrate:\t1300.0 MBit/s" — first decimal before " MBit/s".
+                        if (FirstDecimalBeforeMbitS(line.Substring("tx bitrate:".Length)) is { } tx)
+                            cur.TxBitrate = tx;
+                    }
+                    else if (line.StartsWith("rx bitrate:", StringComparison.Ordinal))
+                    {
+                        if (FirstDecimalBeforeMbitS(line.Substring("rx bitrate:".Length)) is { } rx)
+                            cur.RxBitrate = rx;
+                    }
                 }
             }
             catch (Exception ex)
@@ -328,5 +344,22 @@ public static class OpenWrtOutputParser
         // Captures e.g. "-45" from "signal: -45 dBm".
         var match = System.Text.RegularExpressions.Regex.Match(s, @"-?\d+");
         return match.Success ? match.Value : "";
+    }
+    private static double? FirstDecimalBeforeMbitS(string s)
+    {
+        // Captures the first decimal number that appears BEFORE a " MBit/s" sentinel,
+        // e.g. "144.4" from " 144.4 MBit/s, MCS 7, 20MHz   31337 Pkts." or "1300.0"
+        // from "\t1300.0 MBit/s". Returns null when the sentinel is absent or the
+        // capture fails to parse — keeps the CR-03 zero-vs-absent contract.
+        var mbitIdx = s.IndexOf(" MBit/s", StringComparison.Ordinal);
+        if (mbitIdx <= 0) return null;
+        var seg = s.Substring(0, mbitIdx);
+        var match = System.Text.RegularExpressions.Regex.Match(seg, @"\d+(?:\.\d+)?");
+        if (!match.Success) return null;
+        return double.TryParse(
+            match.Value,
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var v) ? v : null;
     }
 }
