@@ -111,4 +111,41 @@ public sealed class ArchitectureTests
 
         Assert.Empty(violators);
     }
+
+    /// <summary>
+    /// D-03 / Phase 5 D-03 reconciliation. <c>PollNotifier.Cycled</c> MUST be
+    /// <c>Func&lt;PollSnapshot, Task&gt;?</c> so subscribers can declare
+    /// <c>async Task</c> handlers (NOT forbidden <c>async void</c> per Pitfall 7).
+    /// Reverting to <c>Action&lt;PollSnapshot&gt;</c> would force <c>async void</c>
+    /// handlers — this test makes that regression provably loud.
+    /// </summary>
+    [Fact]
+    public void PollNotifier_EventSignature_IsFuncTask()
+    {
+        var ev = typeof(OpenWrtApStats.Services.Polling.PollNotifier).GetEvent("Cycled");
+        Assert.NotNull(ev);
+        var expected = typeof(Func<OpenWrtApStats.Services.Polling.PollSnapshot, Task>);
+        Assert.Equal(expected, ev!.EventHandlerType);
+    }
+
+    /// <summary>
+    /// D-09 / Phase 5 CR-02 mirror on <see cref="OpenWrtApStats.Data.Repositories.IStationRepo"/>.
+    /// Any method named <c>UpdateAsync</c> taking <see cref="OpenWrtApStats.Data.Models.WLANStation"/>
+    /// would re-track the whole row and clobber operator-assigned <c>Name</c> from a stub's
+    /// default value. The repo exposes <c>SetNameAsync</c> (single-property
+    /// <c>ExecuteUpdateAsync</c>) and <c>DeleteByMacAsync</c> (single-row <c>ExecuteDeleteAsync</c>)
+    /// — never an entity-shaped Update. This test makes any future re-introduction provably loud.
+    /// </summary>
+    [Fact]
+    public void IStationRepo_DoesNotExposeUpdateWLANStation()
+    {
+        var methods = typeof(OpenWrtApStats.Data.Repositories.IStationRepo).GetMethods();
+        var violators = methods
+            .Where(m => m.Name == "UpdateAsync"
+                     && m.GetParameters().Any(p => p.ParameterType == typeof(OpenWrtApStats.Data.Models.WLANStation)))
+            .Select(m => $"{m.DeclaringType?.Name}.{m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name))})")
+            .ToList();
+
+        Assert.Empty(violators);
+    }
 }
