@@ -1,0 +1,99 @@
+@using OpenWrtApStats.Services.Gating
+@using OpenWrtApStats.Services.Polling
+@using OpenWrtApStats.Services.Settings
+@implements IDisposable
+
+@inject PollNotifier Notifier
+@inject IAppSettingsService Settings
+@inject ICircuitGate Gate
+
+@* PollCountdown.razor — Phase 5 D-12 paired adjacency (post-discussion Pi.Alert lift
+   2026-05-02). UI-SPEC §PollCountdown (lines 619-665). 1-second client-side tick
+   re-renders the displayed seconds-to-next-cycle. CycleEndUtc anchor refreshes on each
+   PollNotifier.Cycled (D-03 Func<PollSnapshot, Task>?). When Gate.Current == Paused
+   (Phase 6 forward-compat), display is "—" (no poll pending).
+
+   `System.Threading.Timer` is permitted here (UI-SPEC line 668): the CLAUDE.md
+   PeriodicTimer rule applies to *polling work* (SSH I/O, DB writes); this is a 1Hz UI
+   tick with no I/O, no DB — analogous to Nodes/Detail.razor:202-208 Task.Delay flash
+   idiom that ships in Phase 3.
+
+   Revision-1 W4 (race with Dispose): the Timer callback can fire concurrently with
+   Dispose(). If we hand a disposed renderer to InvokeAsync(StateHasChanged) we get
+   ObjectDisposedException. Guard with both a volatile `_disposed` flag (fast-path skip)
+   and a try/catch around InvokeAsync (belt + braces — covers the small window between
+   the flag-check and the InvokeAsync call). *@
+
+<span class="badge text-bg-secondary" aria-label="@_ariaLabel">
+    <span style="font-variant-numeric: tabular-nums;">@_displayText</span>
+</span>
+
+@code {
+    private DateTime? _lastCycleEndUtc;
+    private System.Threading.Timer? _tick;
+    private string _displayText = "—";
+    private string _ariaLabel = "Next poll: pending";
+    private volatile bool _disposed;     // W4 race guard
+
+    protected override Task OnInitializedAsync()
+    {
+        Notifier.Cycled += OnCycleAsync;
+        _tick = new System.Threading.Timer(_ => Tick(), state: null, dueTime: 1000, period: 1000);
+        return Task.CompletedTask;
+    }
+
+    private async Task OnCycleAsync(PollSnapshot s)
+    {
+        if (_disposed) return;     // W4: skip if dispose already happened
+        _lastCycleEndUtc = s.CycleEndUtc;
+        // Pitfall 7: handler arrives off the orchestrator's stack frame.
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+            // W4: race between Cycled and Dispose — renderer is gone, swallow.
+        }
+    }
+
+    private void Tick()
+    {
+        if (_disposed) return;     // W4 fast path
+
+        if (Gate.Current == GateState.Paused)
+        {
+            _displayText = "—";
+            _ariaLabel   = "Polling paused";
+        }
+        else if (_lastCycleEndUtc is null)
+        {
+            _displayText = "—";
+            _ariaLabel   = "Awaiting first poll";
+        }
+        else
+        {
+            var nextAt    = _lastCycleEndUtc.Value.AddSeconds(Settings.PollingIntervalSeconds);
+            var remaining = (int)Math.Max(0, Math.Round((nextAt - DateTime.UtcNow).TotalSeconds));
+            _displayText = $"{remaining}s";
+            _ariaLabel   = $"Next poll in {remaining} seconds";
+        }
+        // The Timer callback is OUTSIDE the Blazor circuit's sync context.
+        // W4: belt + braces — Dispose() may have run between the _disposed check and here.
+        try
+        {
+            _ = InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Renderer disposed; swallow.
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;     // W4: set BEFORE detaching subscriptions and disposing timer
+        Notifier.Cycled -= OnCycleAsync;
+        _tick?.Dispose();
+    }
+}
