@@ -1,0 +1,240 @@
+@page "/Stations/{Mac}"
+@using System.ComponentModel.DataAnnotations
+@using OpenWrtApStats.Data.Models
+@using OpenWrtApStats.Data.Repositories
+@using OpenWrtApStats.Services.Settings
+@using OpenWrtApStats.Services.Vendor
+
+@inject IStationRepo Stations
+@inject INodeRepo Nodes
+@inject INetworkRepo Networks
+@inject IOuiLookup Oui
+@inject IAppSettingsService Settings
+@inject NavigationManager Nav
+
+@* Stations/Detail.razor — Phase 5 D-13 / DASH-15 / DASH-14 / DASH-16. UI-SPEC §Layout
+   Contracts §/Stations/{mac} (lines 244-316), §Component Contracts §Detail Page (lines
+   764-823). Two-column responsive AdminLTE card layout. Read-only fields left, edit
+   Name + Delete trigger right. Reuses Phase 3 ConfirmationModal verbatim for D-14
+   (PATTERNS.md "Decision: prefer direct reuse over wrapper"). Detail page does NOT
+   subscribe to PollNotifier (UI-SPEC line 947). *@
+
+<PageHeader Title="@DisplayName" />
+
+@if (_loading)
+{
+    <div class="d-flex justify-content-center py-5">
+        <div class="spinner-border" role="status" aria-label="Loading station"></div>
+    </div>
+}
+else if (_station is null)
+{
+    @* 404 state per UI-SPEC §Detail Page 404 lines 794-799. *@
+    <EmptyState IconClass="bi-search"
+                Heading="Station not found"
+                Body="No station with that MAC has been seen on a monitored WLAN."
+                CtaLabel="Back to dashboard"
+                CtaHref="/"
+                CtaIconClass="bi-arrow-left" />
+}
+else
+{
+    <div class="row g-3">
+        @* LEFT col-lg-7: read-only station details *@
+        <div class="col-lg-7">
+            <div class="card">
+                <div class="card-header"><h5 class="card-title mb-0">Station details</h5></div>
+                <div class="card-body">
+                    <dl class="row mb-0">
+                        <dt class="col-sm-4">MAC</dt>
+                        <dd class="col-sm-8"><code class="font-monospace">@_station.MacAddress</code></dd>
+
+                        <dt class="col-sm-4">Hostname</dt>
+                        <dd class="col-sm-8">@(string.IsNullOrEmpty(_station.Hostname) ? "—" : _station.Hostname)</dd>
+
+                        <dt class="col-sm-4">Vendor</dt>
+                        <dd class="col-sm-8">@(_vendor ?? "Unknown vendor")</dd>
+
+                        <dt class="col-sm-4">IP address</dt>
+                        <dd class="col-sm-8"><code class="font-monospace">@(string.IsNullOrEmpty(_station.IPAddress) ? "—" : _station.IPAddress)</code></dd>
+
+                        <dt class="col-sm-4">SSID</dt>
+                        <dd class="col-sm-8">@(_network?.SSID ?? "—")</dd>
+
+                        <dt class="col-sm-4">Access point</dt>
+                        <dd class="col-sm-8">@(_apHostname ?? "—")</dd>
+
+                        <dt class="col-sm-4">Tx bitrate</dt>
+                        <dd class="col-sm-8">@(_station.TxBitrate > 0 ? FormatBitrate(_station.TxBitrate) : "—")</dd>
+
+                        <dt class="col-sm-4">Rx bitrate</dt>
+                        <dd class="col-sm-8">@(_station.RxBitrate > 0 ? FormatBitrate(_station.RxBitrate) : "—")</dd>
+
+                        <dt class="col-sm-4">Signal</dt>
+                        <dd class="col-sm-8"><RssiCell Rss="_station.RSS" /></dd>
+
+                        <dt class="col-sm-4">Last seen</dt>
+                        <dd class="col-sm-8">@RelativeTime(_station.LastPollDate) <small class="text-body-secondary">(@_station.LastPollDate.ToUniversalTime().ToString("u"))</small></dd>
+
+                        <dt class="col-sm-4">Status</dt>
+                        <dd class="col-sm-8"><StatusBadge Status="_station.Status" IsStale="@_isStale" /></dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+
+        @* RIGHT col-lg-5: edit Name + Delete trigger *@
+        <div class="col-lg-5">
+            <div class="card">
+                <div class="card-header"><h5 class="card-title mb-0">Manage</h5></div>
+                <div class="card-body">
+                    <EditForm Model="_form" OnValidSubmit="HandleSaveNameAsync" FormName="station-name-form">
+                        <DataAnnotationsValidator />
+                        <div class="mb-3">
+                            <label class="form-label" for="station-name">Display name</label>
+                            <InputText id="station-name" class="form-control" @bind-Value="_form.Name" maxlength="64" />
+                            <ValidationMessage For="@(() => _form.Name)" class="invalid-feedback d-block" />
+                            <small class="form-text text-body-secondary">Leave blank to fall back to hostname or MAC.</small>
+                        </div>
+                        <button type="submit" class="btn btn-primary" disabled="@_saving">
+                            @if (_saving)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                <span>Saving…</span>
+                            }
+                            else
+                            {
+                                <span>Save name</span>
+                            }
+                        </button>
+                        @if (_savedFlash) { <small class="text-success ms-2">Saved</small> }
+                    </EditForm>
+                </div>
+                <div class="card-footer bg-body">
+                    <button type="button" class="btn btn-outline-danger" @onclick="@(() => _deleteOpen = true)">
+                        <i class="bi bi-trash me-2"></i>Delete this station
+                    </button>
+                    <a class="btn btn-link" href="/">Back to dashboard</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @* Delete modal — reuses Phase 3 ConfirmationModal verbatim. CONTEXT D-14 modal copy. *@
+    <ConfirmationModal IsOpen="_deleteOpen"
+                       IsOpenChanged="@((bool v) => _deleteOpen = v)"
+                       Title="@($"Delete station \"{(_station.Name ?? _station.MacAddress)}\"?")"
+                       ConfirmLabel="Delete"
+                       OnConfirm="HandleDeleteAsync">
+        <Body>
+            This removes it from the dashboard. If it reconnects to a monitored WLAN it will reappear on the next poll.
+        </Body>
+    </ConfirmationModal>
+}
+
+@code {
+    [Parameter] public string Mac { get; set; } = string.Empty;
+
+    private string _mac = "";
+    private bool _loading = true;
+    private WLANStation? _station;
+    private WiFiNetwork? _network;
+    private string? _apHostname;
+    private string? _vendor;
+    private bool _isStale;
+
+    private NameForm _form = new();
+    private bool _saving;
+    private bool _savedFlash;
+    private bool _deleteOpen;
+
+    private string DisplayName => _station?.Name ?? _station?.Hostname ?? _station?.MacAddress ?? "Station";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _mac = Uri.UnescapeDataString(Mac).ToUpperInvariant();   // Phase 2 D-07 MAC casing rule
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _station = await Stations.GetByMacAsync(_mac);
+        if (_station is null)
+        {
+            _loading = false;
+            return;
+        }
+
+        _form.Name = _station.Name;
+        _vendor = Oui.GetVendor(_station.MacAddress);
+
+        if (_station.WiFiNetworkId is int netId)
+        {
+            _network = await Networks.GetByIdAsync(netId);
+            if (_network is not null)
+            {
+                var allNodes = await Nodes.GetAllAsync();
+                _apHostname = allNodes.FirstOrDefault(n => n.Id == _network.WiFiNodeId)?.Hostname;
+            }
+        }
+
+        // Stale derivation (D-08 multiplier 1.5; UI-SPEC line 700). The detail page's
+        // _cycleEndUtc anchor is the current wall clock — Plan 03 wires Dashboard's anchor
+        // to PollNotifier; the detail page is a snapshot, so "now" is the closest proxy.
+        _isStale = _station.Status == Status.Offline
+                && (DateTime.UtcNow - _station.LastPollDate.ToUniversalTime())
+                       >= TimeSpan.FromSeconds(1.5 * Settings.PollingIntervalSeconds);
+
+        _loading = false;
+    }
+
+    private async Task HandleSaveNameAsync()
+    {
+        if (_station is null) return;
+        _saving = true;
+        var trimmed = string.IsNullOrWhiteSpace(_form.Name) ? null : _form.Name!.Trim();
+        await Stations.SetNameAsync(_station.MacAddress, trimmed);
+        await LoadAsync();   // refresh DisplayName + _form.Name from DB
+        _saving = false;
+
+        // 2-second "Saved" flash — matches Phase 3 D-16 instant-write pattern.
+        _savedFlash = true;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(2000);
+            _savedFlash = false;
+            await InvokeAsync(StateHasChanged);
+        });
+    }
+
+    private async Task HandleDeleteAsync()
+    {
+        if (_station is null) return;
+        await Stations.DeleteByMacAsync(_station.MacAddress);
+        Nav.NavigateTo("/");
+    }
+
+    private static string RelativeTime(DateTime t)
+    {
+        if (t == default) return "Never";
+        var d = DateTime.UtcNow - t.ToUniversalTime();
+        if (d.TotalSeconds < 60) return "just now";
+        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes}m ago";
+        if (d.TotalHours < 24)   return $"{(int)d.TotalHours}h ago";
+        return $"{(int)d.TotalDays}d ago";
+    }
+
+    // Bitrate display uses invariant culture so the decimal separator is always '.' —
+    // matches the UI-SPEC §Copywriting Contract format ("{n} Mb/s") regardless of the
+    // operator's browser locale (e.g. it-IT renders 144,4 by default which would diverge
+    // from the locked copy).
+    private static string FormatBitrate(double mbps) =>
+        string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} Mb/s", mbps);
+
+    private sealed class NameForm
+    {
+        [MaxLength(64, ErrorMessage = "Display name must be 64 characters or fewer.")]
+        public string? Name { get; set; }
+    }
+}
