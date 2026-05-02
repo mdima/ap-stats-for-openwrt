@@ -155,6 +155,11 @@ try
     builder.Services.AddTransient<OpenWrtApStats.Services.Nodes.IWlanDiscoveryService,
                                   OpenWrtApStats.Services.Nodes.WlanDiscoveryService>();
 
+    // Phase 5 D-12 — gate seam stubbed for Phase 5; Phase 6 swaps in CircuitTrackerGate
+    // (INF-06 / POLL-05 / POLL-06) without touching MainLayout or LivePausedBadge markup.
+    builder.Services.AddSingleton<OpenWrtApStats.Services.Gating.ICircuitGate,
+                                  OpenWrtApStats.Services.Gating.AlwaysLiveGate>();
+
     // 6. Bootstrap order (registration order = StartAsync order — Pitfall 10):
     //    Migrations -> D-12 probe -> AppSettings warm-up -> Polling.
     //    Phase 2 closes Phase 1's "DO NOT add a fourth here" reservation by adding
