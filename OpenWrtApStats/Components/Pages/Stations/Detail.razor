@@ -65,10 +65,10 @@ else
                         <dd class="col-sm-8">@(_apHostname ?? "—")</dd>
 
                         <dt class="col-sm-4">Tx bitrate</dt>
-                        <dd class="col-sm-8">@(_station.TxBitrate > 0 ? $"{_station.TxBitrate} Mb/s" : "—")</dd>
+                        <dd class="col-sm-8">@(_station.TxBitrate > 0 ? FormatBitrate(_station.TxBitrate) : "—")</dd>
 
                         <dt class="col-sm-4">Rx bitrate</dt>
-                        <dd class="col-sm-8">@(_station.RxBitrate > 0 ? $"{_station.RxBitrate} Mb/s" : "—")</dd>
+                        <dd class="col-sm-8">@(_station.RxBitrate > 0 ? FormatBitrate(_station.RxBitrate) : "—")</dd>
 
                         <dt class="col-sm-4">Signal</dt>
                         <dd class="col-sm-8"><RssiCell Rss="_station.RSS" /></dd>
@@ -224,6 +224,13 @@ else
         if (d.TotalHours < 24)   return $"{(int)d.TotalHours}h ago";
         return $"{(int)d.TotalDays}d ago";
     }
+
+    // Bitrate display uses invariant culture so the decimal separator is always '.' —
+    // matches the UI-SPEC §Copywriting Contract format ("{n} Mb/s") regardless of the
+    // operator's browser locale (e.g. it-IT renders 144,4 by default which would diverge
+    // from the locked copy).
+    private static string FormatBitrate(double mbps) =>
+        string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} Mb/s", mbps);
 
     private sealed class NameForm
     {
