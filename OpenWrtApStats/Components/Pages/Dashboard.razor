@@ -125,6 +125,19 @@ else
                         </tbody>
                     </table>
                 </div>
+                <div class="card-footer text-body-secondary small d-flex justify-content-between py-2 px-3" data-testid="dashboard-row-counter">
+                    <span>
+                        @if (_lastFilteredCount == _rows.Count)
+                        {
+                            <text>Showing @_rows.Count of @_rows.Count entries</text>
+                        }
+                        else
+                        {
+                            <text>Showing @_lastFilteredCount of @_rows.Count entries (filtered)</text>
+                        }
+                    </span>
+                    <span>Last poll: @RelativeTime(_lastPollUtc)</span>
+                </div>
             </div>
         </div>
     }
@@ -152,6 +165,10 @@ else
 
     private DateTime _cycleEndUtc = DateTime.UtcNow;
     private DateTime _lastPollUtc = DateTime.UtcNow;
+
+    // Updated as a side effect of ComputeFilteredRows() so the card-footer can render
+    // "Showing X of Y" without re-running the LINQ pipeline a second time per render.
+    private int _lastFilteredCount;
 
     private string DashTenBody =>
         $"You have {_nodeCount} access point{(_nodeCount == 1 ? "" : "s")} configured, but every WLAN is disabled. Enable at least one WLAN to start seeing connected stations.";
@@ -301,7 +318,11 @@ else
                 : q.OrderBy(key);
         }
         // Stable secondary sort by MAC asc (UI-SPEC line 885)
-        return ordered.ThenBy(r => r.Mac, StringComparer.OrdinalIgnoreCase).ToList();
+        var result = ordered.ThenBy(r => r.Mac, StringComparer.OrdinalIgnoreCase).ToList();
+        // Cache for the card-footer "Showing X of Y" counter; Razor evaluates the Virtualize
+        // Items= parameter before rendering tfoot/footer, so the field is current at read time.
+        _lastFilteredCount = result.Count;
+        return result;
     }
 
     private bool IsStale(DashboardRow row)
