@@ -107,6 +107,7 @@ public sealed class DashboardTests
         ctx.Services.AddSingleton<IStationRepo>(sr);
         ctx.Services.AddSingleton<IOuiLookup>(oui);
         ctx.Services.AddSingleton<IAppSettingsService>(settings);
+        ctx.Services.AddSingleton(new OpenWrtApStats.Services.Polling.PollNotifier());
         return (ctx, nr, nws, sr, oui);
     }
 
@@ -209,37 +210,13 @@ public sealed class DashboardTests
         }
     }
 
-    // ── DASH-11 deferred placeholder ──────────────────────────────────────
-    [Fact]
-    public void NodesExist_WlansEnabled_NoStations_RendersPlaceholderRow()
-    {
-        var nodes = new[] { new WiFiNode { Id = 1, Hostname = "ap-1", Username = "root" } };
-        var networks = new Dictionary<int, List<WiFiNetwork>>
-        {
-            [1] = new() { new WiFiNetwork { Id = 100, WiFiNodeId = 1, MacAddress = "AA:BB:CC:00:00:00", SSID = "main", Enabled = true } }
-        };
-        var (ctx, _, _, _, _) = Build(nodes, Array.Empty<WLANStation>(), anyEnabled: true, networks);
-        using (ctx)
-        {
-            var cut = ctx.Render<Dashboard>();
-            Assert.Contains("No stations associated.", cut.Markup);
-            Assert.Contains("colspan=\"9\"", cut.Markup);
-        }
-    }
+    // ── DASH-11 Phase 5 empty state (replaces the Phase 3 placeholder row) ─
+    // Note: the dedicated phase-5 test `Dashboard_Dash11_EmptyState_RendersWhenNodesAndWlansButNoStations`
+    // (below) covers the new EmptyState rendering; the Phase 3 placeholder-row test was retired with
+    // Plan 03 since the muted "No stations associated." row + colspan=9 was replaced by <EmptyState>.
 
-    // ── Forward-compat anchor presence (T-3-06-04 structural mitigation) ──
-    // Razor strips comments from rendered output, so we assert against the .razor source on disk.
-    [Fact]
-    public void Dashboard_ContainsAllRequiredForwardCompatAnchors()
-    {
-        var source = ReadDashboardSource();
-        // NOTE: TODO(phase-04) anchor was removed in Plan 04-05 (D-09 CTA wired).
-        Assert.Contains("TODO(phase-05): wrap <tbody> in <Virtualize>", source);
-        Assert.Contains("TODO(phase-05): RSSI cell", source);
-        Assert.Contains("TODO(phase-05): subscribe to PollNotifier", source);
-        Assert.Contains("TODO(phase-05): add search input above table", source);
-        Assert.Contains("TODO(phase-05): SSID/AP filter chips row", source);
-    }
+    // ── Phase-5 closure: TODO(phase-05) markers removed — `Dashboard_ClosesAllPhase05TodoMarkers` ──
+    // (below in the Phase 5 tests block) replaces the Phase 3 forward-compat anchor test.
 
     // ── DASH-09 D-09 conditional CTA (ONB-06) ─────────────────────────────
     [Fact]

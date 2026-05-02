@@ -1,22 +1,22 @@
 @page "/"
-@using OpenWrtApStats.Services.Vendor
+@using OpenWrtApStats.Services.Polling
 @using OpenWrtApStats.Services.Settings
+@using OpenWrtApStats.Services.Vendor
+@implements IDisposable
 
 @inject INodeRepo Nodes
 @inject INetworkRepo Networks
 @inject IStationRepo Stations
 @inject IOuiLookup Oui
 @inject IAppSettingsService Settings
+@inject PollNotifier Notifier
 
-@* Dashboard.razor — Phase 3 static-snapshot dashboard. UI-SPEC §Dashboard (lines 297-316).
-   Closes DASH-09 (zero-nodes empty state), DASH-10 (nodes-but-no-WLANs-enabled empty state),
-   DASH-13 (vendor column via OUI lookup). Phase 5 layers Virtualize + search/sort/filter +
-   PollNotifier subscription additively at the marked TODO anchors. *@
+@* Dashboard.razor — Phase 5 live-push view. UI-SPEC §Layout Contracts §Dashboard.
+   Closes DASH-01..08, DASH-11, DASH-12, DASH-14 (link), POLL-09. Phase 3 DASH-09 + DASH-10
+   empty states and DASH-13 vendor column are preserved. PollNotifier subscription per
+   ARCHITECTURE.md §Pattern 2; Pitfall 7 await InvokeAsync invariant. *@
 
 <PageHeader Title="Dashboard" />
-
-@* TODO(phase-05): add search input above table *@
-@* TODO(phase-05): SSID/AP filter chips row *@
 
 @if (_loading)
 {
@@ -24,8 +24,7 @@
 }
 else if (_nodeCount == 0)
 {
-    @* DASH-09 zero-nodes empty state. D-09 (Phase 4): CTA conditional on WizardDismissed.
-       Closed TODO(phase-04) marker — Phase 4 D-09. *@
+    @* DASH-09 zero-nodes empty state. D-09 (Phase 4): CTA conditional on WizardDismissed. *@
     <EmptyState IconClass="bi-router-fill"
                 Heading="No access points yet"
                 Body="@(_wizardDismissed
@@ -37,7 +36,7 @@ else if (_nodeCount == 0)
 }
 else if (!_anyEnabledWlan)
 {
-    @* DASH-10 nodes-but-all-WLANs-disabled empty state. UI-SPEC §Dashboard DASH-10 lines 313-315. *@
+    @* DASH-10 nodes-but-all-WLANs-disabled empty state. UI-SPEC §Dashboard DASH-10. *@
     <EmptyState IconClass="bi-wifi-off"
                 Heading="No WLANs are being monitored"
                 Body="@DashTenBody"
@@ -47,66 +46,88 @@ else if (!_anyEnabledWlan)
 }
 else
 {
-    @* Static-snapshot table (D-22). Phase 5 layers Virtualize / search / sort / filter / live push additively. *@
-    <div class="card">
-        <div class="card-body">
-            <table class="table table-striped">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>MAC</th>
-                        <th>Vendor</th>
-                        <th>IP</th>
-                        <th>SSID</th>
-                        <th>AP</th>
-                        <th>RSSI</th>
-                        <th>Last seen</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                @* TODO(phase-05): wrap <tbody> in <Virtualize> *@
-                <tbody>
-                    @* TODO(phase-05): subscribe to PollNotifier; replace OnInitializedAsync read with InvokeAsync(StateHasChanged) on RaiseAsync *@
-                    @if (_rows.Count == 0)
-                    {
-                        @* DASH-11 deferred (Phase 5 binding) — placeholder muted row per UI-SPEC §Dashboard DASH-11 line 316. *@
-                        <tr>
-                            <td colspan="9" class="text-center text-body-secondary py-4">
-                                No stations associated.
-                            </td>
-                        </tr>
-                    }
-                    else
-                    {
-                        @foreach (var row in _rows)
-                        {
-                            <tr>
-                                <td>@(string.IsNullOrEmpty(row.Name) ? row.Mac : row.Name)</td>
-                                <td><code class="font-monospace">@row.Mac</code></td>
-                                <td>
-                                    @if (!string.IsNullOrEmpty(row.Vendor))
-                                    {
-                                        @row.Vendor
-                                    }
-                                    else
-                                    {
-                                        <span class="text-body-secondary">Unknown vendor</span>
-                                    }
-                                </td>
-                                <td>@(string.IsNullOrEmpty(row.Ip) ? "—" : row.Ip)</td>
-                                <td>@row.Ssid</td>
-                                <td>@row.ApHostname</td>
-                                @* TODO(phase-05): RSSI cell — wrap in <RssiCell> bar component *@
-                                <td>@(row.Rss is { } r ? $"{r} dBm" : "—")</td>
-                                <td>@RelativeTime(row.LastSeen)</td>
-                                <td><StatusBadge Status="row.StationStatus" /></td>
-                            </tr>
-                        }
-                    }
-                </tbody>
-            </table>
+    <PerApStrip Nodes="_nodes" SelectedAps="_selectedAps" OnApClicked="ToggleApFilterById" />
+
+    <div class="card mb-3">
+        <div class="card-body py-3">
+            <div class="row g-3 align-items-center">
+                <div class="col-md-5">
+                    <label class="visually-hidden" for="dashboard-search">Search stations</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search" aria-hidden="true"></i></span>
+                        <input id="dashboard-search" class="form-control" type="search"
+                               placeholder="Search MAC, hostname, name, IP, or vendor"
+                               @bind="_searchText" @bind:event="oninput" />
+                    </div>
+                </div>
+                <div class="col-md-7">
+                    <FilterChipGroup Title="SSID" Options="_allSsids"
+                                     Selected="_selectedSsids" OnToggled="ToggleSsidFilter" />
+                    <FilterChipGroup Title="AP"   Options="_allApLabels"
+                                     Selected="_selectedApLabels" OnToggled="ToggleApFilterByLabel" />
+                </div>
+            </div>
         </div>
     </div>
+
+    if (_rows.Count == 0)
+    {
+        @* DASH-11 NEW Phase 5: WLANs healthy, zero stations.
+           Plan 02 made EmptyState CTA params optional; we omit them here entirely. *@
+        <EmptyState IconClass="bi-wifi"
+                    Heading="WLANs are healthy, no clients right now"
+                    Body="@($"Last poll: {RelativeTime(_lastPollUtc)}.")" />
+    }
+    else
+    {
+        <div class="card">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover align-middle mb-0">
+                        <thead class="sticky-top bg-body">
+                            <tr>
+                                <SortHeaderCell Column="name"     CurrentSort="_sortColumn" Descending="_sortDescending" OnSort="ApplySort">Name</SortHeaderCell>
+                                <SortHeaderCell Column="mac"      CurrentSort="_sortColumn" Descending="_sortDescending" OnSort="ApplySort">MAC</SortHeaderCell>
+                                <SortHeaderCell Column="vendor"   CurrentSort="_sortColumn" Descending="_sortDescending" OnSort="ApplySort">Vendor</SortHeaderCell>
+                                <SortHeaderCell Column="ip"       CurrentSort="_sortColumn" Descending="_sortDescending" OnSort="ApplySort">IP</SortHeaderCell>
+                                <SortHeaderCell Column="ssid"     CurrentSort="_sortColumn" Descending="_sortDescending" OnSort="ApplySort">SSID</SortHeaderCell>
+                                <SortHeaderCell Column="ap"       CurrentSort="_sortColumn" Descending="_sortDescending" OnSort="ApplySort">AP</SortHeaderCell>
+                                <SortHeaderCell Column="rssi"     CurrentSort="_sortColumn" Descending="_sortDescending" OnSort="ApplySort">RSSI</SortHeaderCell>
+                                <SortHeaderCell Column="lastSeen" CurrentSort="_sortColumn" Descending="_sortDescending" OnSort="ApplySort">Last seen</SortHeaderCell>
+                                <SortHeaderCell Column="status"   CurrentSort="_sortColumn" Descending="_sortDescending" OnSort="ApplySort">Status</SortHeaderCell>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <Virtualize Items="ComputeFilteredRows()" ItemSize="40" Context="row">
+                                <ItemContent>
+                                    <tr>
+                                        <td><a href="@($"/Stations/{Uri.EscapeDataString(row.Mac)}")">@(string.IsNullOrEmpty(row.Name) ? (string.IsNullOrEmpty(row.Hostname) ? row.Mac : row.Hostname) : row.Name)</a></td>
+                                        <td><code class="font-monospace">@row.Mac</code></td>
+                                        <td>
+                                            @if (!string.IsNullOrEmpty(row.Vendor))
+                                            {
+                                                @row.Vendor
+                                            }
+                                            else
+                                            {
+                                                <span class="text-body-secondary">Unknown vendor</span>
+                                            }
+                                        </td>
+                                        <td><code class="font-monospace">@(string.IsNullOrEmpty(row.Ip) ? "—" : row.Ip)</code></td>
+                                        <td>@row.Ssid</td>
+                                        <td>@row.ApHostname</td>
+                                        <td><RssiCell Rss="row.Rss" /></td>
+                                        <td>@RelativeTime(row.LastSeen)</td>
+                                        <td><StatusBadge Status="row.StationStatus" IsStale="@IsStale(row)" /></td>
+                                    </tr>
+                                </ItemContent>
+                            </Virtualize>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
 }
 
 @code {
@@ -115,72 +136,209 @@ else
     private bool _anyEnabledWlan;
     private int _firstNodeId;
     private bool _wizardDismissed;
+
+    private IReadOnlyList<WiFiNode> _nodes = Array.Empty<WiFiNode>();
     private List<DashboardRow> _rows = new();
+
+    // Filter / sort / search state — survives Cycled re-queries naturally (only _rows + _nodes + _cycleEndUtc replaced).
+    private string _searchText = "";
+    private string _sortColumn = "lastSeen";
+    private bool   _sortDescending = true;
+    private HashSet<string> _selectedSsids = new();
+    private HashSet<int>    _selectedAps = new();           // node Ids — written by PerApStrip
+    private HashSet<string> _selectedApLabels = new();      // hostname strings — written by AP FilterChipGroup
+    private List<string>    _allSsids = new();
+    private List<string>    _allApLabels = new();
+
+    private DateTime _cycleEndUtc = DateTime.UtcNow;
+    private DateTime _lastPollUtc = DateTime.UtcNow;
 
     private string DashTenBody =>
         $"You have {_nodeCount} access point{(_nodeCount == 1 ? "" : "s")} configured, but every WLAN is disabled. Enable at least one WLAN to start seeing connected stations.";
 
     protected override async Task OnInitializedAsync()
     {
-        // D-22 static-snapshot — read at OnInitializedAsync ONLY. No PollNotifier subscription
-        // (Phase 5 binding). All reads via repositories per PER-04.
+        await ReloadAsync();
+        // Subscribe AFTER initial load so the first Cycled event isn't lost between OnInit and Dispose.
+        Notifier.Cycled += OnCycledAsync;
+        _loading = false;
+    }
+
+    private async Task ReloadAsync()
+    {
         var allNodes = await Nodes.GetAllAsync();
+        _nodes = allNodes;
         _nodeCount = allNodes.Count;
-        // D-09: read WizardDismissed from singleton snapshot — no DB call.
         _wizardDismissed = Settings.WizardDismissed;
 
         if (_nodeCount > 0)
         {
             _firstNodeId = allNodes.OrderBy(n => n.Id).First().Id;
-            _anyEnabledWlan = await Networks.AnyEnabledAsync();   // single AsNoTracking AnyAsync (Plan 03-02)
+            _anyEnabledWlan = await Networks.AnyEnabledAsync();
         }
 
         if (_anyEnabledWlan)
         {
             _rows = await BuildRowsAsync(allNodes);
+            _allSsids    = _rows.Select(r => r.Ssid).Distinct().OrderBy(s => s).ToList();
+            _allApLabels = _rows.Select(r => r.ApHostname).Distinct().OrderBy(a => a).ToList();
         }
+    }
 
-        _loading = false;
+    private async Task OnCycledAsync(PollSnapshot snapshot)
+    {
+        // Pitfall 7: Cycled handler arrives off the orchestrator's stack frame, OUTSIDE
+        // the Blazor circuit's sync context. Wrap state mutation + StateHasChanged.
+        await InvokeAsync(async () =>
+        {
+            _cycleEndUtc = snapshot.CycleEndUtc;
+            _lastPollUtc = snapshot.CycleEndUtc;
+            await ReloadAsync();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        // Pattern 2: unsubscribe to release captured `this`. Singleton Notifier outlives circuit.
+        Notifier.Cycled -= OnCycledAsync;
     }
 
     private async Task<List<DashboardRow>> BuildRowsAsync(IReadOnlyList<WiFiNode> allNodes)
     {
-        // Build a (WiFiNetworkId → (SSID, NodeHostname, Enabled)) lookup. We need every node's
-        // networks because stations can span any WLAN on any node. N node calls is acceptable for
-        // the small-scale Phase 3 deployment (Phase 5 may optimize via INetworkRepo.GetAllAsync if
-        // it exists). Threat: T-3-06-02 (DoS) — accepted per plan.
-        var networkLookup = new Dictionary<int, (string Ssid, string ApHostname, bool Enabled)>();
+        // Build a (WiFiNetworkId → (SSID, NodeHostname, NodeId, Enabled)) lookup.
+        var networkLookup = new Dictionary<int, (string Ssid, string ApHostname, int ApNodeId, bool Enabled)>();
         foreach (var n in allNodes)
         {
             var networks = await Networks.GetByNodeAsync(n.Id);
             foreach (var w in networks)
             {
-                networkLookup[w.Id] = (w.SSID, n.Hostname, w.Enabled);
+                networkLookup[w.Id] = (w.SSID, n.Hostname, n.Id, w.Enabled);
             }
         }
 
-        // Pull all stations + project to DashboardRow.
         var stations = await Stations.GetAllAsync();
         var rows = new List<DashboardRow>(stations.Count);
         foreach (var s in stations)
         {
-            // Station may have null FK after NODE-04 cascade dissociation — skip if no association.
             if (s.WiFiNetworkId is not int netId) continue;
             if (!networkLookup.TryGetValue(netId, out var net)) continue;
-            if (!net.Enabled) continue;   // only show stations on Enabled WLANs
+            if (!net.Enabled) continue;
 
             rows.Add(new DashboardRow(
                 Name: s.Name,
+                Hostname: s.Hostname,
                 Mac: s.MacAddress,
                 Vendor: Oui.GetVendor(s.MacAddress),
                 Ip: s.IPAddress,
                 Ssid: net.Ssid,
                 ApHostname: net.ApHostname,
-                Rss: s.RSS,   // int? — null means absent, never sentinel-zero (CR-03)
+                ApNodeId: net.ApNodeId,
+                Rss: s.RSS,
                 LastSeen: s.LastPollDate,
                 StationStatus: s.Status));
         }
         return rows;
+    }
+
+    private List<DashboardRow> ComputeFilteredRows()
+    {
+        IEnumerable<DashboardRow> q = _rows;
+
+        // Search predicate (UI-SPEC lines 870-879)
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var needle = _searchText.Trim();
+            q = q.Where(r =>
+                (r.Name?.Contains(needle, StringComparison.OrdinalIgnoreCase)     ?? false)
+             || (r.Hostname?.Contains(needle, StringComparison.OrdinalIgnoreCase) ?? false)
+             ||  r.Mac.Contains(needle, StringComparison.OrdinalIgnoreCase)
+             || (r.Ip?.Contains(needle, StringComparison.OrdinalIgnoreCase)       ?? false)
+             || (r.Vendor?.Contains(needle, StringComparison.OrdinalIgnoreCase)   ?? false));
+        }
+
+        // SSID filter — OR within (CONTEXT D-06)
+        if (_selectedSsids.Count > 0)
+        {
+            q = q.Where(r => _selectedSsids.Contains(r.Ssid));
+        }
+
+        // AP filter — composes from BOTH the strip (_selectedAps by node Id) and the chip group
+        // (_selectedApLabels by hostname). Single source of truth: the strip writes node Ids and
+        // the chip group writes labels; both sets contribute via OR-within-AP filter.
+        if (_selectedAps.Count > 0 || _selectedApLabels.Count > 0)
+        {
+            q = q.Where(r => _selectedAps.Contains(r.ApNodeId) || _selectedApLabels.Contains(r.ApHostname));
+        }
+
+        // Sort (UI-SPEC §Sort behavior — secondary stable sort by MAC asc)
+        Func<DashboardRow, IComparable?> key = _sortColumn switch
+        {
+            "name"     => r => r.Name ?? r.Hostname ?? r.Mac,
+            "mac"      => r => r.Mac,
+            "vendor"   => r => r.Vendor ?? "",
+            "ip"       => r => r.Ip ?? "",
+            "ssid"     => r => r.Ssid,
+            "ap"       => r => r.ApHostname,
+            "rssi"     => r => r.Rss,
+            "lastSeen" => r => r.LastSeen,
+            "status"   => r => (int)r.StationStatus,
+            _          => r => r.LastSeen,
+        };
+
+        // RSSI null sorts LAST in BOTH directions (UI-SPEC line 889).
+        IOrderedEnumerable<DashboardRow> ordered;
+        if (_sortColumn == "rssi")
+        {
+            ordered = _sortDescending
+                ? q.OrderBy(r => r.Rss is null).ThenByDescending(r => r.Rss)
+                : q.OrderBy(r => r.Rss is null).ThenBy(r => r.Rss);
+        }
+        else
+        {
+            ordered = _sortDescending
+                ? q.OrderByDescending(key)
+                : q.OrderBy(key);
+        }
+        // Stable secondary sort by MAC asc (UI-SPEC line 885)
+        return ordered.ThenBy(r => r.Mac, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private bool IsStale(DashboardRow row)
+    {
+        // D-08 multiplier 1.5 — UI-SPEC line 700.
+        if (row.StationStatus != Status.Offline) return false;
+        var threshold = TimeSpan.FromSeconds(1.5 * Settings.PollingIntervalSeconds);
+        var elapsed = _cycleEndUtc - row.LastSeen.ToUniversalTime();
+        return elapsed >= threshold;
+    }
+
+    private void ApplySort(string column)
+    {
+        if (string.Equals(_sortColumn, column, StringComparison.OrdinalIgnoreCase))
+        {
+            _sortDescending = !_sortDescending;
+        }
+        else
+        {
+            _sortColumn = column;
+            _sortDescending = false;
+        }
+    }
+
+    private void ToggleSsidFilter(string ssid)
+    {
+        if (!_selectedSsids.Add(ssid)) _selectedSsids.Remove(ssid);
+    }
+
+    private void ToggleApFilterByLabel(string label)
+    {
+        if (!_selectedApLabels.Add(label)) _selectedApLabels.Remove(label);
+    }
+
+    private void ToggleApFilterById(int nodeId)
+    {
+        if (!_selectedAps.Add(nodeId)) _selectedAps.Remove(nodeId);
     }
 
     private static string RelativeTime(DateTime t)
@@ -189,17 +347,19 @@ else
         var d = DateTime.UtcNow - t.ToUniversalTime();
         if (d.TotalSeconds < 60) return "just now";
         if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes}m ago";
-        if (d.TotalHours < 24) return $"{(int)d.TotalHours}h ago";
+        if (d.TotalHours < 24)   return $"{(int)d.TotalHours}h ago";
         return $"{(int)d.TotalDays}d ago";
     }
 
     private sealed record DashboardRow(
         string? Name,
+        string? Hostname,        // NEW Phase 5 — search predicate matches hostname per DASH-04
         string Mac,
         string? Vendor,
         string? Ip,
         string Ssid,
         string ApHostname,
+        int ApNodeId,            // NEW Phase 5 — AP filter-by-Id (PerApStrip integration)
         int? Rss,
         DateTime LastSeen,
         Status StationStatus);
