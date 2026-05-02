@@ -8,9 +8,10 @@
    reports GateState.Live and never raises Changed. Phase 6 swaps in CircuitTrackerGate
    (INF-06 / POLL-05 / POLL-06) — no markup change required.
    Pattern 2: subscribe in OnInitialized, unsubscribe in Dispose; handler is `async Task`
-   (NOT async void) and wraps mutation in await InvokeAsync (Pitfall 7).
+   (returning Task — NOT a fire-and-forget signature) and wraps mutation in await
+   InvokeAsync (Pitfall 7).
    Revision-1 W3: ICircuitGate.Changed was declared as Func<GateState, Task>? in Plan 01,
-   so this handler is `async Task OnGateChanged(GateState)` — no async-void anywhere. *@
+   so this handler is `async Task OnGateChanged(GateState)` — fully Task-returning. *@
 
 <span class="badge @(_state == GateState.Live ? "text-bg-success" : "text-bg-secondary") d-inline-flex align-items-center">
     <i class="bi @(_state == GateState.Live ? "bi-circle-fill" : "bi-pause-fill") me-1" aria-hidden="true"></i>
