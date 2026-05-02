@@ -74,7 +74,7 @@ else
                         <dd class="col-sm-8"><RssiCell Rss="_station.RSS" /></dd>
 
                         <dt class="col-sm-4">Last seen</dt>
-                        <dd class="col-sm-8">@RelativeTime(_station.LastPollDate) <small class="text-body-secondary">(@_station.LastPollDate.ToUniversalTime().ToString("u"))</small></dd>
+                        <dd class="col-sm-8">@RelativeTime(_station.LastPollDate) <small class="text-body-secondary">(@DateTime.SpecifyKind(_station.LastPollDate, DateTimeKind.Utc).ToString("u"))</small></dd>
 
                         <dt class="col-sm-4">Status</dt>
                         <dd class="col-sm-8"><StatusBadge Status="_station.Status" IsStale="@_isStale" /></dd>
@@ -182,8 +182,10 @@ else
         // Stale derivation (D-08 multiplier 1.5; UI-SPEC line 700). The detail page's
         // _cycleEndUtc anchor is the current wall clock — Plan 03 wires Dashboard's anchor
         // to PollNotifier; the detail page is a snapshot, so "now" is the closest proxy.
+        // SpecifyKind(Utc): SQLite round-trips DateTimes with Kind=Unspecified; the
+        // orchestrator only ever writes UTC, so reattach the kind before the subtraction.
         _isStale = _station.Status == Status.Offline
-                && (DateTime.UtcNow - _station.LastPollDate.ToUniversalTime())
+                && (DateTime.UtcNow - DateTime.SpecifyKind(_station.LastPollDate, DateTimeKind.Utc))
                        >= TimeSpan.FromSeconds(1.5 * Settings.PollingIntervalSeconds);
 
         _loading = false;
@@ -218,7 +220,11 @@ else
     private static string RelativeTime(DateTime t)
     {
         if (t == default) return "Never";
-        var d = DateTime.UtcNow - t.ToUniversalTime();
+        // SQLite has no native DateTime type — EF Core round-trips DateTimes back with
+        // Kind=Unspecified. The orchestrator only ever writes DateTime.UtcNow, so treat
+        // an Unspecified value as UTC; ToUniversalTime() would otherwise interpret it
+        // as local and subtract the local offset (off-by-N hours bug).
+        var d = DateTime.UtcNow - DateTime.SpecifyKind(t, DateTimeKind.Utc);
         if (d.TotalSeconds < 60) return "just now";
         if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes}m ago";
         if (d.TotalHours < 24)   return $"{(int)d.TotalHours}h ago";
