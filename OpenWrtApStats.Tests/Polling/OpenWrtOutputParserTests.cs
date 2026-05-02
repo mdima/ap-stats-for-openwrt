@@ -167,4 +167,21 @@ public sealed class OpenWrtOutputParserTests
         Assert.Equal(-40, stations[0].RSS);
         Assert.Equal(-60, stations[1].RSS);
     }
+
+    [Theory]
+    // Regression: ParseIwinfoAssocList must extract RSS from AFTER the MAC.
+    // Pre-fix, FirstSignedNumber matched the first decimal digit run anywhere in the line —
+    // which is inside the MAC byte (e.g. "A4" → 4) — instead of the actual dBm value.
+    [InlineData("A4:CF:12:D9:B9:B2  -67 dBm / -95 dBm (SNR 28)  3220 ms ago", "A4:CF:12:D9:B9:B2", -67)]
+    [InlineData("5C:01:3B:70:A1:B8  -45 dBm / -95 dBm (SNR 50)  100 ms ago",  "5C:01:3B:70:A1:B8", -45)]
+    [InlineData("EC:FA:BC:50:DF:65  -82 dBm / -95 dBm (SNR 13)  500 ms ago",  "EC:FA:BC:50:DF:65", -82)]
+    [InlineData("02:00:5F:AA:BB:01  -45 dBm / -95 dBm (SNR 50)  100 ms ago",  "02:00:5F:AA:BB:01", -45)]
+    public void ParseIwinfoAssocList_RssExtractedFromAfterMac_NotFromMacDigits(
+        string rawLine, string expectedMac, int expectedRss)
+    {
+        var stations = OpenWrtOutputParser.ParseIwinfoAssocList(rawLine, wiFiNetworkId: 1, NullLogger.Instance);
+        Assert.Single(stations);
+        Assert.Equal(expectedMac, stations[0].MacAddress);
+        Assert.Equal(expectedRss, stations[0].RSS);
+    }
 }

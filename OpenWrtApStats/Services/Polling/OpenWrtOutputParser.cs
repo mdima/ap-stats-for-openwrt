@@ -124,12 +124,15 @@ public static class OpenWrtOutputParser
                         LastPollDate = DateTime.UtcNow,
                         Status = Status.Online,
                     };
-                    // RSS may also be on the same line: "AA:BB:..  -45 dBm"
+                    // RSS may also be on the same line: "A4:CF:12:..  -67 dBm".
                     // Only assign when parse succeeds — null means absent, not zero (CR-03).
-                    var dbmIdx = line.IndexOf(" dBm", StringComparison.Ordinal);
+                    // Search AFTER the MAC — MAC bytes contain decimal digits (e.g. "A4" → "4")
+                    // that FirstSignedNumber would otherwise capture before the real RSS value.
+                    var afterMac = line.Substring(macMatch.Index + macMatch.Length);
+                    var dbmIdx = afterMac.IndexOf(" dBm", StringComparison.Ordinal);
                     if (dbmIdx > 0)
                     {
-                        var seg = line.Substring(0, dbmIdx);
+                        var seg = afterMac.Substring(0, dbmIdx);
                         if (int.TryParse(FirstSignedNumber(seg), out var rss))
                             cur.RSS = rss;
                     }
