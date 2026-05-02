@@ -15,6 +15,19 @@ public interface IStationRepo
     Task<WLANStation?> GetByMacAsync(string macAddress, CancellationToken ct = default);
     Task SetNameAsync(string macAddress, string? name, CancellationToken ct = default);
 
+    /// <summary>
+    /// D-14 (Phase 5) operator-initiated delete (DASH-16). Single-statement
+    /// <c>ExecuteDeleteAsync</c> (CR-02-safe — never <c>db.WLANStations.Remove(entity)</c>
+    /// after a Find which would re-track the row, RESEARCH §Pitfall 5). Repo-owned only;
+    /// never composed inside the coordinator transaction (operator-initiated and runs
+    /// outside any cycle, so by definition not concurrent with the orchestrator's writer).
+    /// Idempotent — calling on a non-existent MAC is a no-op (no exception).
+    /// Race-with-cycle (CONTEXT D-14): if a <c>PollNotifier.Cycled</c> upsert recreates
+    /// the row between modal-confirm and this call, the operator's delete still removes
+    /// the just-recreated row; the modal copy explicitly warns about reconnect-reappear.
+    /// </summary>
+    Task DeleteByMacAsync(string macAddress, CancellationToken ct = default);
+
     // ── Cycle-shaped (D-07) ─────────────────────────────────────────────────
     Task MarkAllOfflineAsync(CancellationToken ct = default);
     Task MarkAllOfflineAsync(DatabaseContext db, CancellationToken ct = default);
