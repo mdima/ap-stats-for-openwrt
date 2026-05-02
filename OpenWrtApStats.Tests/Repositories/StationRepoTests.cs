@@ -181,6 +181,52 @@ public sealed class StationRepoTests(SqliteInMemoryFixture fixture) : IClassFixt
     }
 
     [Fact]
+    public async Task DeleteByMacAsync_RemovesRow()
+    {
+        // D-14 (Phase 5) — operator-initiated delete via single-statement ExecuteDeleteAsync.
+        var ct = TestContext.Current.CancellationToken;
+        var repo = CreateRepo();
+        var (_, net1Id, _) = await SeedNodeWithTwoNetworksAsync(ct);
+        var mac = $"DD:DE:DE:DE:DE:{Random.Shared.Next(0, 255):X2}";
+
+        await repo.UpsertCycleAsync([MakeStation(mac, net1Id)], ct);
+        Assert.NotNull(await repo.GetByMacAsync(mac, ct));   // baseline
+
+        await repo.DeleteByMacAsync(mac, ct);
+
+        Assert.Null(await repo.GetByMacAsync(mac, ct));
+    }
+
+    [Fact]
+    public async Task DeleteByMacAsync_NoMatch_DoesNotThrow()
+    {
+        // Idempotent — deleting a MAC that does not exist is a no-op (no exception).
+        var ct = TestContext.Current.CancellationToken;
+        var repo = CreateRepo();
+
+        // No seed; MAC does not exist.
+        await repo.DeleteByMacAsync("AA:BB:CC:DD:EE:FF", ct);   // must not throw
+        Assert.Null(await repo.GetByMacAsync("AA:BB:CC:DD:EE:FF", ct));
+    }
+
+    [Fact]
+    public async Task DeleteByMacAsync_OnlyDeletesTargetMac()
+    {
+        // Only the targeted MAC is removed; siblings survive.
+        var ct = TestContext.Current.CancellationToken;
+        var repo = CreateRepo();
+        var (_, net1Id, _) = await SeedNodeWithTwoNetworksAsync(ct);
+        var macKept    = $"AA:AA:AA:AA:AA:{Random.Shared.Next(0, 255):X2}";
+        var macDeleted = $"BB:BB:BB:BB:BB:{Random.Shared.Next(0, 255):X2}";
+
+        await repo.UpsertCycleAsync(new[] { MakeStation(macKept, net1Id), MakeStation(macDeleted, net1Id) }, ct);
+        await repo.DeleteByMacAsync(macDeleted, ct);
+
+        Assert.NotNull(await repo.GetByMacAsync(macKept, ct));
+        Assert.Null(await repo.GetByMacAsync(macDeleted, ct));
+    }
+
+    [Fact]
     public async Task UpsertCycleAsync_CR01_DifferentMacCases_TreatedAsDistinctRows()
     {
         // CR-01 closure proof: post-D-07, the repo dedup is case-STRICT (StringComparer.Ordinal).

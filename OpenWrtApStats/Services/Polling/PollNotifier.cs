@@ -13,15 +13,16 @@ public sealed record PollSnapshot(
     DateTime CycleEndUtc);
 
 /// <summary>
-/// Singleton event hub. Raised by <c>PollOrchestrator</c> after <c>tx.CommitAsync</c>. No subscribers in Phase 2.
+/// Singleton event hub. Raised by <c>PollOrchestrator</c> after <c>tx.CommitAsync</c>. Phase 5 D-03
+/// reconciles the delegate type to <c>Func&lt;PollSnapshot, Task&gt;?</c> matching
+/// <c>ARCHITECTURE.md:356</c> — closes the Phase-2 doc/code drift. Subscribers MUST register
+/// <c>async Task</c> handlers (NOT <c>async void</c>; Pitfall 7) and unsubscribe in <c>Dispose</c>
+/// (Pattern 2 — captured <c>this</c> leaks otherwise).
 /// </summary>
 public sealed class PollNotifier
 {
-    public event Action<PollSnapshot>? Cycled;
+    public event Func<PollSnapshot, Task>? Cycled;
 
     public Task RaiseAsync(PollSnapshot snapshot)
-    {
-        Cycled?.Invoke(snapshot);
-        return Task.CompletedTask;
-    }
+        => Cycled?.Invoke(snapshot) ?? Task.CompletedTask;
 }

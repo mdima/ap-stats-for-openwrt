@@ -34,6 +34,14 @@ public sealed class StationRepo(IDbContextFactory<DatabaseContext> factory) : IS
             .ExecuteUpdateAsync(u => u.SetProperty(s => s.Name, name), ct);
     }
 
+    public async Task DeleteByMacAsync(string macAddress, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.WLANStations
+            .Where(s => s.MacAddress == macAddress)
+            .ExecuteDeleteAsync(ct);
+    }
+
     // ── Repo-owned overloads delegate to caller-owned ───────────────────────
     public async Task MarkAllOfflineAsync(CancellationToken ct = default)
     {
