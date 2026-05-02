@@ -1,0 +1,40 @@
+@* RssiCell.razor — Phase 5 D-15. UI-SPEC §RssiCell (lines 482-535).
+   4-segment bar + dBm number colored per locked thresholds. Null Rss → em-dash (Phase 3 lock).
+   Used by Dashboard table (Plan 03) and Stations Detail page (Plan 04). *@
+
+@if (Rss is { } r)
+{
+    var bars  = SegmentCount(r);
+    var color = ColorClass(r);
+    <span class="rssi-cell" style="display:inline-flex; gap:2px; align-items:center;"
+          aria-label="@($"Signal {r} dBm, {bars} of 4 bars")">
+        <span class="rssi-seg @(1 <= bars ? $"rssi-seg-filled {color}" : "rssi-seg-empty")"></span>
+        <span class="rssi-seg @(2 <= bars ? $"rssi-seg-filled {color}" : "rssi-seg-empty")"></span>
+        <span class="rssi-seg @(3 <= bars ? $"rssi-seg-filled {color}" : "rssi-seg-empty")"></span>
+        <span class="rssi-seg @(4 <= bars ? $"rssi-seg-filled {color}" : "rssi-seg-empty")"></span>
+        <small class="text-body-secondary ms-2">@r dBm</small>
+    </span>
+}
+else
+{
+    <span class="text-body-secondary" aria-label="Signal unknown">—</span>
+}
+
+@code {
+    [Parameter] public int? Rss { get; set; }
+
+    private static int SegmentCount(int r) => r switch
+    {
+        >= -60 => 4,
+        >= -70 => 3,
+        >= -80 => 2,
+        _      => 1,
+    };
+
+    private static string ColorClass(int r) => r switch
+    {
+        >= -70 => "text-bg-success",
+        >= -80 => "text-bg-warning",
+        _      => "text-bg-danger",
+    };
+}
