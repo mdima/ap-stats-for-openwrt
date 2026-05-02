@@ -344,7 +344,11 @@ else
     private static string RelativeTime(DateTime t)
     {
         if (t == default) return "Never";
-        var d = DateTime.UtcNow - t.ToUniversalTime();
+        // SQLite has no native DateTime type — EF Core round-trips DateTimes back with
+        // Kind=Unspecified. The orchestrator only ever writes DateTime.UtcNow, so treat
+        // an Unspecified value as UTC; ToUniversalTime() would otherwise interpret it
+        // as local and subtract the local offset (off-by-N hours bug).
+        var d = DateTime.UtcNow - DateTime.SpecifyKind(t, DateTimeKind.Utc);
         if (d.TotalSeconds < 60) return "just now";
         if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes}m ago";
         if (d.TotalHours < 24)   return $"{(int)d.TotalHours}h ago";
