@@ -1,7 +1,12 @@
 @inherits LayoutComponentBase
 
 @* MainLayout.razor — AdminLTE 4 fixed-sidebar chrome. UI-SPEC §MainLayout (lines 64-94).
-   The Phase 6 anchor comment lives between sidebar-toggle and user-menu; do not move. *@
+   The Phase 6 anchor comment lives between sidebar-toggle and user-menu; do not move.
+   The .app-wrapper div is REQUIRED — AdminLTE 4 RC drives layout via display:grid +
+   grid-template-areas on this container. Without it, .app-sidebar falls back to
+   position:fixed and overlaps .app-main; the header sits above content in normal flow. *@
+
+<div class="app-wrapper">
 
 <nav class="app-header navbar navbar-expand bg-body">
     <div class="container-fluid">
@@ -80,6 +85,8 @@
         <span>Self-hosted dashboard</span>
     </div>
 </footer>
+
+</div>
 
 @code {
     // PageTitle is rendered in the app-content-header h3. Pages set it via <PageHeader Title="..." />
