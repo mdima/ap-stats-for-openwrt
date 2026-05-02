@@ -12,8 +12,15 @@
                 </button>
             </li>
         </ul>
-        @* Phase 6: Live/Paused indicator slot *@
-        <span class="d-none" data-phase6-anchor="Phase 6: Live/Paused indicator slot"></span>
+        @* Phase 5 D-12 / DASH-08: Live/Paused indicator + paired poll countdown.
+           Adjacent pills (UI-SPEC line 615 LOCK — NOT a combined pill). The slot
+           originally reserved by Phase 3 for "Phase 6" is claimed by Phase 5; Phase 6
+           will swap the gate source (DI replacement of ICircuitGate impl) without
+           touching this markup. *@
+        <div class="d-flex align-items-center gap-2 me-3">
+            <LivePausedBadge />
+            <PollCountdown />
+        </div>
         <ul class="navbar-nav ms-auto">
             <AuthorizeView>
                 <Authorized>
