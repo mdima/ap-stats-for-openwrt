@@ -1,0 +1,28 @@
+@* SortHeaderCell.razor — Phase 5 D-05 / DASH-05. UI-SPEC §Sort behavior (lines 884-890).
+   Renders a <th> wrapping an inner <button> for keyboard accessibility. Active column
+   shows a caret (caret-up-fill or caret-down-fill); inactive column shows no caret
+   (UI-SPEC line 471 — Phase 5 omits inactive carets to reduce visual noise). *@
+
+<th aria-sort="@AriaSort" class="user-select-none">
+    <button type="button" class="btn btn-link p-0 text-decoration-none align-baseline"
+            @onclick="() => OnSort.InvokeAsync(Column)">
+        @ChildContent
+        @if (string.Equals(CurrentSort, Column, StringComparison.OrdinalIgnoreCase))
+        {
+            <i class="bi @(Descending ? "bi-caret-down-fill" : "bi-caret-up-fill") ms-1" aria-hidden="true"></i>
+        }
+    </button>
+</th>
+
+@code {
+    [Parameter, EditorRequired] public string Column { get; set; } = "";
+    [Parameter] public string? CurrentSort { get; set; }
+    [Parameter] public bool Descending { get; set; }
+    [Parameter] public EventCallback<string> OnSort { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private string AriaSort =>
+        !string.Equals(CurrentSort, Column, StringComparison.OrdinalIgnoreCase) ? "none"
+        : Descending ? "descending"
+        : "ascending";
+}
