@@ -1,0 +1,50 @@
+/* Phase 5 wwwroot/css/site.css
+   Project-level Bootstrap CSS-variable overrides for the Pi.Alert visual identity.
+   LOCKED by .planning/phases/05-live-push/05-UI-SPEC.md §Visual Identity.
+
+   Link order (App.razor): adminlte.min.css → site.css → app.css.
+   site.css MUST come AFTER adminlte.min.css so :root variable overrides win the cascade. */
+
+:root {
+  /* Warning = Primary by design (Pi.Alert palette).
+     Same hex value across two semantic tokens is intentional;
+     operator-readable distinction comes from badge label and shape:
+     - text-bg-warning  → rounded badge with the literal text "Stale"
+     - btn-primary      → rectangular CTA labeled "Save name" (and similar)
+     Never substitute one token for the other in markup. */
+  --bs-primary:   #f39c12;
+  --bs-success:   #00a65a;
+  --bs-warning:   #f39c12;
+  --bs-danger:    #dd4b39;
+  --bs-info:      #00c0ef;
+  --bs-secondary: #8c8c8c;
+}
+
+/* WCAG AA contrast for first-column hyperlinks (Dashboard table → /Stations/{mac}).
+   Default link color resolves to --bs-primary #f39c12 which is below 4.5:1 on white.
+   #b6741a is a darker shade of the same hue, meeting AA on #ffffff and #fff8d6. */
+.table a { color: #b6741a; }
+
+/* Pi.Alert table density override (UI-SPEC §Spacing Exception #2).
+   Squeezes table rows to ~38px to align with <Virtualize ItemSize="40">. */
+.table > :not(caption) > * > * {
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+
+/* Pi.Alert hover row — soft yellow distinguishes from AdminLTE 4 default gray. */
+.table-hover tbody tr:hover {
+  background-color: #fff8d6;
+}
+
+/* RssiCell segment styles (D-15 / UI-SPEC §RssiCell). 4×4px segments + 2px gap = 22px bar. */
+.rssi-seg {
+  display: inline-block;
+  width: 4px;
+  height: 16px;
+  border-radius: 1px;
+}
+.rssi-seg-empty { background-color: rgba(0,0,0,0.1); }
+.rssi-seg-filled.text-bg-success { background-color: var(--bs-success); }
+.rssi-seg-filled.text-bg-warning { background-color: var(--bs-warning); }
+.rssi-seg-filled.text-bg-danger { background-color: var(--bs-danger); }

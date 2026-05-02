@@ -1,0 +1,26 @@
+@* FilterChipGroup.razor — Phase 5 D-06 / DASH-06. UI-SPEC §FilterChipGroup (lines 833-857).
+   Two instances on Dashboard: SSID + AP. Compose semantics: OR within group, AND across
+   groups (the parent Dashboard composes the predicates against _rows). Empty Options
+   renders only the title (UI-SPEC line 857 — communicates "filter exists but no values"). *@
+
+<div class="filter-chip-group d-inline-flex align-items-center gap-1 me-3"
+     role="group" aria-label="@($"Filter by {Title}")">
+    <small class="text-body-secondary me-1">@Title:</small>
+    @foreach (var opt in Options)
+    {
+        var selected = Selected.Contains(opt);
+        <button type="button"
+                class="btn btn-sm @(selected ? "btn-secondary" : "btn-outline-secondary")"
+                aria-pressed="@selected.ToString().ToLowerInvariant()"
+                @onclick="() => OnToggled.InvokeAsync(opt)">
+            @opt
+        </button>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter, EditorRequired] public IReadOnlyList<string> Options { get; set; } = Array.Empty<string>();
+    [Parameter, EditorRequired] public HashSet<string> Selected { get; set; } = new();
+    [Parameter] public EventCallback<string> OnToggled { get; set; }
+}

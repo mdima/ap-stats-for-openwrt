@@ -1,0 +1,43 @@
+@using OpenWrtApStats.Data.Models
+
+@* PerApStrip.razor — Phase 5 D-11 / DASH-07. UI-SPEC §PerApStrip (lines 537-575).
+   Horizontal node-badge strip rendered above the dashboard search row. Click toggles
+   that node in the parent's _selectedAps HashSet (single source of truth — same set
+   bound to the AP FilterChipGroup). Phase 5 LOCK: Online/Offline only on the strip
+   (UI-SPEC line 568 — node-level Stale is informational, deferred to v2). Hostname-
+   with-dot LOCK (UI-SPEC line 558 — Phase 3 router-fill icon stays reserved for empty-state). *@
+
+<div class="per-ap-strip d-flex flex-wrap align-items-center gap-2 mb-3"
+     role="group" aria-label="Per-access-point connectivity">
+    @foreach (var node in Nodes)
+    {
+        var selected = SelectedAps.Contains(node.Id);
+        <button type="button"
+                class="btn btn-sm @(selected ? "btn-secondary" : "btn-outline-secondary") d-inline-flex align-items-center gap-2"
+                aria-pressed="@selected.ToString().ToLowerInvariant()"
+                title="@($"Last poll: {RelativeTime(node.LastPollDate)}")"
+                @onclick="() => OnApClicked.InvokeAsync(node.Id)">
+            <span>@node.Hostname</span>
+            <i class="bi @(node.Status == Status.Online ? "bi-circle-fill text-success" : "bi-circle text-secondary")"
+               aria-label="@(node.Status == Status.Online ? "Online" : "Offline")"></i>
+        </button>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<WiFiNode> Nodes { get; set; } = Array.Empty<WiFiNode>();
+    [Parameter, EditorRequired] public HashSet<int> SelectedAps { get; set; } = new();
+    [Parameter] public EventCallback<int> OnApClicked { get; set; }
+
+    /// <summary>Duplicate of Dashboard.razor:186-194 RelativeTime — accepted shape per
+    /// PATTERNS.md ("3 copies project-wide is the accepted shape; do NOT extract").</summary>
+    private static string RelativeTime(DateTime t)
+    {
+        if (t == default) return "Never";
+        var d = DateTime.UtcNow - t.ToUniversalTime();
+        if (d.TotalSeconds < 60) return "just now";
+        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes}m ago";
+        if (d.TotalHours < 24)   return $"{(int)d.TotalHours}h ago";
+        return $"{(int)d.TotalDays}d ago";
+    }
+}
