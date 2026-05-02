@@ -61,10 +61,12 @@ else
                     </div>
                 </div>
                 <div class="col-md-7">
-                    <FilterChipGroup Title="SSID" Options="_allSsids"
-                                     Selected="_selectedSsids" OnToggled="ToggleSsidFilter" />
-                    <FilterChipGroup Title="AP"   Options="_allApLabels"
+                    <FilterChipGroup Title="SSID"   Options="_allSsids"
+                                     Selected="_selectedSsids"   OnToggled="ToggleSsidFilter" />
+                    <FilterChipGroup Title="AP"     Options="_allApLabels"
                                      Selected="_selectedApLabels" OnToggled="ToggleApFilterByLabel" />
+                    <FilterChipGroup Title="Status" Options="StatusFilterOptions"
+                                     Selected="_selectedStatuses" OnToggled="ToggleStatusFilter" />
                 </div>
             </div>
         </div>
@@ -160,8 +162,14 @@ else
     private HashSet<string> _selectedSsids = new();
     private HashSet<int>    _selectedAps = new();           // node Ids — written by PerApStrip
     private HashSet<string> _selectedApLabels = new();      // hostname strings — written by AP FilterChipGroup
+    private HashSet<string> _selectedStatuses = new();      // "Online" / "Offline" / "Stale"
     private List<string>    _allSsids = new();
     private List<string>    _allApLabels = new();
+
+    // Status filter options are fixed (3 derived UI categories) — not derived from data.
+    // "Stale" is a UI-only sub-state of Offline (Status.Offline + IsStale predicate).
+    private static readonly IReadOnlyList<string> StatusFilterOptions =
+        new[] { "Online", "Offline", "Stale" };
 
     private DateTime _cycleEndUtc = DateTime.UtcNow;
     private DateTime _lastPollUtc = DateTime.UtcNow;
@@ -288,6 +296,21 @@ else
             q = q.Where(r => _selectedAps.Contains(r.ApNodeId) || _selectedApLabels.Contains(r.ApHostname));
         }
 
+        // Status filter — OR within (consistent with SSID/AP). "Stale" is a UI-only sub-state
+        // of Offline computed via IsStale(row); selecting "Offline" excludes Stale rows so the
+        // three categories partition the result cleanly.
+        if (_selectedStatuses.Count > 0)
+        {
+            q = q.Where(r =>
+            {
+                if (r.StationStatus == Status.Online) return _selectedStatuses.Contains("Online");
+                var stale = IsStale(r);
+                return stale
+                    ? _selectedStatuses.Contains("Stale")
+                    : _selectedStatuses.Contains("Offline");
+            });
+        }
+
         // Sort (UI-SPEC §Sort behavior — secondary stable sort by MAC asc)
         Func<DashboardRow, IComparable?> key = _sortColumn switch
         {
@@ -360,6 +383,11 @@ else
     private void ToggleApFilterById(int nodeId)
     {
         if (!_selectedAps.Add(nodeId)) _selectedAps.Remove(nodeId);
+    }
+
+    private void ToggleStatusFilter(string status)
+    {
+        if (!_selectedStatuses.Add(status)) _selectedStatuses.Remove(status);
     }
 
     private static string RelativeTime(DateTime t)

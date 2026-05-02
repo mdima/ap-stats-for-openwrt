@@ -112,14 +112,16 @@ public sealed class StaleHysteresisTests
         var cut = ctx.Render<Dashboard>();
 
         // First cycle ends 5s after station's last poll — under the 1.5×10=15s threshold → NOT Stale.
+        // Assertions target the badge by class (text-bg-warning is exclusive to StatusBadge's
+        // Stale variant; text-bg-secondary is exclusive to its Offline variant). Loose text
+        // matching against "Stale"/"Offline" would also match the dashboard's Status filter
+        // chip group, which always renders those literal labels.
         await notifier.RaiseAsync(new PollSnapshot(1, 0, 0, 1, t0.AddSeconds(5)));
-        Assert.Contains("Offline", cut.Markup);
-        Assert.DoesNotContain("Stale", cut.Markup);
+        Assert.Contains("text-bg-secondary", cut.Markup);
         Assert.DoesNotContain("text-bg-warning", cut.Markup);
 
         // Second cycle ends 20s after station's last poll — past the 15s threshold → Stale.
         await notifier.RaiseAsync(new PollSnapshot(1, 0, 0, 1, t0.AddSeconds(20)));
-        Assert.Contains("Stale", cut.Markup);
         Assert.Contains("text-bg-warning", cut.Markup);
     }
 
@@ -153,9 +155,9 @@ public sealed class StaleHysteresisTests
 
         var cut = ctx.Render<Dashboard>();
 
-        // Push past the stale threshold.
+        // Push past the stale threshold. Class-based assertion — see note above.
         await notifier.RaiseAsync(new PollSnapshot(1, 0, 0, 1, t0.AddSeconds(20)));
-        Assert.Contains("Stale", cut.Markup);
+        Assert.Contains("text-bg-warning", cut.Markup);
 
         // Simulate a successful subsequent poll: the orchestrator's mark-Offline-then-upsert
         // would set Status=Online and LastPollDate=now. Mutate the stub's row in place.
@@ -163,7 +165,7 @@ public sealed class StaleHysteresisTests
         stn.LastPollDate = t0.AddSeconds(30);
 
         await notifier.RaiseAsync(new PollSnapshot(1, 1, 0, 1, t0.AddSeconds(30)));
-        Assert.DoesNotContain("Stale", cut.Markup);
-        Assert.Contains("Online", cut.Markup);
+        Assert.DoesNotContain("text-bg-warning", cut.Markup);
+        Assert.Contains("text-bg-success", cut.Markup);
     }
 }
