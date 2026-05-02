@@ -1,21 +1,29 @@
 @* EmptyState.razor — reusable empty-state per UI-SPEC §Empty-State Visual Pattern.
-   Used by DASH-09, DASH-10, Nodes Index zero-state, Node Detail no-WLAN-yet.
-   Single 4rem muted icon + heading + body + ONE primary CTA. *@
+   Used by DASH-09, DASH-10, Nodes Index zero-state, Node Detail no-WLAN-yet (CTA forms),
+   and DASH-11 "WLANs are healthy, no clients right now" (CTA-less form, Phase 5 / B1).
+   Single 4rem muted icon + heading + body + (optionally) ONE primary CTA.
+
+   Phase 5 B1 ownership: CtaLabel / CtaHref / CtaIconClass are optional. When CtaLabel is
+   null or empty the CTA <a> is omitted entirely — callers that genuinely have no CTA (e.g.
+   DASH-11) render a clean icon+heading+body block with no broken hyperlink. *@
 
 <div class="text-center py-5">
     <i class="bi @IconClass" style="font-size: 4rem;" aria-hidden="true"></i>
     <h4 class="mt-3">@Heading</h4>
     <p class="text-body-secondary mb-4">@Body</p>
-    <a class="btn btn-primary" href="@CtaHref">
-        <i class="bi @CtaIconClass me-2"></i>@CtaLabel
-    </a>
+    @if (!string.IsNullOrEmpty(CtaLabel))
+    {
+        <a class="btn btn-primary" href="@CtaHref">
+            <i class="bi @CtaIconClass me-2"></i>@CtaLabel
+        </a>
+    }
 </div>
 
 @code {
     [Parameter, EditorRequired] public string IconClass { get; set; } = "";
     [Parameter, EditorRequired] public string Heading { get; set; } = "";
     [Parameter, EditorRequired] public string Body { get; set; } = "";
-    [Parameter, EditorRequired] public string CtaLabel { get; set; } = "";
-    [Parameter, EditorRequired] public string CtaHref { get; set; } = "";
-    [Parameter, EditorRequired] public string CtaIconClass { get; set; } = "";
+    [Parameter] public string CtaLabel { get; set; } = "";
+    [Parameter] public string CtaHref { get; set; } = "";
+    [Parameter] public string CtaIconClass { get; set; } = "";
 }
