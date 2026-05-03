@@ -264,12 +264,18 @@ try
     }
 
     // D-11 — /health is reachable regardless of UI-password state (ROADMAP success #3).
-    // Mapped BEFORE UseAuthentication so the auth middleware never sees /health requests.
+    // Mapped BEFORE UseAuthentication so the source-order discipline matches CONTEXT.md (Phase 6
+    // documented the lexical placement as the contract). The endpoint metadata also carries
+    // .AllowAnonymous() so the AuthorizationMiddleware fallback policy (which engages once a
+    // UI password is set) does not redirect /health to /Login — endpoint matching happens during
+    // the implicit UseRouting at WebApplication start, so middleware after UseRouting still runs
+    // for matched endpoints. Without AllowAnonymous, the cookie middleware's OnRedirectToLogin
+    // would fire on the protected endpoint even though MapHealthChecks itself is short-circuit.
     // Status code (200 / 503) auto-derived from HealthReport.Status by the framework.
     app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
     {
         ResponseWriter = WriteJsonResponse,
-    });
+    }).AllowAnonymous();
 
     app.UseAuthentication();        // reads "OpenWrtApStats.Auth" cookie
     app.UseAuthorization();         // applies fallback ConditionalAuthRequirement
