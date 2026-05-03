@@ -46,6 +46,12 @@
          on IDataConsumer otherwise). Adding xunit.v3.mtp-v2 3.2.2 (same release, v2-aligned
          variant) pulls xunit.v3.core.mtp-v2 and the matching MTP v2 runtime. -->
     <PackageReference Include="xunit.v3.mtp-v2" Version="3.2.2" />
+    <!-- Phase 6 Plan 06-03 W7 / B2 — TestCorrelator sink lets HealthSerilogFilterTests assert
+         at runtime that the production .Filter.ByExcluding clause for /health is honored. The
+         doubled-quote literal `p.ToString() == "\"/health\""` in Program.cs is fragile; static
+         grep gates can only catch surface-level regression. CI-02 permits this package
+         (only coverlet.* prefixes are blocked). -->
+    <PackageReference Include="Serilog.Sinks.TestCorrelator" Version="4.0.0" />
   </ItemGroup>
 
   <ItemGroup>
