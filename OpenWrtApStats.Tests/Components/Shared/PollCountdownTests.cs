@@ -129,7 +129,7 @@ public sealed class PollCountdownTests
         await notifier.RaiseAsync(new PollSnapshot(1, 1, 0, 0, DateTime.UtcNow));
 
         // Wait briefly so the System.Threading.Timer is alive and likely between Tick invocations.
-        await Task.Delay(50);
+        await Task.Delay(50, Xunit.TestContext.Current.CancellationToken);
 
         // Dispose under contention. If W4 guards aren't in place the Timer callback may
         // race with the renderer's Dispose() and throw ObjectDisposedException.
@@ -137,7 +137,7 @@ public sealed class PollCountdownTests
 
         // Wait long enough for any in-flight Tick callbacks to finish (period was 1000ms;
         // give a couple of ticks worth of buffer to surface a swallowed exception).
-        await Task.Delay(150);
+        await Task.Delay(150, Xunit.TestContext.Current.CancellationToken);
 
         // No assertion needed beyond "did not throw" — xUnit fails the test if any exception
         // escaped into the test thread (Timer callbacks rethrow on the threadpool).

@@ -151,7 +151,7 @@ public sealed class NodesPageTests
                         Username = "root",
                         Password = "secret"
                     }));
-            var rows = await repo.GetAllAsync();
+            var rows = await repo.GetAllAsync(Xunit.TestContext.Current.CancellationToken);
             Assert.Single(rows);
         }
     }
@@ -193,13 +193,13 @@ public sealed class NodesPageTests
                         Password = "pw"
                     }));
             // Get the saved node id
-            var nodes = await repo.GetAllAsync();
+            var nodes = await repo.GetAllAsync(Xunit.TestContext.Current.CancellationToken);
             var nodeId = nodes.First().Id;
             // Invoke remove
             await cut.InvokeAsync(async () =>
                 await cut.Instance.HandleRemoveForTestAsync(nodeId));
             Assert.Equal(nodeId, repo.DeletedId);
-            var remaining = await repo.GetAllAsync();
+            var remaining = await repo.GetAllAsync(Xunit.TestContext.Current.CancellationToken);
             Assert.Empty(remaining);
         }
     }
