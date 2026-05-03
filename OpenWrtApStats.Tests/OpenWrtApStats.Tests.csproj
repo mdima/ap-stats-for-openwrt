@@ -52,6 +52,14 @@
          grep gates can only catch surface-level regression. CI-02 permits this package
          (only coverlet.* prefixes are blocked). -->
     <PackageReference Include="Serilog.Sinks.TestCorrelator" Version="4.0.0" />
+    <!-- Phase 7 / Testcontainers for the Docker-smoke fixture (D-06). Targets net10.0 cleanly.
+         NO Testcontainers.Xunit (still v2-only as of 4.11.0); use the manual IAsyncLifetime
+         pattern with [Collection(DisableParallelization = true)]. Smoke facts are gated by
+         [Trait("Category","Smoke")] AND [Trait("RequiresDocker","true")] so the default
+         `dotnet test ... filter-not-trait Category=Smoke` invocation excludes them on dev
+         boxes and from the 80/80 coverage gate; CI's smoke-tests job runs them on
+         ubuntu-latest with `filter-trait Category=Smoke`. -->
+    <PackageReference Include="Testcontainers" Version="4.11.0" />
   </ItemGroup>
 
   <ItemGroup>
