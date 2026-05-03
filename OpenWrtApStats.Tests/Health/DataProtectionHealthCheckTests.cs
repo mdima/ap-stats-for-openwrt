@@ -114,6 +114,50 @@ public sealed class DataProtectionHealthCheckTests(SqliteInMemoryFixture sql) : 
     /// ciphertext-shaped string flips Guard 1 true. Uses a unique hostname per call so parallel
     /// invocations within the same class do not collide on the unique-index constraint.
     /// </summary>
+    [Fact]
+    public async Task ReturnsUnhealthy_WhenRepoThrows()
+    {
+        // Closes the catch (Exception) arm — the production code's defensive non-throw policy.
+        // Symmetrical with DbHealthCheckTests.ReturnsUnhealthy_WhenRepoThrows; uses an inline
+        // INodeRepo double whose AnyEncryptedPasswordsAsync throws.
+        var ct = TestContext.Current.CancellationToken;
+        var sut = new DataProtectionHealthCheck(new ThrowingNodeRepo());
+
+        var result = await sut.CheckHealthAsync(new HealthCheckContext(), ct);
+
+        Assert.Equal(HealthStatus.Unhealthy, result.Status);
+        Assert.Equal("fail", result.Description);
+        Assert.NotNull(result.Exception);
+        Assert.IsType<InvalidOperationException>(result.Exception);
+    }
+
+    /// <summary>
+    /// Inline test double — DataProtectionHealthCheck only invokes
+    /// <see cref="INodeRepo.AnyEncryptedPasswordsAsync"/>. All other surface members throw
+    /// <see cref="NotImplementedException"/> so any future drift in the production probe call
+    /// is loud at test time. Mirrors the project-wide inline-double convention from Plan 02-03.
+    /// </summary>
+    private sealed class ThrowingNodeRepo : INodeRepo
+    {
+        public Task<bool> AnyEncryptedPasswordsAsync(CancellationToken ct = default)
+            => throw new InvalidOperationException("simulated repo failure (Plan 06-02 DataProtectionHealthCheck catch-arm coverage)");
+
+        public Task<IReadOnlyList<WiFiNode>> GetAllAsync(CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<WiFiNode?> GetByIdAsync(int id, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task AddAsync(WiFiNode node, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task DeleteAsync(int id, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateMetadataAsync(int id, string hostname, string username, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdatePasswordAsync(int id, string encryptedPassword, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task ClearAllHostKeyFingerprintsAsync(CancellationToken ct = default) => throw new NotImplementedException();
+        public Task ClearHostKeyFingerprintAsync(int nodeId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<bool> AnyAsync(CancellationToken ct = default) => throw new NotImplementedException();
+        public Task MarkAllOfflineAsync(CancellationToken ct = default) => throw new NotImplementedException();
+        public Task MarkAllOfflineAsync(DatabaseContext db, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateOnlineAsync(int nodeId, DateTime lastPoll, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateOnlineAsync(DatabaseContext db, int nodeId, DateTime lastPoll, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task SetHostKeyFingerprintAsync(DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default) => throw new NotImplementedException();
+    }
+
     private async Task SeedEncryptedNodeAsync(string hostname, CancellationToken ct)
     {
         await using var ctx = new DatabaseContext(_sql.Options);
