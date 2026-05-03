@@ -21,4 +21,12 @@ public sealed class CircuitTrackerGate(CircuitTracker tracker) : ICircuitGate
         add    => tracker.Changed += value;
         remove => tracker.Changed -= value;
     }
+
+    /// <summary>
+    /// Forwards to <see cref="CircuitTracker.WaitForVisitorAsync(CancellationToken)"/>. Phase 6
+    /// D-01: PollingHostedService awaits this before each poll cycle so headless installations
+    /// (no UI tab open) draw zero SSH traffic.
+    /// </summary>
+    public Task WaitForVisitorAsync(CancellationToken ct)
+        => tracker.WaitForVisitorAsync(ct);
 }
