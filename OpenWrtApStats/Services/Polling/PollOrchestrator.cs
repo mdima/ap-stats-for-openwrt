@@ -35,6 +35,26 @@ public sealed class PollOrchestrator(
     PollNotifier notifier,
     ILogger<PollOrchestrator> log)
 {
+    // D-09 — lock-free LastSuccessfulCycleUtc exposure for /health (plan 06-03 reads this).
+    // Volatile.Read<T> requires primitive/reference type; DateTime (struct) is NOT eligible —
+    // store DateTime.Ticks in a long instead. Mirrors the AppSettingsService.cs lock-free
+    // typed-snapshot pattern (Plan 01-03), adapted to a single primitive value. Default = 0
+    // (== DateTime.MinValue.Ticks); read via Volatile.Read; written ONLY after successful
+    // tx.CommitAsync. Volatile.Read<long> is a torn-free 64-bit load on both 32-bit and 64-bit
+    // runtimes, so concurrent reads from the /health pipeline never observe a half-written
+    // Ticks value while a poll cycle is committing.
+    private long _ticks;
+
+    /// <summary>
+    /// UTC timestamp of the most recently committed coordinator transaction. Returns
+    /// <see cref="DateTime.MinValue"/> (kind=Utc) before the first successful cycle. Read
+    /// non-blocking via <see cref="Volatile.Read(ref long)"/> so the /health endpoint never
+    /// serializes against poll cycles. The /health JSON writer in plan 06-03 maps the
+    /// MinValue case to <c>lastPollAge: null</c> per D-07.
+    /// </summary>
+    public DateTime LastSuccessfulCycleUtc
+        => new(Volatile.Read(ref _ticks), DateTimeKind.Utc);
+
     public async Task RunCycleAsync(CancellationToken ct)
     {
         var nodes = await nodeRepo.GetAllAsync(ct);
@@ -140,6 +160,7 @@ public sealed class PollOrchestrator(
             await stationRepo.UpsertCycleAsync(db, deduped, ct);
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
+            Interlocked.Exchange(ref _ticks, now.Ticks);     // D-09 — only after successful commit (write-after-commit invariant; rolled-back cycles do NOT advance _ticks).
 
             // 7.5 B10 LOCK -- post-commit TOFU audit log. Only emitted when the trust persisted.
             foreach (var t in newlyTrusted)
