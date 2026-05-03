@@ -6,7 +6,7 @@
     <RootNamespace>OpenWrtApStats</RootNamespace>
     <AssemblyName>OpenWrtApStats</AssemblyName>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
-    <DockerfileContext>..</DockerfileContext>
+    <DockerfileContext>.</DockerfileContext>
     <DockerfileFile>..\Dockerfile</DockerfileFile>
   </PropertyGroup>
 
@@ -24,7 +24,7 @@
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.Async" Version="2.1.0" />
     <PackageReference Include="SSH.NET" Version="2025.1.0" />
-    <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.21.0" />
+    <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.22.0" />
   </ItemGroup>
 
   <ItemGroup>
