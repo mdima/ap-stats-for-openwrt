@@ -36,6 +36,17 @@ try
         .ReadFrom.Configuration(ctx.Configuration)
         .ReadFrom.Services(services)
         .Enrich.FromLogContext()
+        // Phase 6 D-10 — drop /health from the request log entirely. UseSerilogRequestLogging
+        // attaches RequestPath as a property; ByExcluding evaluates against e.Properties.
+        // The doubled-quote literal `"\"/health\""` is intentional — Serilog stores string
+        // ScalarValue.ToString() with surrounding double quotes (quirk of LogEventPropertyValue
+        // formatting). Runtime regression coverage: HealthSerilogFilterTests via TestCorrelator.
+        // The filter is on RequestPath only; logs emitted FROM the health checks themselves
+        // (DbHealthCheck / DataProtectionHealthCheck) are NOT excluded — they have a different
+        // logger category, not a RequestPath property.
+        .Filter.ByExcluding(e =>
+            e.Properties.TryGetValue("RequestPath", out var p) &&
+            p.ToString() == "\"/health\"")
         .MinimumLevel.Information()
         .MinimumLevel.Override("Microsoft.AspNetCore", Serilog.Events.LogEventLevel.Warning)
         .WriteTo.Console()
@@ -155,10 +166,28 @@ try
     builder.Services.AddTransient<OpenWrtApStats.Services.Nodes.IWlanDiscoveryService,
                                   OpenWrtApStats.Services.Nodes.WlanDiscoveryService>();
 
-    // Phase 5 D-12 — gate seam stubbed for Phase 5; Phase 6 swaps in CircuitTrackerGate
-    // (INF-06 / POLL-05 / POLL-06) without touching MainLayout or LivePausedBadge markup.
+    // Phase 6 INF-06 / POLL-05 / POLL-06 — real visitor gate.
+    // CircuitTracker holds the Interlocked counter + re-armable TCS; CircuitTrackerHandler is
+    // scoped (one per circuit) and forwards open/close to the singleton tracker; CircuitTrackerGate
+    // is the singleton ICircuitGate forwarding adapter consumed by LivePausedBadge / PollCountdown
+    // (Pattern 2 subscribers — Plans 05-03 / 05-05 unchanged).
+    // CircuitOptions.DisconnectedCircuitRetentionPeriod = 3 min (D-03 — hard-coded, NOT App Settings
+    // in v1; total grace = 3 min + 30s in CircuitTracker semantics).
+    builder.Services.AddSingleton<OpenWrtApStats.Services.Gating.CircuitTracker>();
     builder.Services.AddSingleton<OpenWrtApStats.Services.Gating.ICircuitGate,
-                                  OpenWrtApStats.Services.Gating.AlwaysLiveGate>();
+                                  OpenWrtApStats.Services.Gating.CircuitTrackerGate>();
+    builder.Services.AddScoped<Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler,
+                               OpenWrtApStats.Services.Gating.CircuitTrackerHandler>();
+    builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions>(o =>
+    {
+        o.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(3);  // D-03
+    });
+
+    // Phase 6 INF-06 / D-08 — request-time health checks. Two named checks; status code
+    // (200 / 503) is auto-derived from HealthReport.Status by MapHealthChecks below.
+    builder.Services.AddHealthChecks()
+        .AddCheck<OpenWrtApStats.Services.Health.DbHealthCheck>("db")
+        .AddCheck<OpenWrtApStats.Services.Health.DataProtectionHealthCheck>("dataProtection");
 
     // 6. Bootstrap order (registration order = StartAsync order — Pitfall 10):
     //    Migrations -> D-12 probe -> AppSettings warm-up -> Polling.
@@ -193,6 +222,55 @@ try
     // Placed after UseStaticFiles (assets bypass it) and after UseAntiforgery,
     // but BEFORE UseAuthentication so anonymous GET / is handled before the auth pipeline.
     app.UseMiddleware<WizardRedirectMiddleware>();
+
+    // D-07 / D-08 / W4 — /health response writer + FormatAge helper. Hand-written
+    // static local functions defined in top-level statements scope, lexically ABOVE the
+    // app.MapHealthChecks call below so the method-group reference resolves.
+    // Shape: { status, components: { db, dataProtection }, lastPollAge }.
+    // gateState is INTENTIONALLY OMITTED (D-07 — UI concern, not /health concern).
+    static async Task WriteJsonResponse(
+        HttpContext ctx,
+        Microsoft.Extensions.Diagnostics.HealthChecks.HealthReport report)
+    {
+        ctx.Response.ContentType = "application/json; charset=utf-8";
+
+        // D-09 — read PollOrchestrator.LastSuccessfulCycleUtc via Volatile.Read (non-blocking).
+        var orchestrator = ctx.RequestServices
+            .GetRequiredService<OpenWrtApStats.Services.Polling.PollOrchestrator>();
+        var lastSuccess = orchestrator.LastSuccessfulCycleUtc;
+        string? lastPollAge = lastSuccess == default
+            ? null
+            : FormatAge(DateTime.UtcNow - lastSuccess);
+
+        var payload = new
+        {
+            status     = report.Status.ToString(),                           // "Healthy" | "Unhealthy"
+            components = report.Entries.ToDictionary(
+                             e => e.Key,
+                             e => e.Value.Status == Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Healthy
+                                 ? "ok" : "fail"),
+            lastPollAge,
+        };
+
+        await System.Text.Json.JsonSerializer.SerializeAsync(ctx.Response.Body, payload);
+    }
+
+    static string FormatAge(TimeSpan t)
+    {
+        if (t.TotalSeconds < 0) t = TimeSpan.Zero;     // defensive: clock skew shouldn't render "-3s".
+        return t.TotalMinutes < 1
+            ? $"{(int)t.TotalSeconds}s"
+            : $"{(int)t.TotalMinutes}m{t.Seconds:D2}s";
+    }
+
+    // D-11 — /health is reachable regardless of UI-password state (ROADMAP success #3).
+    // Mapped BEFORE UseAuthentication so the auth middleware never sees /health requests.
+    // Status code (200 / 503) auto-derived from HealthReport.Status by the framework.
+    app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+    {
+        ResponseWriter = WriteJsonResponse,
+    });
+
     app.UseAuthentication();        // reads "OpenWrtApStats.Auth" cookie
     app.UseAuthorization();         // applies fallback ConditionalAuthRequirement
     app.UseRateLimiter();           // sees rewritten IP (Pitfall 4)

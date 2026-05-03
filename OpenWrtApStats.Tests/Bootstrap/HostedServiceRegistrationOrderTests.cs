@@ -55,6 +55,14 @@ public sealed class HostedServiceRegistrationOrderTests
         builder.Services.AddSingleton<Func<CancellationToken, Task>>(
             sp => ct => Task.CompletedTask);
 
+        // Phase 6 — visitor gate seam (registered as AlwaysLiveGate stub for ORDER-validation;
+        // production registers CircuitTrackerGate per Program.cs). PollingHostedService's primary
+        // ctor now takes ICircuitGate; this stub keeps the descriptor-enumeration test compiling
+        // and resolvable. W-new-2 — exactly ONE AddSingleton<ICircuitGate, ...> registration in
+        // this file (no double-registration drift).
+        builder.Services.AddSingleton<OpenWrtApStats.Services.Gating.ICircuitGate,
+                                      OpenWrtApStats.Services.Gating.AlwaysLiveGate>();
+
         builder.Services.AddHostedService<MigrationsHostedService>();
         builder.Services.AddHostedService<DataProtectionHealthHostedService>();
         builder.Services.AddHostedService<AppSettingsBootstrapHostedService>();
@@ -87,6 +95,10 @@ public sealed class HostedServiceRegistrationOrderTests
 
         // Phase 2 adds the 4th — total is now four. Pitfall 8 still active: future phases adding
         // a 5th MUST amend this count again.
+        // Phase 6 amendment: zero new IHostedService entries — CircuitTrackerGate is a singleton,
+        // CircuitTrackerHandler is scoped (Blazor framework), DbHealthCheck and DataProtectionHealthCheck
+        // are IHealthCheck (different DI surface). HostedServiceRegistrationOrderTests count stays at 4
+        // (Pitfall 8 still active: future phases adding a 5th MUST amend this count again).
         Assert.Equal(4, allServices.Count);
     }
 }
