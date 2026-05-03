@@ -6,7 +6,7 @@
     <RootNamespace>OpenWrtApStats</RootNamespace>
     <AssemblyName>OpenWrtApStats</AssemblyName>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
-    <DockerfileContext>..\</DockerfileContext>
+    <DockerfileContext>..</DockerfileContext>
     <DockerfileFile>..\Dockerfile</DockerfileFile>
   </PropertyGroup>
 
