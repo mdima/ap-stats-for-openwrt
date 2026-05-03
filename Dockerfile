@@ -6,11 +6,13 @@ FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION} AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 
-# csproj-only restore for cache-friendly layer ordering.
+# csproj-only restore for cache-friendly layer ordering. Only the production csproj is
+# copied separately — `dotnet restore OpenWrtApStats/OpenWrtApStats.csproj` does NOT walk
+# the .sln, so peer csproj files (OpenWrtApStats.Tests, tools/FixtureCapture) are not
+# needed at this stage and cannot be copied anyway because .dockerignore excludes
+# OpenWrtApStats.Tests/ wholesale (test source must never enter image layers).
 COPY OpenWrtApStats.sln Directory.Build.props global.json ./
 COPY OpenWrtApStats/OpenWrtApStats.csproj OpenWrtApStats/
-COPY OpenWrtApStats.Tests/OpenWrtApStats.Tests.csproj OpenWrtApStats.Tests/
-COPY tools/FixtureCapture/FixtureCapture.csproj tools/FixtureCapture/
 
 RUN dotnet restore OpenWrtApStats/OpenWrtApStats.csproj
 
