@@ -58,8 +58,15 @@ try
             shared: false)));
 
     // 3. EF Core — factory only, NEVER scoped DbContext (PER-05; PITFALL: captive dependency).
+    //    Pooling=True for connection reuse; Default Timeout=5 -> PRAGMA busy_timeout=5000
+    //    so transient SQLITE_BUSY (file-lock) is retried instead of erroring.
+    //    NO Cache=Shared on a file DB: shared cache forces table-level cache locks that
+    //    bypass WAL's file-level reader/writer concurrency, producing SQLITE_LOCKED (error 6)
+    //    when the orchestrator transaction holds WiFiNodes while the dashboard / health checks
+    //    read it. WAL itself is enabled by MigrationsHostedService via PRAGMA journal_mode=WAL
+    //    and is persisted on the DB file.
     builder.Services.AddDbContextFactory<DatabaseContext>(options =>
-        options.UseSqlite($"Data Source={dataRoot}/OpenWRT-AP-Stats.db;Cache=Shared;Pooling=True"));
+        options.UseSqlite($"Data Source={dataRoot}/OpenWRT-AP-Stats.db;Pooling=True;Default Timeout=5"));
 
     // 4. ASP.NET Data Protection — file-system key ring + verbatim application name (D-02 / SEC-03).
     //    On Linux/WSL2 keys are NOT encrypted at rest (DPAPI is Windows-only) —

@@ -43,6 +43,32 @@ public sealed class MigrationsHostedService(
         await db.Database.MigrateAsync(cancellationToken);
 
         log.LogInformation("Database migration complete");
+
+        // PRAGMA journal_mode=WAL is persisted on the DB file (one-shot per file). Once set,
+        // every subsequent connection sees WAL — readers do not block writers and writers do
+        // not block readers at the file level. PRAGMA synchronous=NORMAL is the recommended
+        // pairing with WAL (durability is preserved across normal shutdowns; only correlated
+        // power loss + OS crash can lose committed-but-not-checkpointed pages — acceptable for
+        // this workload). synchronous is per-connection, so this command only affects the
+        // current connection — but NORMAL is also the SQLite default for WAL mode in newer
+        // versions, so omitting it on later connections is safe.
+        // Closes Phase 1 PITFALLS.md §SQLite WAL gap surfaced by Phase 6 live testing.
+        var conn = db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync(cancellationToken);
+
+        await using (var pragma = conn.CreateCommand())
+        {
+            pragma.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;";
+            await pragma.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var verify = conn.CreateCommand())
+        {
+            verify.CommandText = "PRAGMA journal_mode;";
+            var journalMode = (await verify.ExecuteScalarAsync(cancellationToken)) as string;
+            log.LogInformation("SQLite journal_mode: {JournalMode}", journalMode);
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
