@@ -29,6 +29,9 @@ public sealed class PollCountdownTests
     {
         public GateState Current { get; set; } = GateState.Live;
         public event Func<GateState, Task>? Changed { add { } remove { } }     // W3
+        // Phase 6 D-01: ICircuitGate gained WaitForVisitorAsync. PollCountdown is a UI subscriber
+        // and never calls WaitForVisitorAsync; return Task.CompletedTask (mirrors AlwaysLiveGate).
+        public Task WaitForVisitorAsync(CancellationToken ct) => Task.CompletedTask;
     }
 
     private static (BunitContext ctx, PollNotifier notifier, StubSettings settings, TestGate gate) Build()

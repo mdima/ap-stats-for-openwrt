@@ -21,6 +21,10 @@ public sealed class LivePausedBadgeTests
             Current = newState;
             return Changed?.Invoke(newState) ?? Task.CompletedTask;
         }
+        // Phase 6 D-01: ICircuitGate gained WaitForVisitorAsync. UI tests don't exercise the
+        // gate's polling-host wait semantics — return Task.CompletedTask so the badge tests
+        // remain a pure rendering check (mirrors AlwaysLiveGate behaviour).
+        public Task WaitForVisitorAsync(CancellationToken ct) => Task.CompletedTask;
     }
 
     [Fact]

@@ -79,6 +79,12 @@ public sealed class CompositionRootValidationTests
         services.AddSingleton<Func<CancellationToken, Task>>(sp => ct =>
             sp.GetRequiredService<PollOrchestrator>().RunCycleAsync(ct));
 
+        // Phase 6 D-01 — PollingHostedService now takes ICircuitGate for the cold-start kick.
+        // Use AlwaysLiveGate as the validation-only stub (this test asserts registration shape,
+        // not gating semantics). Production registers CircuitTrackerGate (see Program.cs §6).
+        services.AddSingleton<OpenWrtApStats.Services.Gating.ICircuitGate,
+                              OpenWrtApStats.Services.Gating.AlwaysLiveGate>();
+
         services.AddHostedService<PollingHostedService>();
 
         // The eager-validation pass: this is what WebApplicationBuilder runs in Development.
