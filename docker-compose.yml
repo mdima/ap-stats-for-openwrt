@@ -1,0 +1,35 @@
+# OpenWRT-AP-Stats — sample operator deployment manifest.
+# Brings up the dashboard on port 8080 with named volumes for /data (SQLite +
+# DataProtection keys) and /logs (Serilog daily-rolling files).
+#
+# Usage:
+#   docker compose up -d         # start
+#   docker compose logs -f       # follow logs
+#   docker compose down          # stop (PRESERVES volumes)
+#   docker compose down -v       # stop AND WIPE volumes (DO NOT do this on a configured deployment)
+#
+# Named volumes (vs bind mounts) sidestep the UID/GID ownership trap on Linux:
+# the Dockerfile's `chown -R app:app /data /logs` runs against named volumes
+# cleanly on first attach. For bind mounts, operators must `chown -R 1654:1654`
+# the host paths first.
+
+services:
+  openwrtapstats:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: openwrtapstats:latest
+    container_name: openwrtapstats
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - openwrtapstats-data:/data
+      - openwrtapstats-logs:/logs
+    # NOTE: No `healthcheck:` block here — the Dockerfile's HEALTHCHECK directive
+    # governs. Adding a Compose healthcheck would OVERRIDE the image directive
+    # (Phase 7 RESEARCH Finding #8).
+
+volumes:
+  openwrtapstats-data:
+  openwrtapstats-logs:

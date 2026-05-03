@@ -3,16 +3,16 @@ using Xunit;
 namespace OpenWrtApStats.Tests.Smoke;
 
 /// <summary>
-/// INF-07 / D-01..D-04 plain-text lint of the repo-root Dockerfile + .dockerignore. Runs in
-/// the DEFAULT test suite (NOT Smoke-trait-gated) per RESEARCH §"Wave 0 Gaps" — the assertions
-/// are file-text greps that need NO Docker daemon, so the structural regression catches at
-/// every commit before the (slow) container-bound smoke job picks it up.
+/// INF-07 / INF-08 / D-01..D-04 plain-text lint of the repo-root Dockerfile + .dockerignore +
+/// docker-compose.yml. Runs in the DEFAULT test suite (NOT Smoke-trait-gated) per RESEARCH
+/// §"Wave 0 Gaps" — the assertions are file-text greps that need NO Docker daemon, so the
+/// structural regression catches at every commit before the (slow) container-bound smoke
+/// job picks it up.
 /// <para>
-/// Two Plan-07-02 handoff facts deliberately INVERT in the next wave:
-/// <see cref="Dockerfile_DoesNotIncludeHealthcheckYet_BelongsTo_07_02"/> flips to
-/// <c>Assert.Contains("HEALTHCHECK", ...)</c> as part of the same commit that adds the
-/// <c>HEALTHCHECK</c> directive; <see cref="Dockerfile_DoesNotInstallCurlYet_BelongsTo_07_02"/>
-/// flips identically for the curl install.
+/// Plan 07-02 flipped the two Plan-07-01 handoff facts (the former negative-asserts on
+/// the HEALTHCHECK directive and on the curl install) into positive assertions over the
+/// now-amended Dockerfile, and added the docker-compose.yml structural facts (named
+/// volumes, port mapping, restart policy, NO healthcheck override per RESEARCH Finding #8).
 /// </para>
 /// </summary>
 public sealed class DockerfileStructuralTests
@@ -30,6 +30,9 @@ public sealed class DockerfileStructuralTests
 
     private static string DockerignoreText() =>
         File.ReadAllText(Path.Combine(SolutionRoot(), ".dockerignore"));
+
+    private static string DockerComposeText() =>
+        File.ReadAllText(Path.Combine(SolutionRoot(), "docker-compose.yml"));
 
     // ── Dockerfile structural facts ──────────────────────────────────────────
 
@@ -89,21 +92,30 @@ public sealed class DockerfileStructuralTests
     }
 
     [Fact]
-    public void Dockerfile_DoesNotIncludeHealthcheckYet_BelongsTo_07_02()
+    public void Dockerfile_DeclaresHealthcheckOverHealthEndpoint()
     {
-        // HANDOFF: this assertion FLIPS in Plan 07-02 to Assert.Contains("HEALTHCHECK", ...).
-        // The plan acceptance criterion `grep -c "HEALTHCHECK" Dockerfile` requires zero
-        // occurrences of the literal token in this baseline; the explanatory comment at the
-        // top of the runtime stage is phrased to avoid the literal word for that reason.
-        Assert.DoesNotContain("HEALTHCHECK", DockerfileText(), StringComparison.Ordinal);
+        // FLIPPED in Plan 07-02 from the Plan 07-01 negative-assert handoff fact.
+        // INF-08 / D-03 verbatim: HEALTHCHECK directive shape + the curl probe targeting
+        // the Phase 6 /health endpoint (D-07/D-08).
+        var t = DockerfileText();
+        Assert.Contains("HEALTHCHECK", t, StringComparison.Ordinal);
+        Assert.Contains("--interval=30s", t, StringComparison.Ordinal);
+        Assert.Contains("--timeout=5s", t, StringComparison.Ordinal);
+        Assert.Contains("--start-period=30s", t, StringComparison.Ordinal);
+        Assert.Contains("--retries=3", t, StringComparison.Ordinal);
+        Assert.Contains("curl -fsS http://localhost:8080/health", t, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Dockerfile_DoesNotInstallCurlYet_BelongsTo_07_02()
+    public void Dockerfile_InstallsCurl_NoCachedAptLists()
     {
-        // HANDOFF: this assertion FLIPS in Plan 07-02 to assert the curl install. D-04 ships
-        // the apt-get install line with the same commit that adds HEALTHCHECK.
-        Assert.DoesNotContain("apt-get install", DockerfileText(), StringComparison.Ordinal);
+        // FLIPPED in Plan 07-02 from the Plan 07-01 negative-assert handoff fact.
+        // D-04 verbatim: curl is installed via apt-get with --no-install-recommends and the
+        // apt cache is removed in the SAME RUN line so the cache files do not appear in any
+        // image layer (T-07-10 mitigation).
+        var t = DockerfileText();
+        Assert.Contains("apt-get install -y --no-install-recommends curl", t, StringComparison.Ordinal);
+        Assert.Contains("rm -rf /var/lib/apt/lists/*", t, StringComparison.Ordinal);
     }
 
     // ── .dockerignore structural facts ───────────────────────────────────────
@@ -153,5 +165,60 @@ public sealed class DockerfileStructuralTests
         // T-07-02 mitigation: *.user files (Visual Studio per-developer secrets, EF connection
         // strings) must never enter image layers.
         Assert.Contains("**/*.user", DockerignoreText(), StringComparison.Ordinal);
+    }
+
+    // ── docker-compose.yml structural facts (Plan 07-02 — RESEARCH Finding #8) ───
+
+    [Fact]
+    public void DockerCompose_DeclaresOpenWrtApStatsDataVolume()
+    {
+        // D-10 / RESEARCH Finding #2: named volume openwrtapstats-data mounted at /data so
+        // SQLite + DataProtection key ring survive `docker compose down && up`.
+        Assert.Contains("openwrtapstats-data:/data", DockerComposeText(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DockerCompose_DeclaresOpenWrtApStatsLogsVolume()
+    {
+        // D-10: named volume openwrtapstats-logs mounted at /logs for Serilog daily-rolling
+        // files; survives container lifecycle.
+        Assert.Contains("openwrtapstats-logs:/logs", DockerComposeText(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DockerCompose_DeclaresPortMapping_8080()
+    {
+        // D-03: port matches Dockerfile's EXPOSE 8080 + the HEALTHCHECK CMD's curl target.
+        Assert.Contains("\"8080:8080\"", DockerComposeText(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DockerCompose_HasUnlessStoppedRestartPolicy()
+    {
+        // RESEARCH Finding #8: standard restart policy for self-hosted operator workloads.
+        Assert.Contains("restart: unless-stopped", DockerComposeText(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DockerCompose_DoesNotOverrideHealthcheck()
+    {
+        // RESEARCH Finding #8: a `healthcheck:` block in Compose would OVERRIDE the
+        // Dockerfile's HEALTHCHECK directive (D-03 verbatim). Assert that no non-comment
+        // line introduces a `healthcheck:` key. The leading docs comment in the file mentions
+        // the word but is `#`-prefixed; the regex matches whitespace-then-`healthcheck:`
+        // (no `#`), so the comment is excluded.
+        var t = DockerComposeText();
+        Assert.DoesNotMatch(@"(?m)^\s+healthcheck:\s*$", t);
+        Assert.DoesNotMatch(@"(?m)^\s+healthcheck:\s+\w", t);
+    }
+
+    [Fact]
+    public void DockerCompose_DeclaresTopLevelVolumesSection()
+    {
+        // D-10: named volumes must be declared at the top level (not just referenced inside
+        // services:) so `docker compose down` preserves them and `docker compose up` reuses
+        // them on restart.
+        var t = DockerComposeText().Replace("\r\n", "\n");
+        Assert.Contains("\nvolumes:\n", t);
     }
 }
