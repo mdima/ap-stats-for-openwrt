@@ -23,11 +23,16 @@ jobs:
         run: dotnet build -c Release --no-restore
 
       - name: Test with coverage
+        # Phase 7 / Plan 07-03 — `-- --filter-not-trait "Category=Smoke"` excludes the
+        # Testcontainers-bound smoke tests from the default run so the 80/80 line +
+        # branch coverage gate (irongut/CodeCoverageSummary below) is unaffected by
+        # the smoke surface. The smoke tests run separately in the `smoke-tests` job.
         run: |
           dotnet test --no-build -c Release \
             --coverage \
             --coverage-output-format cobertura \
-            --coverage-output coverage.cobertura.xml
+            --coverage-output coverage.cobertura.xml \
+            -- --filter-not-trait "Category=Smoke"
 
       - name: Locate coverage artifact
         id: locate-coverage
@@ -62,3 +67,32 @@ jobs:
         with:
           name: coverage
           path: coverage.cobertura.xml
+
+  # Phase 7 / Plan 07-03 — sibling smoke-tests job. Pinned to ubuntu-latest because
+  # only the Linux runners ship a Docker daemon in the GitHub-hosted pool; macOS /
+  # Windows runners do NOT match this label so the job is skipped at the workflow
+  # level (visible in the run UI) rather than at the test level (which would
+  # silently pass). RESEARCH Risks #1.
+  #
+  # Smoke tests are NOT included in the 80/80 coverage gate (RESEARCH Finding #10)
+  # — this job runs without `--coverage` and uses `--filter-trait "Category=Smoke"`
+  # to invert the test job's filter.
+  smoke-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build (Release)
+        run: dotnet build -c Release --no-restore
+
+      - name: Smoke tests (requires Docker daemon)
+        run: |
+          dotnet test --no-build -c Release \
+            -- --filter-trait "Category=Smoke"
