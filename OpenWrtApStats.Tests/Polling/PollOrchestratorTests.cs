@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using OpenWrtApStats.Data;
 using OpenWrtApStats.Data.Models;
 using OpenWrtApStats.Data.Repositories;
 using OpenWrtApStats.Services.Polling;
@@ -474,6 +475,126 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
                      && e.Message.Contains("probe failed (top-level catch)", StringComparison.Ordinal))
             .ToList();
         Assert.NotEmpty(probeFailLogs);
+    }
+
+    // ── D-09 LastSuccessfulCycleUtc regression facts (Plan 06-02 Task 1) ──────
+    // The /health writer in Plan 06-03 consumes this property. The contract:
+    //  * fresh instance returns DateTime.MinValue (kind=Utc) — emits null in JSON.
+    //  * after a successful RunCycleAsync (commit succeeded), the property reflects
+    //    the same `now` the orchestrator embedded in the cycle's writes.
+    //  * if the cycle throws before tx.CommitAsync, the property is NOT updated
+    //    (write-after-commit invariant — mirrors the post-commit TOFU audit log).
+
+    [Fact]
+    public void LastSuccessfulCycleUtc_OnFreshInstance_IsDefault()
+    {
+        // D-09 cold-boot semantic — null/MinValue means "no successful cycle yet" (plan 06-03's
+        // /health writer maps this to lastPollAge=null in the JSON response).
+        var orch = BuildOrchestrator((n, _) => Task.FromResult<NodeProbeResult>(new NodeProbeResult.Failed(n.Id, "stub")));
+
+        Assert.Equal(default(DateTime), orch.LastSuccessfulCycleUtc);
+        Assert.Equal(DateTimeKind.Utc, orch.LastSuccessfulCycleUtc.Kind);
+    }
+
+    [Fact]
+    public async Task RunCycleAsync_AfterSuccessfulCommit_UpdatesLastSuccessfulCycleUtc()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (nodeId, _, bssid) = await SeedNodeWithOneNetworkAsync(ct);
+
+        Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync = (n, _) =>
+        {
+            // IClassFixture-shared DB — only this test's node should produce live data.
+            if (n.Id != nodeId)
+                return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Failed(n.Id, "not-this-test"));
+            var net = new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssid, SSID = "Net" };
+            return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Success(
+                NodeId: n.Id,
+                Networks: new[] { net },
+                Stations: Array.Empty<WLANStation>(),
+                NewlyTrustedFingerprint: null));
+        };
+
+        var orch = BuildOrchestrator(probeAsync);
+        var before = orch.LastSuccessfulCycleUtc;
+        var startedAt = DateTime.UtcNow;
+
+        await orch.RunCycleAsync(ct);
+
+        var after = orch.LastSuccessfulCycleUtc;
+        Assert.NotEqual(before, after);
+        Assert.Equal(DateTimeKind.Utc, after.Kind);
+        Assert.True(after >= startedAt.AddSeconds(-1), $"after={after:O} should be >= startedAt-1s ({startedAt:O})");
+        Assert.True(after <= DateTime.UtcNow.AddSeconds(1), $"after={after:O} should be <= UtcNow+1s");
+    }
+
+    [Fact]
+    public async Task RunCycleAsync_OnFailure_DoesNotUpdateLastSuccessfulCycleUtc()
+    {
+        // D-09 write-after-commit invariant: if anything in the cycle throws before tx.CommitAsync
+        // (and the catch block runs RollbackAsync), _ticks must NOT be advanced. We force a failure
+        // by injecting a stub network repo whose UpsertManyAsync throws.
+        var ct = TestContext.Current.CancellationToken;
+        var (nodeId, _, bssid) = await SeedNodeWithOneNetworkAsync(ct);
+
+        Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync = (n, _) =>
+        {
+            if (n.Id != nodeId)
+                return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Failed(n.Id, "not-this-test"));
+            var net = new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssid, SSID = "Net" };
+            return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Success(
+                NodeId: n.Id,
+                Networks: new[] { net },
+                Stations: Array.Empty<WLANStation>(),
+                NewlyTrustedFingerprint: null));
+        };
+
+        var dpFactory = new TestDbContextFactory(_fixture.Options);
+        var orch = new PollOrchestrator(
+            dpFactory,
+            new NodeRepo(dpFactory),
+            new ThrowingNetworkRepo(),
+            new StationRepo(dpFactory),
+            probeAsync,
+            new PollNotifier(),
+            NullLogger<PollOrchestrator>.Instance);
+
+        var before = orch.LastSuccessfulCycleUtc;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => orch.RunCycleAsync(ct));
+
+        Assert.Equal(before, orch.LastSuccessfulCycleUtc);   // _ticks stayed at the pre-cycle value
+    }
+
+    /// <summary>
+    /// Test double for <see cref="INetworkRepo"/> that throws on the cycle-shaped UpsertManyAsync.
+    /// Used by <see cref="RunCycleAsync_OnFailure_DoesNotUpdateLastSuccessfulCycleUtc"/> to force the
+    /// orchestrator into the catch + RollbackAsync path BEFORE tx.CommitAsync runs. All other methods
+    /// throw NotImplementedException — the orchestrator only invokes UpsertManyAsync on this seam
+    /// during the failing cycle.
+    /// </summary>
+    private sealed class ThrowingNetworkRepo : INetworkRepo
+    {
+        public Task UpsertManyAsync(DatabaseContext db, int wiFiNodeId, IEnumerable<WiFiNetwork> discovered, CancellationToken ct = default)
+            => throw new InvalidOperationException("simulated UpsertManyAsync failure (Plan 06-02 D-09 regression test)");
+
+        public Task UpsertManyAsync(int wiFiNodeId, IEnumerable<WiFiNetwork> discovered, CancellationToken ct = default)
+            => throw new NotImplementedException();
+
+        public Task<IReadOnlyList<WiFiNetwork>> GetByNodeAsync(int wiFiNodeId, CancellationToken ct = default)
+            => throw new NotImplementedException();
+
+        public Task<WiFiNetwork?> GetByIdAsync(int id, CancellationToken ct = default)
+            => throw new NotImplementedException();
+
+        public Task SetEnabledAsync(int id, bool enabled, CancellationToken ct = default)
+            => throw new NotImplementedException();
+
+        public Task MarkAbsentDisabledAsync(int wiFiNodeId, IReadOnlyCollection<string> presentMacs, CancellationToken ct = default)
+            => throw new NotImplementedException();
+
+        public Task<bool> AnyEnabledAsync(CancellationToken ct = default)
+            => throw new NotImplementedException();
     }
 
     [Fact]
