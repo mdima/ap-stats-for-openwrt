@@ -21,6 +21,13 @@
 </head>
 <body class="layout-fixed sidebar-expand-lg bg-body-tertiary">
     <Routes @rendermode="@PageRenderMode" />
+    @* Script load order is load-bearing: Bootstrap (with Popper, in the bundle build)
+       MUST be present before AdminLTE 4 RC7 binds its data-lte-toggle="sidebar"
+       handlers, modals, and dropdowns. AdminLTE 4 RC7's package.json declares a
+       hard dep on "bootstrap": "^5.3.8" — without bootstrap.bundle.min.js the
+       sidebar toggle silently no-ops. blazor.web.js loads last so static-asset
+       behaviour is in place before the Blazor runtime takes over the circuit. *@
+    <script src="/lib/bootstrap/js/bootstrap.bundle.min.js"></script>
     <script src="/lib/adminlte/js/adminlte.min.js"></script>
     <script src="_framework/blazor.web.js"></script>
 </body>
