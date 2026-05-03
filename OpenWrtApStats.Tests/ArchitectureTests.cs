@@ -148,4 +148,20 @@ public sealed class ArchitectureTests
 
         Assert.Empty(violators);
     }
+
+    /// <summary>
+    /// Phase 6 mirror of <see cref="PollNotifier_EventSignature_IsFuncTask"/>.
+    /// <c>ICircuitGate.Changed</c> MUST be <c>Func&lt;GateState, Task&gt;?</c> so subscribers
+    /// can declare <c>async Task</c> handlers (NOT forbidden <c>async void</c> per Pitfall 7).
+    /// Reverting to <c>Action&lt;GateState&gt;</c> would re-introduce the async-void exception
+    /// in <c>LivePausedBadge.OnGateChanged</c> — this test makes that regression loud.
+    /// </summary>
+    [Fact]
+    public void ICircuitGate_ChangedEventSignature_IsFuncTask()
+    {
+        var ev = typeof(OpenWrtApStats.Services.Gating.ICircuitGate).GetEvent("Changed");
+        Assert.NotNull(ev);
+        var expected = typeof(Func<OpenWrtApStats.Services.Gating.GateState, Task>);
+        Assert.Equal(expected, ev!.EventHandlerType);
+    }
 }
