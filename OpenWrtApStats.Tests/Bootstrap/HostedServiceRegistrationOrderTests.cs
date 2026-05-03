@@ -18,9 +18,11 @@ namespace OpenWrtApStats.Tests.Bootstrap;
 /// would query a not-yet-migrated WiFiNodes table and crash for the wrong reason. This test
 /// makes the silent reorder loud.
 /// <para>
-/// Phase 2 amendment: PollingHostedService is the 4th IHostedService. The test asserts both
-/// the locked order [Migrations, DataProtectionHealth, AppSettingsBootstrap, Polling] AND the
-/// total count == 4 (Pitfall 8). Future phases adding a 5th MUST amend this test again.
+/// Phase 7 amendment: WritabilityCheckHostedService is the 1st IHostedService; total count == 5
+/// (Writability → Migrations → DataProtectionHealth → AppSettingsBootstrap → Polling). The
+/// writability probe MUST run BEFORE EF migrations or a read-only /data mount silently corrupts
+/// the bootstrap chain (INF-07; D-01). Pitfall 8 still active: future phases adding a 6th
+/// MUST amend this test again.
 /// </para>
 /// </summary>
 public sealed class HostedServiceRegistrationOrderTests
@@ -63,6 +65,7 @@ public sealed class HostedServiceRegistrationOrderTests
         builder.Services.AddSingleton<OpenWrtApStats.Services.Gating.ICircuitGate,
                                       OpenWrtApStats.Services.Gating.AlwaysLiveGate>();
 
+        builder.Services.AddHostedService<WritabilityCheckHostedService>();      // NEW — Phase 7
         builder.Services.AddHostedService<MigrationsHostedService>();
         builder.Services.AddHostedService<DataProtectionHealthHostedService>();
         builder.Services.AddHostedService<AppSettingsBootstrapHostedService>();
@@ -76,8 +79,9 @@ public sealed class HostedServiceRegistrationOrderTests
 
         var implTypes = hostedDescriptors.Select(t => t!.Name).ToList();
 
-        // All four bootstrap-then-polling services must appear in exact registration order.
+        // All five bootstrap-then-polling services must appear in exact registration order.
         var allServices = implTypes.Where(n =>
+            n == nameof(WritabilityCheckHostedService) ||  // NEW — Phase 7 / INF-07
             n == nameof(MigrationsHostedService) ||
             n == nameof(DataProtectionHealthHostedService) ||
             n == nameof(AppSettingsBootstrapHostedService) ||
@@ -86,6 +90,7 @@ public sealed class HostedServiceRegistrationOrderTests
         Assert.Equal(
             new[]
             {
+                nameof(WritabilityCheckHostedService),       // NEW — Phase 7
                 nameof(MigrationsHostedService),
                 nameof(DataProtectionHealthHostedService),
                 nameof(AppSettingsBootstrapHostedService),
@@ -93,12 +98,8 @@ public sealed class HostedServiceRegistrationOrderTests
             },
             allServices);
 
-        // Phase 2 adds the 4th — total is now four. Pitfall 8 still active: future phases adding
-        // a 5th MUST amend this count again.
-        // Phase 6 amendment: zero new IHostedService entries — CircuitTrackerGate is a singleton,
-        // CircuitTrackerHandler is scoped (Blazor framework), DbHealthCheck and DataProtectionHealthCheck
-        // are IHealthCheck (different DI surface). HostedServiceRegistrationOrderTests count stays at 4
-        // (Pitfall 8 still active: future phases adding a 5th MUST amend this count again).
-        Assert.Equal(4, allServices.Count);
+        // Phase 7 adds the 5th — total is now five (WritabilityCheckHostedService prepended).
+        // Pitfall 8 still active: future phases adding a 6th MUST amend this count again.
+        Assert.Equal(5, allServices.Count);
     }
 }

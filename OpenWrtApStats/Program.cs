@@ -197,17 +197,19 @@ try
         .AddCheck<OpenWrtApStats.Services.Health.DataProtectionHealthCheck>("dataProtection");
 
     // 6. Bootstrap order (registration order = StartAsync order — Pitfall 10):
-    //    Migrations -> D-12 probe -> AppSettings warm-up -> Polling.
-    //    Phase 2 closes Phase 1's "DO NOT add a fourth here" reservation by adding
-    //    PollingHostedService LAST.
-    builder.Services.AddHostedService<MigrationsHostedService>();
+    //    Writability -> Migrations -> D-12 probe -> AppSettings warm-up -> Polling.
+    //    Phase 7 prepends WritabilityCheckHostedService so /data + /logs writability is
+    //    fail-fast verified BEFORE EF migrations run (INF-07; D-01). Phase 2 closed Phase 1's
+    //    "DO NOT add a fourth here" reservation by adding PollingHostedService LAST.
+    builder.Services.AddHostedService<WritabilityCheckHostedService>();     // 1st — Phase 7 (INF-07)
+    builder.Services.AddHostedService<MigrationsHostedService>();           // 2nd
     // Registered after MigrationsHostedService (schema must exist before the D-12 probe queries
     // WiFiNodes via INodeRepo) and before AppSettingsBootstrapHostedService (must fail-fast
     // before settings warm-up so a key-ring/DB mismatch surfaces BEFORE any settings consumer
     // observes a partially-bootstrapped app). D-12 / Pitfall 10.
-    builder.Services.AddHostedService<DataProtectionHealthHostedService>(); // D-12
-    builder.Services.AddHostedService<AppSettingsBootstrapHostedService>();
-    builder.Services.AddHostedService<PollingHostedService>();              // 4th — Phase 2
+    builder.Services.AddHostedService<DataProtectionHealthHostedService>(); // 3rd — D-12
+    builder.Services.AddHostedService<AppSettingsBootstrapHostedService>(); // 4th
+    builder.Services.AddHostedService<PollingHostedService>();              // 5th — Phase 2
 
     // 7. Razor components (Phase 3 starts here). Auth + ratelimit + forwarded headers are
     //    added in Plan 03-03; this Plan 03-01 only lights up the Razor seam so the smoke
