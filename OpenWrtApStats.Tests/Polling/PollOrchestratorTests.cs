@@ -383,6 +383,145 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
         Assert.Equal(goodNetId, goodStation.WiFiNetworkId);
     }
 
+    // Phase 7 LIVE-UAT row 5.2 escalation: operator reports stations stay Stale despite
+    // re-association. Probe path is healthy per logs (29 stations, 0 failed). MACs are
+    // uppercase, no duplicates. Two new tests pin down whether the orchestrator/repo
+    // pair correctly recovers a previously-stale station and handles AP roaming.
+
+    [Fact]
+    public async Task StaleStation_Recovers_ToOnline_WhenSeenAgainNextCycle()
+    {
+        // Pre-state: a station X exists with Status=Offline + LastPollDate=10 minutes ago
+        // (the in-DB representation of "stale"). Probe reports the SAME MAC under the same
+        // WiFiNetworkId. Expected post-state: Status=Online and LastPollDate within seconds
+        // of UtcNow. Failure here would prove a bug in StationRepo.UpsertCycleAsync that
+        // explains the LIVE-UAT symptom.
+        var ct = TestContext.Current.CancellationToken;
+        var (nodeId, netId, bssid) = await SeedNodeWithOneNetworkAsync(ct);
+        var staleMac = $"CC:01:02:03:04:{Random.Shared.Next(0, 255):X2}";
+
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.WLANStations.Add(new WLANStation
+            {
+                MacAddress = staleMac,
+                WiFiNetworkId = netId,
+                Status = Status.Offline,                                  // already marked offline (post mark-all-offline)
+                LastPollDate = DateTime.UtcNow.AddMinutes(-10),           // long enough ago that IsStale would be true on the dashboard
+            });
+            await seed.SaveChangesAsync(ct);
+        }
+
+        Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync = (n, _) =>
+        {
+            if (n.Id != nodeId)
+                return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Failed(n.Id, "not-this-test"));
+
+            return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Success(
+                NodeId: n.Id,
+                Networks: new[] { new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssid, SSID = "Net" } },
+                Stations: new[] { new WLANStation
+                {
+                    MacAddress = staleMac,                                // SAME MAC as the offline pre-state row
+                    Bssid = bssid,
+                    RSS = -55,
+                    LastPollDate = DateTime.UtcNow,
+                }},
+                NewlyTrustedFingerprint: null));
+        };
+
+        var orch = BuildOrchestrator(probeAsync);
+        await orch.RunCycleAsync(ct);
+
+        await using var verify = _fixture.CreateContext();
+        var recovered = await verify.WLANStations.FirstAsync(s => s.MacAddress == staleMac, ct);
+        Assert.Equal(Status.Online, recovered.Status);
+        Assert.True(recovered.LastPollDate > DateTime.UtcNow.AddSeconds(-30),
+            $"LastPollDate must be recent after re-association. Was: {recovered.LastPollDate:o}");
+        Assert.Equal(netId, recovered.WiFiNetworkId);
+
+        // No duplicate row got created — exactly one row for this MAC.
+        var dupCount = await verify.WLANStations.CountAsync(s => s.MacAddress == staleMac, ct);
+        Assert.Equal(1, dupCount);
+    }
+
+    [Fact]
+    public async Task RoamingStation_UpdatesWiFiNetworkId_AndStaysOnline_AcrossAPSwitch()
+    {
+        // Operator clarification: a station can switch APs autonomously while keeping the
+        // same MAC. Test scenario: station X is associated to AP1 on cycle 1, then in cycle 2
+        // it's reported by AP2 and NOT by AP1. Expected: the row's WiFiNetworkId updates to
+        // AP2's network and Status stays Online. Failure here would mean the dashboard
+        // would render stations under the wrong AP / SSID after roaming, or worse, drop them.
+        var ct = TestContext.Current.CancellationToken;
+        var (nodeId1, netId1, bssid1) = await SeedNodeWithOneNetworkAsync(ct);
+        var (nodeId2, netId2, bssid2) = await SeedNodeWithOneNetworkAsync(ct);
+        var roamMac = $"DD:01:02:03:04:{Random.Shared.Next(0, 255):X2}";
+
+        // Cycle 1: AP1 sees the station. AP2 sees nothing.
+        Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeCycle1 = (n, _) =>
+        {
+            if (n.Id == nodeId1)
+            {
+                return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Success(
+                    NodeId: n.Id,
+                    Networks: new[] { new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssid1, SSID = "Net" } },
+                    Stations: new[] { new WLANStation { MacAddress = roamMac, Bssid = bssid1, RSS = -45, LastPollDate = DateTime.UtcNow } },
+                    NewlyTrustedFingerprint: null));
+            }
+            if (n.Id == nodeId2)
+            {
+                return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Success(
+                    NodeId: n.Id,
+                    Networks: new[] { new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssid2, SSID = "Net" } },
+                    Stations: Array.Empty<WLANStation>(),
+                    NewlyTrustedFingerprint: null));
+            }
+            return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Failed(n.Id, "not-this-test"));
+        };
+
+        var orch1 = BuildOrchestrator(probeCycle1);
+        await orch1.RunCycleAsync(ct);
+
+        await using (var verify1 = _fixture.CreateContext())
+        {
+            var afterCycle1 = await verify1.WLANStations.FirstAsync(s => s.MacAddress == roamMac, ct);
+            Assert.Equal(Status.Online, afterCycle1.Status);
+            Assert.Equal(netId1, afterCycle1.WiFiNetworkId);
+        }
+
+        // Cycle 2: station roamed. AP2 sees it. AP1 does not.
+        Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeCycle2 = (n, _) =>
+        {
+            if (n.Id == nodeId1)
+            {
+                return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Success(
+                    NodeId: n.Id,
+                    Networks: new[] { new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssid1, SSID = "Net" } },
+                    Stations: Array.Empty<WLANStation>(),
+                    NewlyTrustedFingerprint: null));
+            }
+            if (n.Id == nodeId2)
+            {
+                return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Success(
+                    NodeId: n.Id,
+                    Networks: new[] { new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssid2, SSID = "Net" } },
+                    Stations: new[] { new WLANStation { MacAddress = roamMac, Bssid = bssid2, RSS = -60, LastPollDate = DateTime.UtcNow } },
+                    NewlyTrustedFingerprint: null));
+            }
+            return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Failed(n.Id, "not-this-test"));
+        };
+
+        var orch2 = BuildOrchestrator(probeCycle2);
+        await orch2.RunCycleAsync(ct);
+
+        await using var verify2 = _fixture.CreateContext();
+        var roamed = await verify2.WLANStations.FirstAsync(s => s.MacAddress == roamMac, ct);
+        Assert.Equal(Status.Online, roamed.Status);
+        Assert.Equal(netId2, roamed.WiFiNetworkId);   // FK switched to AP2
+        Assert.Equal(1, await verify2.WLANStations.CountAsync(s => s.MacAddress == roamMac, ct));
+    }
+
     [Fact]
     public async Task SC2_FanOut_NoSqliteLock()
     {
