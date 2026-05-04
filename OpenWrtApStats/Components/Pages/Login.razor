@@ -30,13 +30,11 @@
     <DataAnnotationsValidator />
     <AntiforgeryToken />
 
-    <div class="input-group mb-3">
-        <InputText class="form-control" placeholder="Username" autocomplete="username"
-                   @bind-Value="form.Username" />
-        <div class="input-group-text"><i class="bi bi-person"></i></div>
-    </div>
-    <ValidationMessage For="@(() => form.Username)" class="invalid-feedback d-block" />
-
+    @* Auth model is single shared UI password (SEC-04: PBKDF2 hash) — no per-user identity.
+       The setup wizard (Phase 4) collects only a password; the cookie principal's display name
+       is always the literal "operator". Surfacing a Username field on /Login was a UX nicety
+       from the Phase 3 UI-SPEC that confused operators during Phase 7 LIVE-UAT row 3.3 — they
+       had nothing meaningful to type. Dropped here for consistency with the auth model. *@
     <div class="input-group mb-3">
         <InputText type="password" class="form-control" placeholder="Password" autocomplete="current-password"
                    @bind-Value="form.Password" />
@@ -70,9 +68,6 @@
 
     public sealed class LoginForm
     {
-        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Username is required.")]
-        public string? Username { get; set; }
-
         [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Password is required.")]
         public string? Password { get; set; }
     }
@@ -115,10 +110,9 @@
             await Settings.SetUIPasswordHashAsync(newHash, HttpContext.RequestAborted);
         }
 
-        // Build the cookie principal. The username displayed in MainLayout is the literal
-        // "operator" (RESEARCH §Open Question #3 recommendation) — single shared password,
-        // no per-user identity.
-        var claims = new[] { new Claim(ClaimTypes.Name, form.Username ?? "operator") };
+        // Single shared UI password — no per-user identity. The cookie principal's Name claim
+        // is hardcoded to "operator" to match MainLayout's user-menu display label.
+        var claims = new[] { new Claim(ClaimTypes.Name, "operator") };
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         await HttpContext.SignInAsync(
             CookieAuthenticationDefaults.AuthenticationScheme,

@@ -47,7 +47,7 @@ public sealed class LoginTests
     }
 
     [Fact]
-    public void RendersUsername_Password_SubmitButton_Verbatim_Per_UISpec()
+    public void Renders_PasswordOnly_LoginForm_PerAuthModel()
     {
         using var ctx = BuildContext(
             new StubSettings { UIPasswordHash = "AQAAA-someHash" },
@@ -65,6 +65,12 @@ public sealed class LoginTests
         // contract is exercised end-to-end by AuthGateTests integration).
         Assert.Contains("Sign in to manage your access points", cut.Markup);
         Assert.Contains("login-box-msg", cut.Markup);
+
+        // Auth model: single shared UI password (SEC-04). No per-user identity → no Username
+        // field. Regression guard: a future contributor re-adding a Username InputText would
+        // re-introduce the Phase 7 LIVE-UAT row 3.3 confusion.
+        Assert.DoesNotContain("Username", cut.Markup, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("autocomplete=\"username\"", cut.Markup);
     }
 
     [Fact]
