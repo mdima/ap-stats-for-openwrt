@@ -21,14 +21,19 @@
 </head>
 <body class="layout-fixed sidebar-expand-lg bg-body-tertiary">
     <Routes @rendermode="@PageRenderMode" />
-    @* Script load order is load-bearing: Bootstrap (with Popper, in the bundle build)
-       MUST be present before AdminLTE 4 RC7 binds its data-lte-toggle="sidebar"
-       handlers, modals, and dropdowns. AdminLTE 4 RC7's package.json declares a
-       hard dep on "bootstrap": "^5.3.8" — without bootstrap.bundle.min.js the
-       sidebar toggle silently no-ops. blazor.web.js loads last so static-asset
-       behaviour is in place before the Blazor runtime takes over the circuit. *@
+    @* Script load order is load-bearing:
+       1. bootstrap.bundle.min.js — AdminLTE 4 RC7 hard-deps on "bootstrap": "^5.3.8";
+          modals/dropdowns silently no-op without it (closed UAT 3.2 in 6bfdcb8).
+       2. adminlte.min.js — wires its own data-lte-toggle="*" handlers at DOMContentLoaded.
+       3. sidebar-toggle.js — project-owned document-delegated handler for the sidebar
+          collapse, using attribute `data-app-toggle="sidebar"` so AdminLTE doesn't bind
+          to the same node. Survives Blazor InteractiveServer remounts that AdminLTE's
+          one-shot listener does not. Debug: .planning/debug/resolved/sidebar-toggle-no-collapse.md
+       4. blazor.web.js — static-asset behaviour is in place before the Blazor runtime
+          takes over the circuit. *@
     <script src="/lib/bootstrap/js/bootstrap.bundle.min.js"></script>
     <script src="/lib/adminlte/js/adminlte.min.js"></script>
+    <script src="/js/sidebar-toggle.js"></script>
     <script src="_framework/blazor.web.js"></script>
 </body>
 </html>

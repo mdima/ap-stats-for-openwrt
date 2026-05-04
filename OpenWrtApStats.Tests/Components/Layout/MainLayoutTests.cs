@@ -58,7 +58,10 @@ public sealed class MainLayoutTests
         // Top-nav with sidebar-toggle
         var topnav = cut.Find("nav.app-header");
         Assert.NotNull(topnav);
-        var toggle = topnav.QuerySelector("button[data-lte-toggle='sidebar'] i.bi.bi-list");
+        // data-app-toggle (NOT data-lte-toggle): the toggle is wired by a document-delegated
+        // listener in /js/sidebar-toggle.js so it survives Blazor's interactive remount.
+        // See .planning/debug/resolved/sidebar-toggle-no-collapse.md.
+        var toggle = topnav.QuerySelector("button[data-app-toggle='sidebar'] i.bi.bi-list");
         Assert.NotNull(toggle);
 
         // Phase 5 right-cluster: both badges render (LivePausedBadge renders "Live" via AlwaysLiveGate;
