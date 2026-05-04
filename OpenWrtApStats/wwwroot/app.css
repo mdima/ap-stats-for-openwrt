@@ -2,3 +2,4 @@
    almost everything we need. UI-SPEC.md is the design contract. */
 body { font-family: 'Source Sans 3', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
 .font-monospace { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.card-title {float: none;}
