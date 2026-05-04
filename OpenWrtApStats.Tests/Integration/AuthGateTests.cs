@@ -117,4 +117,106 @@ public sealed class AuthGateTests(SmokeFactoryFixture factory) : IClassFixture<S
             await settings.SetUIPasswordHashAsync(null, ct);
         }
     }
+
+    // Phase 7 LIVE-UAT row 3.3: in-browser POST to /Login failed with "A valid antiforgery
+    // token was not provided" because the form had TWO __RequestVerificationToken hidden
+    // inputs — one auto-emitted by <EditForm method="post"> and one from a redundant explicit
+    // <AntiforgeryToken /> sibling. Browsers submit both; Request.Form coalesces them into a
+    // comma-separated StringValues; validation fails. The two tests below guard against
+    // re-introducing the duplicate.
+
+    [Fact]
+    public async Task LoginPage_GET_EmitsExactlyOneAntiforgeryToken_AndSetsCookie()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var scope = _factory.Services.CreateScope();
+        var settings = scope.ServiceProvider.GetRequiredService<IAppSettingsService>();
+        await settings.SetUIPasswordHashAsync("AQAAA-real", ct);
+
+        try
+        {
+            var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+            var resp = await client.GetAsync("/Login", ct);
+            Assert.Equal(System.Net.HttpStatusCode.OK, resp.StatusCode);
+
+            var html = await resp.Content.ReadAsStringAsync(ct);
+
+            var setCookies = resp.Headers.TryGetValues("Set-Cookie", out var values)
+                ? string.Join("; ", values)
+                : "";
+            Assert.Contains(".AspNetCore.Antiforgery", setCookies);
+
+            // The /Login form MUST contain EXACTLY ONE __RequestVerificationToken hidden input.
+            // <EditForm method="post"> auto-injects one; a redundant explicit <AntiforgeryToken />
+            // sibling would produce a second one and break validation when the browser POSTs.
+            var formMatch = System.Text.RegularExpressions.Regex.Match(
+                html,
+                "<form[^>]*action=\"/Login\"[^>]*>.*?</form>",
+                System.Text.RegularExpressions.RegexOptions.Singleline);
+            Assert.True(formMatch.Success, "expected a <form action=\"/Login\"> in /Login HTML");
+            var tokenCount = System.Text.RegularExpressions.Regex.Matches(
+                formMatch.Value,
+                "name=\"__RequestVerificationToken\"").Count;
+            Assert.Equal(1, tokenCount);
+        }
+        finally
+        {
+            await settings.SetUIPasswordHashAsync(null, ct);
+        }
+    }
+
+    [Fact]
+    public async Task LoginPage_POST_FaithfullyReplaysFormFields_RoundTripsAntiforgery_AndSignsIn()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var scope = _factory.Services.CreateScope();
+        var settings = scope.ServiceProvider.GetRequiredService<IAppSettingsService>();
+        var hasher = scope.ServiceProvider.GetRequiredService<OpenWrtApStats.Services.Auth.IUIPasswordHasher>();
+        var hash = hasher.Hash("operator-pw");
+        await settings.SetUIPasswordHashAsync(hash, ct);
+
+        try
+        {
+            var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+            {
+                AllowAutoRedirect = false,
+                HandleCookies = true,
+            });
+
+            // GET /Login → harvest the form so we replay it exactly the way a browser would.
+            var getResp = await client.GetAsync("/Login", ct);
+            Assert.Equal(System.Net.HttpStatusCode.OK, getResp.StatusCode);
+            var html = await getResp.Content.ReadAsStringAsync(ct);
+
+            var formMatch = System.Text.RegularExpressions.Regex.Match(
+                html,
+                "<form[^>]*action=\"/Login\"[^>]*>(?<body>.*?)</form>",
+                System.Text.RegularExpressions.RegexOptions.Singleline);
+            Assert.True(formMatch.Success, "expected a <form action=\"/Login\"> in /Login HTML");
+            var formBody = formMatch.Groups["body"].Value;
+
+            // Replay every hidden input — duplicate tokens (if any) included, exactly like a browser.
+            var fields = new List<KeyValuePair<string, string>>();
+            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
+                formBody,
+                "<input[^>]*type=\"hidden\"[^>]*name=\"(?<name>[^\"]+)\"[^>]*value=\"(?<value>[^\"]*)\""))
+            {
+                fields.Add(new KeyValuePair<string, string>(m.Groups["name"].Value, m.Groups["value"].Value));
+            }
+            // Plus the password input the operator types.
+            fields.Add(new KeyValuePair<string, string>("form.Password", "operator-pw"));
+
+            var postResp = await client.PostAsync("/Login", new System.Net.Http.FormUrlEncodedContent(fields), ct);
+
+            // Sign-in flow ends with a 302 redirect to "/", NOT a 400 antiforgery error.
+            Assert.True(
+                postResp.StatusCode == System.Net.HttpStatusCode.Redirect ||
+                postResp.StatusCode == System.Net.HttpStatusCode.Found,
+                $"expected 302 redirect from /Login POST, got {(int)postResp.StatusCode} {postResp.StatusCode}. Body: {await postResp.Content.ReadAsStringAsync(ct)}");
+        }
+        finally
+        {
+            await settings.SetUIPasswordHashAsync(null, ct);
+        }
+    }
 }

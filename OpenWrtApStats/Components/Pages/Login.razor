@@ -26,9 +26,13 @@
     <div class="alert alert-danger" role="alert">@_banner</div>
 }
 
+@* No explicit <AntiforgeryToken /> here — <EditForm method="post"> auto-injects exactly
+   one __RequestVerificationToken hidden input. Adding a second one (e.g. via a literal
+   <AntiforgeryToken />) caused Phase 7 LIVE-UAT row 3.3 to fail with "A valid antiforgery
+   token was not provided": the browser submitted both tokens, Request.Form coalesced them
+   into a comma-separated StringValues, and the validator could not match the cookie token. *@
 <EditForm Model="form" method="post" OnValidSubmit="HandleLoginAsync" FormName="login">
     <DataAnnotationsValidator />
-    <AntiforgeryToken />
 
     @* Auth model is single shared UI password (SEC-04: PBKDF2 hash) — no per-user identity.
        The setup wizard (Phase 4) collects only a password; the cookie principal's display name
