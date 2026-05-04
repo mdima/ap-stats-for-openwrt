@@ -66,4 +66,53 @@ public sealed class EmptyStateTests
 
         Assert.DoesNotContain("btn-primary", cut.Markup);
     }
+
+    // Phase 7 row 4.1 follow-up: optional secondary ghost-link below the primary CTA.
+
+    [Fact]
+    public void WithoutSecondaryLabel_OmitsSecondaryLink()
+    {
+        using var ctx = new BunitContext();
+        var cut = ctx.Render<EmptyState>(p => p
+            .Add(c => c.IconClass, "bi-router-fill")
+            .Add(c => c.Heading, "No access points yet")
+            .Add(c => c.Body, "Add your first OpenWRT access point.")
+            .Add(c => c.CtaLabel, "Add your first OpenWRT node")
+            .Add(c => c.CtaHref, "/Nodes/Add")
+            .Add(c => c.CtaIconClass, "bi-plus-lg"));
+            // No SecondaryLabel passed.
+
+        Assert.Single(cut.FindAll("a.btn-primary"));
+        // No secondary anchor — only the primary CTA.
+        Assert.Empty(cut.FindAll("a.text-body-secondary"));
+    }
+
+    [Fact]
+    public void WithSecondaryLabel_RendersGhostLinkBelowPrimary()
+    {
+        using var ctx = new BunitContext();
+        var cut = ctx.Render<EmptyState>(p => p
+            .Add(c => c.IconClass, "bi-router-fill")
+            .Add(c => c.Heading, "No access points yet")
+            .Add(c => c.Body, "Add your first OpenWRT access point.")
+            .Add(c => c.CtaLabel, "Add your first OpenWRT node")
+            .Add(c => c.CtaHref, "/Nodes/Add")
+            .Add(c => c.CtaIconClass, "bi-plus-lg")
+            .Add(c => c.SecondaryLabel, "Continue setup")
+            .Add(c => c.SecondaryHref, "/setup/password")
+            .Add(c => c.SecondaryIconClass, "bi-arrow-right-circle"));
+
+        // Primary CTA still present.
+        Assert.Single(cut.FindAll("a.btn-primary"));
+        // Secondary ghost-link is present with the right copy + href + icon.
+        var secondary = cut.Find("a.text-body-secondary");
+        Assert.Contains("Continue setup", secondary.TextContent);
+        Assert.Equal("/setup/password", secondary.GetAttribute("href"));
+        Assert.NotNull(secondary.QuerySelector("i.bi-arrow-right-circle"));
+
+        // DOM order: secondary must follow primary.
+        var primaryIdx = cut.Markup.IndexOf("Add your first OpenWRT node", System.StringComparison.Ordinal);
+        var secondaryIdx = cut.Markup.IndexOf("Continue setup", System.StringComparison.Ordinal);
+        Assert.True(primaryIdx >= 0 && secondaryIdx > primaryIdx);
+    }
 }

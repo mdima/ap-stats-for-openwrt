@@ -237,8 +237,12 @@ public sealed class DashboardTests
     }
 
     [Fact]
-    public void ZeroNodes_WizardDismissed_RendersAddYourFirstNodeCta()
+    public void ZeroNodes_WizardDismissed_RendersAddYourFirstNodeCta_AndSecondaryContinueSetupLink()
     {
+        // Phase 7 row 4.1 follow-up: SetupLayout's "Skip for now" footer promises "you can always
+        // finish setup later from the dashboard." After skip, primary CTA remains "Add your first
+        // OpenWRT node" (D-09 / ONB-06) but a secondary "Continue setup" ghost-link is rendered
+        // below it so the promise holds.
         var (ctx, _, _, _, _) = Build(
             Array.Empty<WiFiNode>(),
             Array.Empty<WLANStation>(),
@@ -247,9 +251,20 @@ public sealed class DashboardTests
         using (ctx)
         {
             var cut = ctx.Render<Dashboard>();
+
+            // Primary CTA unchanged.
             Assert.Contains("Add your first OpenWRT node", cut.Markup);
             Assert.Contains("href=\"/Nodes/Add\"", cut.Markup);
-            Assert.DoesNotContain("Continue setup", cut.Markup);
+
+            // Secondary "Continue setup" link MUST be present pointing to /setup/password.
+            Assert.Contains("Continue setup", cut.Markup);
+            Assert.Contains("href=\"/setup/password\"", cut.Markup);
+
+            // Order matters: the secondary link must render AFTER the primary CTA in the DOM.
+            var primaryIdx = cut.Markup.IndexOf("Add your first OpenWRT node", StringComparison.Ordinal);
+            var secondaryIdx = cut.Markup.IndexOf("Continue setup", StringComparison.Ordinal);
+            Assert.True(primaryIdx >= 0 && secondaryIdx > primaryIdx,
+                $"secondary 'Continue setup' link must render after the primary CTA. primaryIdx={primaryIdx}, secondaryIdx={secondaryIdx}");
         }
     }
 

@@ -1,11 +1,16 @@
 @* EmptyState.razor — reusable empty-state per UI-SPEC §Empty-State Visual Pattern.
    Used by DASH-09, DASH-10, Nodes Index zero-state, Node Detail no-WLAN-yet (CTA forms),
    and DASH-11 "WLANs are healthy, no clients right now" (CTA-less form, Phase 5 / B1).
-   Single 4rem muted icon + heading + body + (optionally) ONE primary CTA.
+   Single 4rem muted icon + heading + body + (optionally) ONE primary CTA + (optionally)
+   ONE secondary ghost-link below.
 
    Phase 5 B1 ownership: CtaLabel / CtaHref / CtaIconClass are optional. When CtaLabel is
    null or empty the CTA <a> is omitted entirely — callers that genuinely have no CTA (e.g.
-   DASH-11) render a clean icon+heading+body block with no broken hyperlink. *@
+   DASH-11) render a clean icon+heading+body block with no broken hyperlink.
+
+   Phase 7 row 4.1 follow-up: SecondaryLabel / SecondaryHref / SecondaryIconClass enable a
+   small de-emphasized link below the primary CTA. Used by DASH-09 to honor the SetupLayout
+   "you can always finish setup later from the dashboard" promise after the wizard is skipped. *@
 
 <div class="text-center py-5">
     <i class="bi @IconClass" style="font-size: 4rem;" aria-hidden="true"></i>
@@ -17,6 +22,18 @@
             <i class="bi @CtaIconClass me-2"></i>@CtaLabel
         </a>
     }
+    @if (!string.IsNullOrEmpty(SecondaryLabel))
+    {
+        <div class="mt-3">
+            <a class="text-body-secondary small" href="@SecondaryHref">
+                @if (!string.IsNullOrEmpty(SecondaryIconClass))
+                {
+                    <i class="bi @SecondaryIconClass me-1" aria-hidden="true"></i>
+                }
+                @SecondaryLabel
+            </a>
+        </div>
+    }
 </div>
 
 @code {
@@ -26,4 +43,7 @@
     [Parameter] public string CtaLabel { get; set; } = "";
     [Parameter] public string CtaHref { get; set; } = "";
     [Parameter] public string CtaIconClass { get; set; } = "";
+    [Parameter] public string SecondaryLabel { get; set; } = "";
+    [Parameter] public string SecondaryHref { get; set; } = "";
+    [Parameter] public string SecondaryIconClass { get; set; } = "";
 }

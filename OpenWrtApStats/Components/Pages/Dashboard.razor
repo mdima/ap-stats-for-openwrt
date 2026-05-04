@@ -24,7 +24,10 @@
 }
 else if (_nodeCount == 0)
 {
-    @* DASH-09 zero-nodes empty state. D-09 (Phase 4): CTA conditional on WizardDismissed. *@
+    @* DASH-09 zero-nodes empty state. D-09 (Phase 4): primary CTA conditional on WizardDismissed.
+       Phase 7 row 4.1 follow-up: when WizardDismissed=true the primary stays "Add your first
+       OpenWRT node" but a secondary "Continue setup" link is rendered below — honors the
+       SetupLayout "you can always finish setup later from the dashboard" promise. *@
     <EmptyState IconClass="bi-router-fill"
                 Heading="No access points yet"
                 Body="@(_wizardDismissed
@@ -32,7 +35,10 @@ else if (_nodeCount == 0)
                     : "Your access points are not configured yet. Continue the setup wizard to get started.")"
                 CtaLabel="@(_wizardDismissed ? "Add your first OpenWRT node" : "Continue setup")"
                 CtaHref="@(_wizardDismissed ? "/Nodes/Add" : "/setup/password")"
-                CtaIconClass="@(_wizardDismissed ? "bi-plus-lg" : "bi-arrow-right-circle")" />
+                CtaIconClass="@(_wizardDismissed ? "bi-plus-lg" : "bi-arrow-right-circle")"
+                SecondaryLabel="@(_wizardDismissed ? "Continue setup" : "")"
+                SecondaryHref="@(_wizardDismissed ? "/setup/password" : "")"
+                SecondaryIconClass="@(_wizardDismissed ? "bi-arrow-right-circle" : "")" />
 }
 else if (!_anyEnabledWlan)
 {
