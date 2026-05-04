@@ -74,7 +74,17 @@ else
                         <dd class="col-sm-8"><RssiCell Rss="_station.RSS" /></dd>
 
                         <dt class="col-sm-4">Last seen</dt>
-                        <dd class="col-sm-8">@RelativeTime(_station.LastPollDate) <small class="text-body-secondary">(@DateTime.SpecifyKind(_station.LastPollDate, DateTimeKind.Utc).ToString("u"))</small></dd>
+                        <dd class="col-sm-8">
+                            @RelativeTime(_station.LastPollDate)
+                            @* /js/local-time.js rewrites the <time> textContent into the browser's
+                               local timezone via toLocaleString(). UTC ISO 8601 in the datetime
+                               attribute is the source of truth; the inner text is only the
+                               no-JS fallback so view-source still shows a reasonable value. *@
+                            <small class="text-body-secondary">
+                                (<time datetime="@(DateTime.SpecifyKind(_station.LastPollDate, DateTimeKind.Utc).ToString("o"))"
+                                       data-local-time>@DateTime.SpecifyKind(_station.LastPollDate, DateTimeKind.Utc).ToString("u")</time>)
+                            </small>
+                        </dd>
 
                         <dt class="col-sm-4">Status</dt>
                         <dd class="col-sm-8"><StatusBadge Status="_station.Status" IsStale="@_isStale" /></dd>
