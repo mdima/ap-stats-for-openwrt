@@ -356,14 +356,15 @@ else
 
     private bool IsStale(DashboardRow row)
     {
-        // D-08 multiplier 1.5 — UI-SPEC line 700.
+        // D-08 multiplier 2 -- UI-SPEC line 700 (05-UI-SPEC.md). Sense is `<`: Stale
+        // is the transient window WITHIN 2 cycles of LastSeen; beyond 2 cycles -> Offline.
         // SpecifyKind(Utc): SQLite round-trips DateTimes with Kind=Unspecified; the
         // orchestrator only ever writes UTC, so reattach the kind before the subtraction.
         // ToUniversalTime() on Unspecified treats it as local and overshoots by N hours.
         if (row.StationStatus != Status.Offline) return false;
-        var threshold = TimeSpan.FromSeconds(1.5 * Settings.PollingIntervalSeconds);
+        var threshold = TimeSpan.FromSeconds(2 * Settings.PollingIntervalSeconds);
         var elapsed = _cycleEndUtc - DateTime.SpecifyKind(row.LastSeen, DateTimeKind.Utc);
-        return elapsed >= threshold;
+        return elapsed < threshold;
     }
 
     private void ApplySort(string column)

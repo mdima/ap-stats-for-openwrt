@@ -189,14 +189,15 @@ else
             }
         }
 
-        // Stale derivation (D-08 multiplier 1.5; UI-SPEC line 700). The detail page's
+        // Stale derivation (D-08 multiplier 2; UI-SPEC line 700, 05-UI-SPEC.md). Sense
+        // is `<`: Stale = transient window within 2 cycles. The detail page's
         // _cycleEndUtc anchor is the current wall clock — Plan 03 wires Dashboard's anchor
         // to PollNotifier; the detail page is a snapshot, so "now" is the closest proxy.
         // SpecifyKind(Utc): SQLite round-trips DateTimes with Kind=Unspecified; the
         // orchestrator only ever writes UTC, so reattach the kind before the subtraction.
         _isStale = _station.Status == Status.Offline
                 && (DateTime.UtcNow - DateTime.SpecifyKind(_station.LastPollDate, DateTimeKind.Utc))
-                       >= TimeSpan.FromSeconds(1.5 * Settings.PollingIntervalSeconds);
+                       < TimeSpan.FromSeconds(2 * Settings.PollingIntervalSeconds);
 
         _loading = false;
     }
