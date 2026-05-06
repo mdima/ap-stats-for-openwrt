@@ -4,6 +4,7 @@ using OpenWrtApStats.Data;
 using OpenWrtApStats.Data.Models;
 using OpenWrtApStats.Data.Repositories;
 using OpenWrtApStats.Services.Polling.Exceptions;
+using OpenWrtApStats.Services.Settings;
 
 namespace OpenWrtApStats.Services.Polling;
 
@@ -33,7 +34,8 @@ public sealed class PollOrchestrator(
     IStationRepo stationRepo,
     Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync,
     PollNotifier notifier,
-    ILogger<PollOrchestrator> log)
+    ILogger<PollOrchestrator> log,
+    IAppSettingsService settings)
 {
     // D-09 — lock-free LastSuccessfulCycleUtc exposure for /health (plan 06-03 reads this).
     // Volatile.Read<T> requires primitive/reference type; DateTime (struct) is NOT eligible —
@@ -159,10 +161,24 @@ public sealed class PollOrchestrator(
             // 7. Station upsert + final SaveChanges.
             await stationRepo.UpsertCycleAsync(db, deduped, ct);
             await db.SaveChangesAsync(ct);
+
+            // 7.5 Clear telemetry for stations missed >= 2 polling cycles (D-08 multiplier; matches IsStale UI cutoff).
+            //     Stale window (1 missed cycle, elapsed < 2x): keep last-known RSS/Tx/Rx (Stale-badge state).
+            //     Offline window (elapsed >= 2x): blank the cells via Detail.razor / RssiCell.razor "—" render
+            //     paths (null RSS / 0.0 bitrate). MUST stay inside the try block so a failure rolls back with
+            //     the upsert (D-04 coordinator-tx invariant). `now` is the cycle timestamp captured at step 4.
+            var staleCutoff = now - TimeSpan.FromSeconds(2 * settings.PollingIntervalSeconds);
+            await db.WLANStations
+                .Where(s => s.Status == Status.Offline && s.LastPollDate < staleCutoff)
+                .ExecuteUpdateAsync(u => u
+                    .SetProperty(s => s.RSS, (int?)null)
+                    .SetProperty(s => s.TxBitrate, 0.0)
+                    .SetProperty(s => s.RxBitrate, 0.0), ct);
+
             await tx.CommitAsync(ct);
             Interlocked.Exchange(ref _ticks, now.Ticks);     // D-09 — only after successful commit (write-after-commit invariant; rolled-back cycles do NOT advance _ticks).
 
-            // 7.5 B10 LOCK -- post-commit TOFU audit log. Only emitted when the trust persisted.
+            // 7.6 B10 LOCK -- post-commit TOFU audit log. Only emitted when the trust persisted.
             foreach (var t in newlyTrusted)
             {
                 log.LogInformation(
