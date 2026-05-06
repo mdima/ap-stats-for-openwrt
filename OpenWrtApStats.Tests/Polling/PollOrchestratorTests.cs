@@ -7,6 +7,7 @@ using OpenWrtApStats.Data.Models;
 using OpenWrtApStats.Data.Repositories;
 using OpenWrtApStats.Services.Polling;
 using OpenWrtApStats.Services.Polling.Exceptions;
+using OpenWrtApStats.Services.Settings;
 using OpenWrtApStats.Tests.TestSupport;
 using Xunit;
 
@@ -41,7 +42,8 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
 
     private PollOrchestrator BuildOrchestrator(
         Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync,
-        ILogger<PollOrchestrator>? logger = null)
+        ILogger<PollOrchestrator>? logger = null,
+        int pollingIntervalSeconds = 30)
     {
         var dpFactory = new TestDbContextFactory(_fixture.Options);
         return new PollOrchestrator(
@@ -51,7 +53,8 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
             new StationRepo(dpFactory),
             probeAsync,
             new PollNotifier(),
-            logger ?? NullLogger<PollOrchestrator>.Instance);
+            logger ?? NullLogger<PollOrchestrator>.Instance,
+            new StubSettings(pollingIntervalSeconds));
     }
 
     private async Task<(int nodeId, int netId, string netBssid)> SeedNodeWithOneNetworkAsync(CancellationToken ct, string? hostKeyFingerprint = null)
@@ -696,7 +699,8 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
             new StationRepo(dpFactory),
             probeAsync,
             new PollNotifier(),
-            NullLogger<PollOrchestrator>.Instance);
+            NullLogger<PollOrchestrator>.Instance,
+            new StubSettings(30));
 
         var before = orch.LastSuccessfulCycleUtc;
 
@@ -792,5 +796,167 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
         Assert.True(spreadMs < 50, $"Probe entry spread should be < 50ms (concurrent fan-out); actual={spreadMs:F1}ms");
         Assert.True(cycleSw.Elapsed < TimeSpan.FromMilliseconds(500),
             $"Total cycle wall-clock should be < 500ms (concurrent); actual={cycleSw.ElapsedMilliseconds}ms");
+    }
+
+    [Fact]
+    public async Task MissedStation_PreservesTelemetry_DuringStaleWindow_FirstMissedCycle()
+    {
+        // Stale window: 1 missed cycle, elapsed < 2x interval. Telemetry MUST be preserved
+        // (operator's mental model: badge = Stale, cells still show last-known signal/bitrate).
+        var ct = TestContext.Current.CancellationToken;
+        var (nodeId, netId, bssid) = await SeedNodeWithOneNetworkAsync(ct);
+        var mac = $"AA:01:02:03:04:{Random.Shared.Next(0, 255):X2}";
+
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.WLANStations.Add(new WLANStation
+            {
+                MacAddress = mac,
+                WiFiNetworkId = netId,
+                Status = Status.Offline,                                  // already-offline pre-state
+                LastPollDate = DateTime.UtcNow.AddSeconds(-30),           // 1x interval ago — Stale window (< 2x = 60s)
+                RSS = -55,
+                TxBitrate = 72.0,
+                RxBitrate = 65.0,
+            });
+            await seed.SaveChangesAsync(ct);
+        }
+
+        // Probe returns NO stations for this node (the missing station scenario).
+        Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync = (n, _) =>
+            Task.FromResult<NodeProbeResult>(new NodeProbeResult.Success(
+                NodeId: n.Id,
+                Networks: new[] { new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssid, SSID = "Net" } },
+                Stations: Array.Empty<WLANStation>(),
+                NewlyTrustedFingerprint: null));
+
+        var orch = BuildOrchestrator(probeAsync, pollingIntervalSeconds: 30);
+        await orch.RunCycleAsync(ct);
+
+        await using var verify = _fixture.CreateContext();
+        var row = await verify.WLANStations.FirstAsync(s => s.MacAddress == mac, ct);
+        Assert.Equal(Status.Offline, row.Status);
+        Assert.Equal(-55, row.RSS);                                       // PRESERVED
+        Assert.Equal(72.0, row.TxBitrate);                                // PRESERVED
+        Assert.Equal(65.0, row.RxBitrate);                                // PRESERVED
+    }
+
+    [Fact]
+    public async Task MissedStation_ClearsTelemetry_AfterTwoMissedCycles_ButPreservesIdentity()
+    {
+        // Offline window: elapsed >= 2x. Telemetry MUST be cleared (badge = Offline, cells "—").
+        // Identity columns (MAC, Hostname, Name, WiFiNetworkId) MUST be preserved.
+        // Use 3x rather than exactly 2x to avoid boundary-condition ambiguity around the strict-less-than cutoff.
+        var ct = TestContext.Current.CancellationToken;
+        var (nodeId, netId, bssid) = await SeedNodeWithOneNetworkAsync(ct);
+        var mac = $"AB:01:02:03:04:{Random.Shared.Next(0, 255):X2}";
+        var seededHostname = "device-stale";
+        var seededName     = "Operator-Tag";
+
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.WLANStations.Add(new WLANStation
+            {
+                MacAddress = mac,
+                WiFiNetworkId = netId,
+                Hostname = seededHostname,
+                Name = seededName,
+                Status = Status.Offline,
+                LastPollDate = DateTime.UtcNow.AddSeconds(-90),           // 3x interval ago — Offline window (>= 2x = 60s)
+                RSS = -60,
+                TxBitrate = 54.0,
+                RxBitrate = 48.0,
+            });
+            await seed.SaveChangesAsync(ct);
+        }
+
+        Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync = (n, _) =>
+            Task.FromResult<NodeProbeResult>(new NodeProbeResult.Success(
+                NodeId: n.Id,
+                Networks: new[] { new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssid, SSID = "Net" } },
+                Stations: Array.Empty<WLANStation>(),
+                NewlyTrustedFingerprint: null));
+
+        var orch = BuildOrchestrator(probeAsync, pollingIntervalSeconds: 30);
+        await orch.RunCycleAsync(ct);
+
+        await using var verify = _fixture.CreateContext();
+        var row = await verify.WLANStations.FirstAsync(s => s.MacAddress == mac, ct);
+        // Telemetry CLEARED.
+        Assert.Equal(Status.Offline, row.Status);
+        Assert.Null(row.RSS);
+        Assert.Equal(0.0, row.TxBitrate);
+        Assert.Equal(0.0, row.RxBitrate);
+        // Identity PRESERVED.
+        Assert.Equal(mac, row.MacAddress);
+        Assert.Equal(seededHostname, row.Hostname);
+        Assert.Equal(seededName, row.Name);
+        Assert.Equal(netId, row.WiFiNetworkId);
+    }
+
+    [Fact]
+    public async Task RecoveringStation_RehydratesTelemetry_FromProbe_AfterClearedState()
+    {
+        // Regression pin: a station in cleared state (post-Offline-window) must rehydrate telemetry
+        // when probed again. Guards against UpsertCycleAsync skipping rows whose RSS is null.
+        var ct = TestContext.Current.CancellationToken;
+        var (nodeId, netId, bssid) = await SeedNodeWithOneNetworkAsync(ct);
+        var mac = $"AC:01:02:03:04:{Random.Shared.Next(0, 255):X2}";
+
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.WLANStations.Add(new WLANStation
+            {
+                MacAddress = mac,
+                WiFiNetworkId = netId,
+                Status = Status.Offline,                                  // already cleared
+                LastPollDate = DateTime.UtcNow.AddSeconds(-150),          // 5x interval ago (well past cutoff)
+                RSS = null,
+                TxBitrate = 0.0,
+                RxBitrate = 0.0,
+            });
+            await seed.SaveChangesAsync(ct);
+        }
+
+        // Probe returns the station with FRESH telemetry.
+        Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync = (n, _) =>
+            Task.FromResult<NodeProbeResult>(new NodeProbeResult.Success(
+                NodeId: n.Id,
+                Networks: new[] { new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssid, SSID = "Net" } },
+                Stations: new[] { new WLANStation
+                {
+                    MacAddress = mac,
+                    Bssid = bssid,
+                    RSS = -55,
+                    TxBitrate = 72.0,
+                    RxBitrate = 65.0,
+                    LastPollDate = DateTime.UtcNow,
+                }},
+                NewlyTrustedFingerprint: null));
+
+        var orch = BuildOrchestrator(probeAsync, pollingIntervalSeconds: 30);
+        await orch.RunCycleAsync(ct);
+
+        await using var verify = _fixture.CreateContext();
+        var row = await verify.WLANStations.FirstAsync(s => s.MacAddress == mac, ct);
+        Assert.Equal(Status.Online, row.Status);
+        Assert.Equal(-55, row.RSS);
+        Assert.Equal(72.0, row.TxBitrate);
+        Assert.Equal(65.0, row.RxBitrate);
+        Assert.Equal(netId, row.WiFiNetworkId);
+    }
+
+    /// <summary>Minimal IAppSettingsService stub for orchestrator tests. Only PollingIntervalSeconds is exercised.</summary>
+    private sealed class StubSettings(int pollingIntervalSeconds) : IAppSettingsService
+    {
+        public int     PollingIntervalSeconds => pollingIntervalSeconds;
+        public string? UIPasswordHash         => null;
+        public bool    WizardDismissed        => false;
+        public event Action<IAppSettingsService>? Changed { add { } remove { } }
+
+        public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default) => Task.CompletedTask;
+        public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 }
