@@ -137,6 +137,9 @@ public sealed class PollingHostedService(
     {
         if (newState == GateState.Paused)
         {
+            log.LogInformation(
+                "Visitor gate transitioned to Paused — polling will block until the next visitor connects "
+                + "(grace = DisconnectedCircuitRetentionPeriod + 30s)");
             // Re-arm the cold-start flag. The NEXT Live transition will trigger an immediate cycle.
             _coldStart = true;
             return Task.CompletedTask;
@@ -148,6 +151,11 @@ public sealed class PollingHostedService(
         // guarantees a single kick even if the loop body's `if (_coldStart)` race-fires too:
         // _coldStart is now false, the loop's branch skips, and TryRunCycleAsync's SemaphoreSlim
         // would drop a duplicate concurrent invocation anyway (Plan 02-03 overlap-skip semantic).
+        // Log BEFORE the kick branch so the structured {ColdStart} field reads _coldStart's
+        // pre-mutation value (true on a re-armed transition, false on a normal Live arrival).
+        log.LogInformation(
+            "Visitor gate transitioned to Live — polling resuming{ColdStart}",
+            _coldStart ? " (cold-start kick)" : "");
         if (_coldStart)
         {
             _coldStart = false;

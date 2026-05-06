@@ -278,6 +278,99 @@ public sealed class PollingHostedServiceTests
         await sut.StopAsync(ct);
     }
 
+    [Fact]
+    public async Task OnGateChanged_LogsPausedTransition_AtInformationLevel()
+    {
+        // UAT row 6.1 — visitor-gate Paused transition MUST emit an Information-level log line
+        // so the operator can grep the rolling Serilog file to time the
+        // DisconnectedCircuitRetentionPeriod + 30s grace empirically.
+        var ct = TestContext.Current.CancellationToken;
+        var capLogger = new CapturingLogger<PollingHostedService>();
+        var settings = new StubAppSettingsService(pollingIntervalSeconds: 60);  // long timer — gate transitions are the only events
+        var gate = new StubGate();
+
+        Func<CancellationToken, Task> runCycle = _ => Task.CompletedTask;
+
+        var sut = new PollingHostedService(runCycle, settings, gate, capLogger);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+        await sut.StartAsync(cts.Token);
+        try
+        {
+            gate.Open();   // Paused -> Live (consume cold-start kick + first Live log)
+            await Task.Delay(50, ct);
+            gate.Close();  // Live -> Paused — emits the log line under test
+
+            // Bounded poll — wait up to 2s for the Paused log entry to appear.
+            var deadline = DateTime.UtcNow.AddSeconds(2);
+            while (DateTime.UtcNow < deadline
+                && !capLogger.Entries.Any(e =>
+                    e.Level == LogLevel.Information
+                    && e.Message.StartsWith("Visitor gate transitioned to Paused", StringComparison.Ordinal)))
+            {
+                await Task.Delay(20, ct);
+            }
+        }
+        finally
+        {
+            cts.Cancel();
+            await sut.StopAsync(ct);
+        }
+
+        Assert.Contains(capLogger.Entries, e =>
+            e.Level == LogLevel.Information
+            && e.Message.StartsWith("Visitor gate transitioned to Paused", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task OnGateChanged_LogsLiveTransition_WithColdStartFlag_AtInformationLevel()
+    {
+        // UAT row 6.1 — visitor-gate Live transition MUST emit an Information-level log line
+        // including the cold-start indicator so the operator can distinguish a re-armed kick
+        // from a normal already-warm Live arrival in the rolling log file.
+        var ct = TestContext.Current.CancellationToken;
+        var capLogger = new CapturingLogger<PollingHostedService>();
+        var settings = new StubAppSettingsService(pollingIntervalSeconds: 60);  // long timer — kick is the only cycle that fires
+        var gate = new StubGate();
+
+        Func<CancellationToken, Task> runCycle = _ => Task.CompletedTask;
+
+        var sut = new PollingHostedService(runCycle, settings, gate, capLogger);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+        await sut.StartAsync(cts.Token);
+        try
+        {
+            // BackgroundService.StartAsync returns as soon as ExecuteAsync is kicked off as a Task
+            // — it does NOT wait for the first await inside ExecuteAsync. Without this brief delay
+            // we race the SUT's `gate.Changed += OnGateChanged` subscription, and Open()'s
+            // Changed.Invoke fires against a still-empty subscriber list (mirrors the 200ms wait
+            // in ExecuteAsync_WithPausedGate_DoesNotRunFirstCycle_UntilOpen above).
+            await Task.Delay(100, ct);
+            gate.Open();   // Paused -> Live with _coldStart=true at construction -> "cold-start kick" rendered
+
+            // Bounded poll — wait up to 2s for the Live log entry to appear.
+            var deadline = DateTime.UtcNow.AddSeconds(2);
+            while (DateTime.UtcNow < deadline
+                && !capLogger.Entries.Any(e =>
+                    e.Level == LogLevel.Information
+                    && e.Message.StartsWith("Visitor gate transitioned to Live", StringComparison.Ordinal)))
+            {
+                await Task.Delay(20, ct);
+            }
+        }
+        finally
+        {
+            cts.Cancel();
+            await sut.StopAsync(ct);
+        }
+
+        Assert.Contains(capLogger.Entries, e =>
+            e.Level == LogLevel.Information
+            && e.Message.StartsWith("Visitor gate transitioned to Live", StringComparison.Ordinal)
+            && e.Message.Contains("cold-start kick", StringComparison.Ordinal));
+    }
+
     private static async Task WaitForCount(Func<int> count, int target, CancellationToken ct)
     {
         var deadline = DateTime.UtcNow.AddSeconds(2);
