@@ -99,7 +99,19 @@ public sealed class PollOrchestrator(
             var now = DateTime.UtcNow;
             foreach (var r in results.OfType<NodeProbeResult.Success>())
             {
+                // Step 4a: upsert the networks the probe reported as present.
                 await networkRepo.UpsertManyAsync(db, r.NodeId, r.Networks, ct);
+
+                // Step 4b: hard-delete WiFiNetworks for this node whose BSSID was NOT in the probe.
+                // Runs AFTER UpsertManyAsync so newly-discovered BSSIDs are not caught as "absent" on
+                // their first cycle. Runs BEFORE step 5's BSSID-resolution pass so deleted ids cannot
+                // appear in the bssidLookup dictionary. Inside the same try {} as the rest of the cycle
+                // → D-04 atomicity (a failure rolls back upsert + delete + station updates together).
+                // Per-success-only by construction: failed-probe nodes never enter this loop, so a
+                // transient SSH failure cannot wipe a node's WLANs.
+                var presentMacs = r.Networks.Select(n => n.MacAddress).ToList();
+                await networkRepo.DeleteAbsentAsync(db, r.NodeId, presentMacs, ct);
+
                 await nodeRepo.UpdateOnlineAsync(db, r.NodeId, now, ct);
             }
 

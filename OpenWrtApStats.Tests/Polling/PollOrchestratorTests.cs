@@ -952,6 +952,192 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
         Assert.Equal(netId, row.WiFiNetworkId);
     }
 
+    // ── Quick-260506-005 / D-XX: per-cycle hard-delete of absent WiFiNetworks ──
+    // Closes the BSSID-rotation accumulation defect (operator-confirmed: AP2 had 5x
+    // DesertStorm rows on channel 11, one per historically-observed BSSID). The
+    // PollOrchestrator now calls INetworkRepo.DeleteAbsentAsync per Success result,
+    // AFTER UpsertManyAsync and BEFORE step 5's BSSID-resolution, inside the same
+    // coordinator transaction (D-04). Per-success-only protects against transient
+    // SSH failures wiping a node's WLAN set.
+
+    [Fact]
+    public async Task RunCycleAsync_DeletesAbsent_WiFiNetworks_ForSuccessfullyProbedNodes()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        // Seed one node with three networks; only two of them will be reported in the probe.
+        int nodeId;
+        var bssidA = $"FF:0A:00:00:00:{Random.Shared.Next(0, 255):X2}";
+        var bssidB = $"FF:0A:00:01:00:{Random.Shared.Next(0, 255):X2}";
+        var bssidC = $"FF:0A:00:02:00:{Random.Shared.Next(0, 255):X2}";
+        await using (var seed = _fixture.CreateContext())
+        {
+            var node = new WiFiNode { Hostname = $"node-{Guid.NewGuid():N}", Username = "root", Password = "" };
+            seed.WiFiNodes.Add(node);
+            await seed.SaveChangesAsync(ct);
+            nodeId = node.Id;
+
+            seed.WiFiNetworks.AddRange(
+                new WiFiNetwork { WiFiNodeId = nodeId, MacAddress = bssidA, SSID = "DesertStorm" },
+                new WiFiNetwork { WiFiNodeId = nodeId, MacAddress = bssidB, SSID = "DesertStorm" },
+                new WiFiNetwork { WiFiNodeId = nodeId, MacAddress = bssidC, SSID = "DesertStorm" });
+            await seed.SaveChangesAsync(ct);
+        }
+
+        // Probe reports A and B; C has rotated away.
+        Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync = (n, _) =>
+        {
+            if (n.Id != nodeId)
+                return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Failed(n.Id, "not-this-test"));
+            return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Success(
+                NodeId: n.Id,
+                Networks: new[]
+                {
+                    new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssidA, SSID = "DesertStorm" },
+                    new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssidB, SSID = "DesertStorm" },
+                },
+                Stations: Array.Empty<WLANStation>(),
+                NewlyTrustedFingerprint: null));
+        };
+
+        var orch = BuildOrchestrator(probeAsync);
+        await orch.RunCycleAsync(ct);
+
+        await using var verify = _fixture.CreateContext();
+        var rows = await verify.WiFiNetworks.AsNoTracking()
+            .Where(n => n.WiFiNodeId == nodeId)
+            .ToListAsync(ct);
+        Assert.Equal(2, rows.Count);
+        Assert.Contains(rows, r => r.MacAddress == bssidA);
+        Assert.Contains(rows, r => r.MacAddress == bssidB);
+        Assert.DoesNotContain(rows, r => r.MacAddress == bssidC);
+    }
+
+    [Fact]
+    public async Task RunCycleAsync_DoesNotDeleteAbsent_ForFailedProbeNodes()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        // Seed a node with two networks; configure the probe to FAIL for that node.
+        int nodeId;
+        var bssidA = $"FF:0B:00:00:00:{Random.Shared.Next(0, 255):X2}";
+        var bssidB = $"FF:0B:00:01:00:{Random.Shared.Next(0, 255):X2}";
+        await using (var seed = _fixture.CreateContext())
+        {
+            var node = new WiFiNode { Hostname = $"node-{Guid.NewGuid():N}", Username = "root", Password = "" };
+            seed.WiFiNodes.Add(node);
+            await seed.SaveChangesAsync(ct);
+            nodeId = node.Id;
+
+            seed.WiFiNetworks.AddRange(
+                new WiFiNetwork { WiFiNodeId = nodeId, MacAddress = bssidA, SSID = "Net" },
+                new WiFiNetwork { WiFiNodeId = nodeId, MacAddress = bssidB, SSID = "Net" });
+            await seed.SaveChangesAsync(ct);
+        }
+
+        Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync = (n, _) =>
+        {
+            // ALL nodes return Failed for this test — including this test's own node.
+            // The DeleteAbsentAsync pass MUST NOT run for failed nodes (transient outage protection).
+            return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Failed(n.Id, "auth-failed"));
+        };
+
+        var orch = BuildOrchestrator(probeAsync);
+        await orch.RunCycleAsync(ct);
+
+        await using var verify = _fixture.CreateContext();
+        var rows = await verify.WiFiNetworks.AsNoTracking()
+            .Where(n => n.WiFiNodeId == nodeId)
+            .ToListAsync(ct);
+        Assert.Equal(2, rows.Count);
+        Assert.Contains(rows, r => r.MacAddress == bssidA);
+        Assert.Contains(rows, r => r.MacAddress == bssidB);
+    }
+
+    [Fact]
+    public async Task RunCycleAsync_StationOnDeletedNetwork_GetsReResolved_OrNulled()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        // Seed one node with two networks (A, B), and two stations:
+        //   stationX -> WiFiNetworkId points at A's row
+        //   stationY -> WiFiNetworkId points at B's row
+        // Probe reports ONLY A (so B's network is hard-deleted by step 4b).
+        // Probe reports stationX on bssidA in the cycle, but does NOT report stationY at all.
+        // Expected:
+        //   stationX: WiFiNetworkId still == A's network id (re-resolved successfully on the same cycle)
+        //   stationY: row exists, WiFiNetworkId == null (cascade SetNull from B's delete; not reported -> not re-resolved)
+        int nodeId, netAId, netBId;
+        var bssidA = $"FF:0C:00:00:00:{Random.Shared.Next(0, 255):X2}";
+        var bssidB = $"FF:0C:00:01:00:{Random.Shared.Next(0, 255):X2}";
+        var stationXMac = $"AA:0C:00:01:00:{Random.Shared.Next(0, 255):X2}";
+        var stationYMac = $"AA:0C:00:02:00:{Random.Shared.Next(0, 255):X2}";
+        await using (var seed = _fixture.CreateContext())
+        {
+            var node = new WiFiNode { Hostname = $"node-{Guid.NewGuid():N}", Username = "root", Password = "" };
+            seed.WiFiNodes.Add(node);
+            await seed.SaveChangesAsync(ct);
+            nodeId = node.Id;
+
+            var netA = new WiFiNetwork { WiFiNodeId = nodeId, MacAddress = bssidA, SSID = "Net" };
+            var netB = new WiFiNetwork { WiFiNodeId = nodeId, MacAddress = bssidB, SSID = "Net" };
+            seed.WiFiNetworks.AddRange(netA, netB);
+            await seed.SaveChangesAsync(ct);
+            netAId = netA.Id;
+            netBId = netB.Id;
+
+            seed.WLANStations.AddRange(
+                new WLANStation
+                {
+                    MacAddress = stationXMac,
+                    WiFiNetworkId = netAId,
+                    Status = Status.Online,
+                    LastPollDate = DateTime.UtcNow.AddMinutes(-1),
+                },
+                new WLANStation
+                {
+                    MacAddress = stationYMac,
+                    WiFiNetworkId = netBId,
+                    Status = Status.Online,
+                    LastPollDate = DateTime.UtcNow.AddMinutes(-1),
+                });
+            await seed.SaveChangesAsync(ct);
+        }
+
+        Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync = (n, _) =>
+        {
+            if (n.Id != nodeId)
+                return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Failed(n.Id, "not-this-test"));
+            return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Success(
+                NodeId: n.Id,
+                Networks: new[]
+                {
+                    new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssidA, SSID = "Net" },
+                    // bssidB intentionally absent -> step 4b deletes netB
+                },
+                Stations: new[]
+                {
+                    // stationX is reported on bssidA -> orchestrator re-resolves WiFiNetworkId via bssidLookup
+                    new WLANStation { MacAddress = stationXMac, Bssid = bssidA, RSS = -50, LastPollDate = DateTime.UtcNow },
+                    // stationY intentionally not reported -> WiFiNetworkId stays null after cascade
+                },
+                NewlyTrustedFingerprint: null));
+        };
+
+        var orch = BuildOrchestrator(probeAsync);
+        await orch.RunCycleAsync(ct);
+
+        await using var verify = _fixture.CreateContext();
+        // netB was deleted; netA survives.
+        Assert.False(await verify.WiFiNetworks.AsNoTracking().AnyAsync(n => n.Id == netBId, ct));
+        Assert.True (await verify.WiFiNetworks.AsNoTracking().AnyAsync(n => n.Id == netAId, ct));
+
+        // stationX: still pointing at netA, re-resolved on this cycle.
+        var sx = await verify.WLANStations.AsNoTracking().FirstAsync(s => s.MacAddress == stationXMac, ct);
+        Assert.Equal(netAId, sx.WiFiNetworkId);
+
+        // stationY: row still exists but FK was nulled by DeleteBehavior.SetNull cascade.
+        var sy = await verify.WLANStations.AsNoTracking().FirstAsync(s => s.MacAddress == stationYMac, ct);
+        Assert.Null(sy.WiFiNetworkId);
+    }
+
     /// <summary>Minimal IAppSettingsService stub for orchestrator tests. Only PollingIntervalSeconds is exercised.</summary>
     private sealed class StubSettings(int pollingIntervalSeconds) : IAppSettingsService
     {
