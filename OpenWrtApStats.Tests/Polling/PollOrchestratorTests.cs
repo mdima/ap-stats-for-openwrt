@@ -736,6 +736,12 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
         public Task MarkAbsentDisabledAsync(int wiFiNodeId, IReadOnlyCollection<string> presentMacs, CancellationToken ct = default)
             => throw new NotImplementedException();
 
+        public Task DeleteAbsentAsync(int wiFiNodeId, IReadOnlyCollection<string> presentMacs, CancellationToken ct = default)
+            => throw new NotImplementedException();
+
+        public Task DeleteAbsentAsync(DatabaseContext db, int wiFiNodeId, IReadOnlyCollection<string> presentMacs, CancellationToken ct = default)
+            => throw new NotImplementedException();
+
         public Task<bool> AnyEnabledAsync(CancellationToken ct = default)
             => throw new NotImplementedException();
     }

@@ -102,6 +102,12 @@ public sealed class WlansPageTests
         public Task MarkAbsentDisabledAsync(int wiFiNodeId, IReadOnlyCollection<string> presentMacs, CancellationToken ct = default)
             => Task.CompletedTask;
 
+        public Task DeleteAbsentAsync(int wiFiNodeId, IReadOnlyCollection<string> presentMacs, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public Task DeleteAbsentAsync(DatabaseContext db, int wiFiNodeId, IReadOnlyCollection<string> presentMacs, CancellationToken ct = default)
+            => Task.CompletedTask;
+
         public Task<bool> AnyEnabledAsync(CancellationToken ct = default)
             => Task.FromResult(Rows.Any(r => r.Enabled));
     }

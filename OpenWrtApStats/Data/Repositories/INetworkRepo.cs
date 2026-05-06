@@ -40,6 +40,29 @@ public interface INetworkRepo
     /// </summary>
     Task MarkAbsentDisabledAsync(int wiFiNodeId, IReadOnlyCollection<string> presentMacs, CancellationToken ct = default);
 
+    // ── D-XX (NEW): poll-cycle absence is hard-delete, not Enabled-flag toggle ──
+    /// <summary>
+    /// PollOrchestrator-owned per-cycle absence: hard-DELETE every <see cref="WiFiNetwork"/> that belongs to
+    /// <paramref name="wiFiNodeId"/> AND whose <c>MacAddress</c> is NOT in <paramref name="presentMacs"/>.
+    /// Implemented via <c>ExecuteDeleteAsync</c>. Caller-owned overload runs inside the orchestrator's
+    /// coordinator transaction (D-04). The repo-owned overload opens its own context for ad-hoc use.
+    /// <para>
+    /// FK contract: <see cref="WLANStation"/>'s WiFiNetworkId is set to null on parent delete via
+    /// <c>OnDelete(DeleteBehavior.SetNull)</c> (DatabaseContext.cs); stations are NOT deleted, just dissociated.
+    /// They get re-resolved by the next cycle's BSSID lookup pass.
+    /// </para>
+    /// <para>
+    /// Supersedes <see cref="MarkAbsentDisabledAsync"/> for the polling-cycle path. WLAN-03 (preserve
+    /// operator-toggled Enabled flag) was a Phase 3 / discovery-path concern and is dormant in v1
+    /// (no UI exposes Enabled toggle). MarkAbsentDisabledAsync is retained for v2 / discovery use.
+    /// </para>
+    /// <para>
+    /// <paramref name="presentMacs"/> MUST be uppercased upstream (parser does this).
+    /// </para>
+    /// </summary>
+    Task DeleteAbsentAsync(int wiFiNodeId, IReadOnlyCollection<string> presentMacs, CancellationToken ct = default);
+    Task DeleteAbsentAsync(DatabaseContext db, int wiFiNodeId, IReadOnlyCollection<string> presentMacs, CancellationToken ct = default);
+
     // ── DASH-10 Phase 3: dashboard "all WLANs disabled" detection ──────────
     /// <summary>
     /// DASH-10 binding: returns <c>true</c> if any <see cref="WiFiNetwork"/> across all nodes

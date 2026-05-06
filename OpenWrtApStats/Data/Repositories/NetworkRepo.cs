@@ -88,6 +88,29 @@ public sealed class NetworkRepo(IDbContextFactory<DatabaseContext> factory) : IN
             .ExecuteUpdateAsync(s => s.SetProperty(n => n.Enabled, false), ct);
     }
 
+    // ── Repo-owned: opens its own context, commits ──────────────────────────
+    public async Task DeleteAbsentAsync(
+        int wiFiNodeId,
+        IReadOnlyCollection<string> presentMacs,
+        CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await DeleteAbsentAsync(db, wiFiNodeId, presentMacs, ct);
+        // ExecuteDeleteAsync persists immediately; SaveChangesAsync is a no-op for tracked-entity changes here
+        // but call it for symmetry with sibling repo-owned methods.
+        await db.SaveChangesAsync(ct);
+    }
+
+    // ── Caller-owned: NO SaveChangesAsync — orchestrator owns the transaction ──
+    public Task DeleteAbsentAsync(
+        DatabaseContext db,
+        int wiFiNodeId,
+        IReadOnlyCollection<string> presentMacs,
+        CancellationToken ct = default) =>
+        db.WiFiNetworks
+            .Where(n => n.WiFiNodeId == wiFiNodeId && !presentMacs.Contains(n.MacAddress))
+            .ExecuteDeleteAsync(ct);
+
     // ── DASH-10 Phase 3: dashboard empty-state detection ────────────────────
     public async Task<bool> AnyEnabledAsync(CancellationToken ct = default)
     {
