@@ -75,7 +75,9 @@ public static class OpenWrtOutputParser
                 // 'encryption' is parsed for future use (Phase 3 may surface it on the dashboard);
                 // discarding to silence unused-local warnings under TreatWarningsAsErrors.
                 _ = encryption;
-                if (string.IsNullOrEmpty(bssid) || string.IsNullOrEmpty(ssid))
+                if (string.IsNullOrEmpty(bssid) || string.IsNullOrEmpty(ssid)
+                    || bssid.Equals("00:00:00:00:00:00", StringComparison.Ordinal)
+                    || ssid.Equals("unknown", StringComparison.OrdinalIgnoreCase))
                 {
                     log.LogWarning("Parse error in iwinfo output line: {RawLine}. Skipped.", block);
                     continue;
@@ -179,7 +181,9 @@ public static class OpenWrtOutputParser
         {
             try
             {
-                if (!string.IsNullOrEmpty(addr) && !string.IsNullOrEmpty(ssid))
+                if (!string.IsNullOrEmpty(addr) && !string.IsNullOrEmpty(ssid)
+                    && !addr.Equals("00:00:00:00:00:00", StringComparison.Ordinal)
+                    && !ssid.Equals("unknown", StringComparison.OrdinalIgnoreCase))
                 {
                     result.Add(new WiFiNetwork
                     {

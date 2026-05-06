@@ -109,6 +109,80 @@ public sealed class OpenWrtOutputParserTests
     }
 
     [Fact]
+    public void ParseIwinfoSummary_DropsBlock_WhenBssidIsAllZeros()
+    {
+        // Defect 2: OpenWRT iwinfo emits placeholder blocks for ifaces that exist but aren't
+        // associated. BSSID 00:00:00:00:00:00 is the all-zero sentinel. Must be filtered.
+        const string raw = """
+            mld-wifi0 ESSID: "PlausibleSSID"
+                      Mode: Master  Channel: 6
+                      Access Point: 00:00:00:00:00:00
+                      Tx-Power: 0 dBm
+                      Encryption: unknown
+            """;
+        var networks = OpenWrtOutputParser.ParseIwinfoSummary(raw, NullLogger.Instance);
+        Assert.Empty(networks);
+    }
+
+    [Fact]
+    public void ParseIwinfoSummary_DropsBlock_WhenSsidIsLiteralUnknown()
+    {
+        // Defect 2: literal "unknown" (lowercase, as OpenWRT emits it) is the iwinfo placeholder
+        // for a non-broadcasting iface even when the BSSID is real.
+        const string raw = """
+            wifi0     ESSID: unknown
+                      Mode: Master  Channel: 9
+                      Access Point: 94:83:C4:C8:ED:8E
+                      Tx-Power: 20 dBm
+                      Encryption: unknown
+            """;
+        var networks = OpenWrtOutputParser.ParseIwinfoSummary(raw, NullLogger.Instance);
+        Assert.Empty(networks);
+    }
+
+    [Fact]
+    public void ParseIwinfoSummary_DropsBlock_WhenSsidIsLiteralUnknown_CaseInsensitive()
+    {
+        // Defect 2: defensive case-insensitive match. Firmware variance may emit "Unknown" or
+        // "UNKNOWN" — all variants must be treated as the placeholder sentinel.
+        const string raw = """
+            wifi0     ESSID: Unknown
+                      Mode: Master  Channel: 36
+                      Access Point: 94:83:C4:C8:ED:8F
+                      Tx-Power: 20 dBm
+                      Encryption: WPA2 PSK
+            """;
+        var networks = OpenWrtOutputParser.ParseIwinfoSummary(raw, NullLogger.Instance);
+        Assert.Empty(networks);
+    }
+
+    [Fact]
+    public void ParseIwDevSummary_DropsBlock_WhenAddrIsAllZeros()
+    {
+        // Defect 2 (iw-dev fallback): same all-zero BSSID filter applies on the iw-dev path.
+        const string raw = "Interface mld-wifi0\n" +
+                           "\taddr 00:00:00:00:00:00\n" +
+                           "\tssid PlausibleSSID\n" +
+                           "\ttype AP\n" +
+                           "\tchannel 6\n";
+        var networks = OpenWrtOutputParser.ParseIwDevSummary(raw, NullLogger.Instance);
+        Assert.Empty(networks);
+    }
+
+    [Fact]
+    public void ParseIwDevSummary_DropsBlock_WhenSsidIsLiteralUnknown()
+    {
+        // Defect 2 (iw-dev fallback): literal "unknown" placeholder filtered on iw-dev path.
+        const string raw = "Interface wifi0\n" +
+                           "\taddr 94:83:C4:C8:ED:8E\n" +
+                           "\tssid unknown\n" +
+                           "\ttype AP\n" +
+                           "\tchannel 9\n";
+        var networks = OpenWrtOutputParser.ParseIwDevSummary(raw, NullLogger.Instance);
+        Assert.Empty(networks);
+    }
+
+    [Fact]
     public void ParseIwDevSummary_SyntheticInput_EmitsUppercaseMac_AndIfaceName()
     {
         // Synthetic-input regression for the iw fallback parser (POLL-12 fallback path). Closes the
