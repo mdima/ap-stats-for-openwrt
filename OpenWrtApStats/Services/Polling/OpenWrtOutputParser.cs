@@ -25,6 +25,7 @@ public static class OpenWrtOutputParser
     private const string IwinfoChannelKey = "Channel:";
     private const string IwinfoTxPowerKey = "Tx-Power:";
     private const string IwinfoEncryptionKey = "Encryption:";
+    private const string IwinfoHtModeKey = "HT Mode:";
     private const string IwDevInterfaceKey = "Interface ";
     private const string IwDevAddrKey = "\taddr ";
     private const string IwDevSsidKey = "\tssid ";
@@ -37,6 +38,13 @@ public static class OpenWrtOutputParser
     // Six colon-separated hex pairs. Used by iwinfo assoclist and iw dev station dump line-start detection.
     private static readonly System.Text.RegularExpressions.Regex MacRegex =
         new(@"\b([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}\b", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    // HT Mode mnemonic → MHz width. Matches HT20/HT40/HT40+/HT40-/VHT20/VHT40/VHT80/VHT80+80/
+    // VHT160/HE20/HE40/HE80/HE160/EHT20/EHT40/EHT80/EHT160/EHT320 etc. Captures the leading
+    // digit run after the prefix (e.g. "VHT80+80" → 80; "HT40+" → 40). Falls back to 0 (default
+    // int) when the line is missing, contains "NOHT", or otherwise doesn't match.
+    private static readonly System.Text.RegularExpressions.Regex HtModeWidthRegex =
+        new(@"\b(?:HT|VHT|HE|EHT)(\d{2,3})\b", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     /// <summary>Parse `iwinfo` top-level output → WiFiNetwork list (one per WLAN interface). BSSIDs uppercased.
     /// Per-block tolerant: split on blank lines; every block must have BSSID + SSID to emit; missing fields
@@ -52,7 +60,7 @@ public static class OpenWrtOutputParser
             try
             {
                 string? iface = null, ssid = null, bssid = null, encryption = null;
-                int channel = 0, txPower = 0;
+                int channel = 0, txPower = 0, width = 0;
                 var lines = block.Split('\n', StringSplitOptions.RemoveEmptyEntries);
                 if (lines.Length == 0) continue;
                 // Header line: "wlan0     ESSID: \"TestNet\"" — iface is the first token.
@@ -71,6 +79,18 @@ public static class OpenWrtOutputParser
                         int.TryParse(FirstNumber(ExtractAfter(line, IwinfoTxPowerKey)), out txPower);
                     else if (line.Contains(IwinfoEncryptionKey, StringComparison.Ordinal))
                         encryption = ExtractAfter(line, IwinfoEncryptionKey).Trim();
+                    // HT Mode lives on the same physical line as Channel in real OpenWRT iwinfo
+                    // output (e.g., "Mode: Master  Channel: 6 (2.437 GHz)  HT Mode: HT20"). The
+                    // else-if chain above terminates on the first match (Channel:), so the HT Mode
+                    // recognition runs as an INDEPENDENT branch — not chained — so both fields
+                    // populate from the same line.
+                    if (line.Contains(IwinfoHtModeKey, StringComparison.Ordinal))
+                    {
+                        var modeText = ExtractAfter(line, IwinfoHtModeKey);
+                        var m = HtModeWidthRegex.Match(modeText);
+                        if (m.Success && int.TryParse(m.Groups[1].Value, out var w))
+                            width = w;
+                    }
                 }
                 // 'encryption' is parsed for future use (Phase 3 may surface it on the dashboard);
                 // discarding to silence unused-local warnings under TreatWarningsAsErrors.
@@ -87,6 +107,7 @@ public static class OpenWrtOutputParser
                     SSID = ssid,
                     MacAddress = bssid.ToUpperInvariant(),
                     Channel = channel,
+                    Width = width,
                     TxPower = txPower,
                     Enabled = true,
                     IfaceName = iface,
@@ -170,7 +191,10 @@ public static class OpenWrtOutputParser
     }
 
     /// <summary>POLL-12 fallback: parse `iw dev` → WiFiNetwork list. BSSIDs uppercased.
-    /// `iw dev` blocks are: "Interface wlanX\n\taddr AA:BB:..\n\tssid TestNet\n\ttype AP\n\tchannel ...".</summary>
+    /// `iw dev` blocks are: "Interface wlanX\n\taddr AA:BB:..\n\tssid TestNet\n\ttype AP\n\tchannel ...".
+    /// NOTE: `iw dev` top-level output does NOT include channel-width information (no HT Mode line) —
+    /// `WiFiNetwork.Width` stays at its default 0 on this fallback path. The richer iwinfo path
+    /// (ParseIwinfoSummary) populates Width from `HT Mode: HT20|VHT80|EHT160|...` etc.</summary>
     public static IReadOnlyList<WiFiNetwork> ParseIwDevSummary(string raw, ILogger log)
     {
         var result = new List<WiFiNetwork>();

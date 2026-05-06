@@ -182,6 +182,84 @@ public sealed class OpenWrtOutputParserTests
         Assert.Empty(networks);
     }
 
+    [Theory]
+    [InlineData("HT Mode: HT20",       20)]
+    [InlineData("HT Mode: HT40+",      40)]
+    [InlineData("HT Mode: HT40-",      40)]
+    [InlineData("HT Mode: VHT80",      80)]
+    [InlineData("HT Mode: VHT160",    160)]
+    [InlineData("HT Mode: HE160",     160)]
+    [InlineData("HT Mode: EHT320",    320)]
+    public void ParseIwinfoSummary_ExtractsWidth_FromHtMode(string htModeLine, int expectedWidth)
+    {
+        // Defect 3: WiFiNetwork.Width must be populated from the HT Mode mnemonic. Covers the
+        // full PHY family — HT (n), VHT (ac), HE (ax / Wi-Fi 6), EHT (be / Wi-Fi 7). Variants
+        // with +/- suffix (HT40+/HT40-) yield the same MHz as the bare prefix.
+        var raw = $$"""
+            wlan0     ESSID: "WidthTest"
+                      Mode: Master  Channel: 6  {{htModeLine}}
+                      Access Point: AA:BB:CC:DD:EE:01
+                      Tx-Power: 20 dBm
+                      Encryption: WPA2 PSK
+            """;
+        var networks = OpenWrtOutputParser.ParseIwinfoSummary(raw, NullLogger.Instance);
+        Assert.NotEmpty(networks);
+        Assert.Equal(expectedWidth, networks[0].Width);
+    }
+
+    [Fact]
+    public void ParseIwinfoSummary_DefaultsWidthToZero_WhenHtModeMissing()
+    {
+        // Defect 3: when the HT Mode line is absent entirely (older firmware / minimal output),
+        // Width falls back to 0 — the model's default int value.
+        const string raw = """
+            wlan0     ESSID: "NoHtMode"
+                      Mode: Master  Channel: 6
+                      Access Point: AA:BB:CC:DD:EE:02
+                      Tx-Power: 20 dBm
+                      Encryption: WPA2 PSK
+            """;
+        var networks = OpenWrtOutputParser.ParseIwinfoSummary(raw, NullLogger.Instance);
+        Assert.NotEmpty(networks);
+        Assert.Equal(0, networks[0].Width);
+    }
+
+    [Fact]
+    public void ParseIwinfoSummary_DefaultsWidthToZero_WhenHtModeUnrecognized()
+    {
+        // Defect 3: when HT Mode line is present but doesn't match the HT/VHT/HE/EHT prefix
+        // (e.g., "NOHT" on a non-broadcasting iface, or junk from a future firmware), Width
+        // falls back to 0 rather than throwing.
+        const string raw = """
+            wlan0     ESSID: "BogusHtMode"
+                      Mode: Master  Channel: 6  HT Mode: bogus-string
+                      Access Point: AA:BB:CC:DD:EE:03
+                      Tx-Power: 20 dBm
+                      Encryption: WPA2 PSK
+            """;
+        var networks = OpenWrtOutputParser.ParseIwinfoSummary(raw, NullLogger.Instance);
+        Assert.NotEmpty(networks);
+        Assert.Equal(0, networks[0].Width);
+    }
+
+    [Fact]
+    public void ParseIwinfoSummary_FixtureBacked_22_03_7_PopulatesWidthForBothBlocks()
+    {
+        // Defect 3 fixture-backed regression: the openwrt-22.03.7/iwinfo.txt fixture has
+        // wlan0 = HT20 (Width=20) and wlan1 = VHT80 (Width=80). This test pins the parser
+        // against the captured fixture so Width extraction is verified end-to-end on real
+        // OpenWRT output, not just synthetic inputs.
+        var path = Path.Combine("Fixtures", "ssh-output", "openwrt-22.03.7", "iwinfo.txt");
+        Assert.SkipUnless(File.Exists(path), "Fixture not present");
+        var raw = File.ReadAllText(path);
+        var networks = OpenWrtOutputParser.ParseIwinfoSummary(raw, NullLogger.Instance);
+        Assert.Equal(2, networks.Count);
+        var wlan0 = networks.Single(n => n.SSID == "OpenWrt-Lab-Net");
+        var wlan1 = networks.Single(n => n.SSID == "OpenWrt-Lab-5G");
+        Assert.Equal(20, wlan0.Width);
+        Assert.Equal(80, wlan1.Width);
+    }
+
     [Fact]
     public void ParseIwDevSummary_SyntheticInput_EmitsUppercaseMac_AndIfaceName()
     {
