@@ -82,3 +82,36 @@
 [data-bs-theme="dark"] .rssi-seg-empty {
   background-color: rgba(255, 255, 255, 0.15);
 }
+
+/* === Phase 8 polish — REQ-UI-50: softer card shadow than Bootstrap default. ====== */
+.card {
+  box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.04);
+}
+
+[data-bs-theme="dark"] .card {
+  box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.4);
+}
+
+/* === Phase 8 polish — REQ-UI-53. Row status transition fade. ===================
+   The Dashboard component toggles a class `row-status-changed` on the <tr>
+   for one render frame after detecting a Status change in its diff (Plan 08
+   hook). CSS handles the visual fade with cubic-bezier ease-out 600ms.
+   Light and dark variants use different alpha amber tints so the highlight
+   reads as "draws the eye" without overpowering body text. */
+@keyframes row-status-fade {
+  0%   { background-color: rgba(243, 156, 18, 0.18); }
+  100% { background-color: transparent; }
+}
+
+.row-status-changed {
+  animation: row-status-fade 600ms cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+[data-bs-theme="dark"] .row-status-changed {
+  animation: row-status-fade-dark 600ms cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+@keyframes row-status-fade-dark {
+  0%   { background-color: rgba(255, 180, 68, 0.22); }
+  100% { background-color: transparent; }
+}
