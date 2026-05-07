@@ -2,6 +2,7 @@ using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using OpenWrtApStats.Data.Models;
 using OpenWrtApStats.Data.Repositories;
+using OpenWrtApStats.Services;
 using OpenWrtApStats.Services.Settings;
 using OpenWrtApStats.Services.Vendor;
 using Xunit;
@@ -97,6 +98,11 @@ public sealed class DashboardTests
         Build(IEnumerable<WiFiNode> nodes, IEnumerable<WLANStation> stations, bool anyEnabled, Dictionary<int, List<WiFiNetwork>>? networkMap = null, bool wizardDismissed = false)
     {
         var ctx = new BunitContext();
+        // Phase 8: Dashboard.razor injects PreferencesService for view-state restore + persistence.
+        // Loose JS interop mode + a fake `./js/preferences.js` module covers the localStorage path
+        // (OnAfterRenderAsync(firstRender:true) + Set*Async fire-and-forget calls).
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.JSInterop.SetupModule("./js/preferences.js");
         var nr = new StubNodeRepo(nodes);
         var nws = new StubNetworkRepo { AnyEnabledOverride = anyEnabled };
         if (networkMap is not null)
@@ -112,6 +118,7 @@ public sealed class DashboardTests
         ctx.Services.AddSingleton<IOuiLookup>(oui);
         ctx.Services.AddSingleton<IAppSettingsService>(settings);
         ctx.Services.AddSingleton(new OpenWrtApStats.Services.Polling.PollNotifier());
+        ctx.Services.AddSingleton(new PreferencesService(ctx.JSInterop.JSRuntime));
         return (ctx, nr, nws, sr, oui);
     }
 
@@ -381,43 +388,11 @@ public sealed class DashboardTests
         }
     }
 
-    // ── Revision 1 W1 — PerApStrip click-to-filter binds to _selectedAps (D-11) ────────
-    [Fact]
-    public void Dashboard_PerApStrip_ClickFiltersTable()
-    {
-        // Two APs, two stations (one on each AP). Clicking ap-A's strip badge filters out
-        // bob's row (which sits on ap-B). _selectedAps is the SINGLE source of truth shared
-        // with the AP FilterChipGroup — clicking the strip is the same toggle.
-        var nodeA = new WiFiNode { Id = 1, Hostname = "ap-A", Username = "root", Password = "x", Status = Status.Online, LastPollDate = DateTime.UtcNow };
-        var nodeB = new WiFiNode { Id = 2, Hostname = "ap-B", Username = "root", Password = "x", Status = Status.Online, LastPollDate = DateTime.UtcNow };
-        var netA  = new WiFiNetwork { Id = 10, WiFiNodeId = 1, MacAddress = "00:11:22:33:44:55", SSID = "guest", Enabled = true };
-        var netB  = new WiFiNetwork { Id = 20, WiFiNodeId = 2, MacAddress = "00:11:22:33:44:66", SSID = "guest", Enabled = true };
-        var s1    = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10, Hostname = "alice", Status = Status.Online, LastPollDate = DateTime.UtcNow };
-        var s2    = new WLANStation { Id = 101, MacAddress = "BB:00:00:00:00:02", WiFiNetworkId = 20, Hostname = "bob",   Status = Status.Online, LastPollDate = DateTime.UtcNow };
-        var (ctx, _, _, _, _) = Build(new[] { nodeA, nodeB }, new[] { s1, s2 }, anyEnabled: true,
-            networkMap: new Dictionary<int, List<WiFiNetwork>>
-            {
-                [1] = new List<WiFiNetwork> { netA },
-                [2] = new List<WiFiNetwork> { netB },
-            });
-        using (ctx)
-        {
-            var cut = ctx.Render<Dashboard>();
-            Assert.Contains("alice", cut.Markup);
-            Assert.Contains("bob",   cut.Markup);
-
-            // The PerApStrip wraps everything in an aria-labeled group; node buttons live inside it.
-            // Click the strip badge for ap-A by locating the button whose text content contains the hostname.
-            var perApStripGroup = cut.Find("[aria-label=\"Per-access-point connectivity\"]");
-            var apAButton = perApStripGroup.QuerySelectorAll("button")
-                .First(b => b.TextContent.Contains("ap-A"));
-            apAButton.Click();
-
-            // After clicking ap-A, only stations on ap-A (alice) should remain in the table.
-            Assert.Contains("alice", cut.Markup);
-            Assert.DoesNotContain("bob", cut.Markup);
-        }
-    }
+    // ── Phase 8 NOTE — Dashboard_PerApStrip_ClickFiltersTable removed ──────────────────
+    // The PerApStrip component (and the Phase 5 Revision-1 W1 test that drove it) was
+    // intentionally removed in Phase 8 Plan 08-08 (REQ-UI-10 — PerApStrip lockdown). Per-AP
+    // click-to-filter is now provided by the AP FilterChipGroup whose hostname options bind
+    // to `_selectedApLabels` — coverage moves to the new DashboardPhase8Tests fixture.
 
     // ── Revision 1 W2 — <Virtualize> renders 100+ stations cleanly (DASH-12 / SC5) ──
     // Plan-author-deviation note (Rule 1 bug fix): the original assertion expected bUnit's

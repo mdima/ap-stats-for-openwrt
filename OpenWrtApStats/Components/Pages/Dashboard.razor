@@ -1,4 +1,6 @@
 @page "/"
+@using OpenWrtApStats.Components.Shared
+@using OpenWrtApStats.Services
 @using OpenWrtApStats.Services.Polling
 @using OpenWrtApStats.Services.Settings
 @using OpenWrtApStats.Services.Vendor
@@ -10,11 +12,13 @@
 @inject IOuiLookup Oui
 @inject IAppSettingsService Settings
 @inject PollNotifier Notifier
+@inject PreferencesService Prefs
 
-@* Dashboard.razor — Phase 5 live-push view. UI-SPEC §Layout Contracts §Dashboard.
-   Closes DASH-01..08, DASH-11, DASH-12, DASH-14 (link), POLL-09. Phase 3 DASH-09 + DASH-10
-   empty states and DASH-13 vendor column are preserved. PollNotifier subscription per
-   ARCHITECTURE.md §Pattern 2; Pitfall 7 await InvokeAsync invariant. *@
+@* Dashboard.razor — Phase 5 live-push view (REORGANIZED Phase 8 — REQ-UI-10..13, REQ-UI-22, REQ-UI-23, REQ-UI-53).
+   Phase 5 mechanics (Virtualize table, sort, search predicate, ComputeFilteredRows, IsStale, OnCycledAsync) preserved verbatim.
+   Phase 8 reorg: PerApStrip removed, KpiTileBar mounted above filters, search + 3 chips wrapped in AdminLTE filter card with
+   Reset filters button, view-state restored from PreferencesService at first render, AP chip status badges via
+   FilterChipGroup.StatusBadgeFor (Plan 03 extension), per-row Status-change CSS hook for the Plan 10 fade animation. *@
 
 <PageHeader Title="Dashboard" />
 
@@ -52,27 +56,40 @@ else if (!_anyEnabledWlan)
 }
 else
 {
-    <PerApStrip Nodes="_nodes" SelectedAps="_selectedAps" OnApClicked="ToggleApFilterById" />
+    @* 2. KPI tile bar — Phase 8 (REQ-UI-01..04, REQ-UI-13). Bidirectionally
+       synced with the Status FilterChipGroup via _statusFilter. *@
+    <KpiTileBar Rows="_lastFilteredKpiRows" Active="_statusFilter" OnActiveChanged="OnKpiSelectedAsync" />
 
+    @* 3. Filter card — Phase 8 (REQ-UI-12). AdminLTE card with header "Filters",
+       Reset button at right, search + 3 chip groups in a 5/7 grid. *@
     <div class="card mb-3">
-        <div class="card-body py-3">
-            <div class="row g-3 align-items-center">
+        <div class="card-header py-2 px-3 d-flex align-items-center">
+            <h6 class="card-title mb-0">Filters</h6>
+            <button type="button" class="btn btn-link btn-sm ms-auto"
+                    aria-label="Reset filters" @onclick="ResetFiltersAsync">
+                <i class="bi bi-arrow-counterclockwise me-1" aria-hidden="true"></i>Reset filters
+            </button>
+        </div>
+        <div class="card-body p-3">
+            <div class="row g-3">
                 <div class="col-md-5">
                     <label class="visually-hidden" for="dashboard-search">Search stations</label>
                     <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-search" aria-hidden="true"></i></span>
                         <input id="dashboard-search" class="form-control" type="search"
                                placeholder="Search MAC, hostname, name, IP, or vendor"
-                               @bind="_searchText" @bind:event="oninput" />
+                               @bind="_searchText" @bind:event="oninput"
+                               @bind:after="OnSearchChangedAsync" />
                     </div>
                 </div>
                 <div class="col-md-7">
-                    <FilterChipGroup Title="SSID"   Options="_allSsids"
-                                     Selected="_selectedSsids"   OnToggled="ToggleSsidFilter" />
-                    <FilterChipGroup Title="AP"     Options="_allApLabels"
-                                     Selected="_selectedApLabels" OnToggled="ToggleApFilterByLabel" />
+                    <FilterChipGroup Title="SSID" Options="_allSsids"
+                                     Selected="_selectedSsids" OnToggled="OnToggleSsidAsync" />
+                    <FilterChipGroup Title="AP" Options="_allApLabels"
+                                     Selected="_selectedApLabels" OnToggled="OnToggleApAsync"
+                                     StatusBadgeFor="@(ap => MapNodeStatus(ap))" />
                     <FilterChipGroup Title="Status" Options="StatusFilterOptions"
-                                     Selected="_selectedStatuses" OnToggled="ToggleStatusFilter" />
+                                     Selected="_selectedStatuses" OnToggled="OnToggleStatusAsync" />
                 </div>
             </div>
         </div>
@@ -108,7 +125,7 @@ else
                         <tbody>
                             <Virtualize Items="ComputeFilteredRows()" ItemSize="40" Context="row">
                                 <ItemContent>
-                                    <tr>
+                                    <tr class="@(_changedRowMacs.Contains(row.Mac) ? "row-status-changed" : null)">
                                         <td><a href="@($"/Stations/{Uri.EscapeDataString(row.Mac)}")">@(string.IsNullOrEmpty(row.Name) ? (string.IsNullOrEmpty(row.Hostname) ? row.Mac : row.Hostname) : row.Name)</a></td>
                                         <td><code class="font-monospace">@row.Mac</code></td>
                                         <td>
@@ -166,7 +183,7 @@ else
     private string _sortColumn = "lastSeen";
     private bool   _sortDescending = true;
     private HashSet<string> _selectedSsids = new();
-    private HashSet<int>    _selectedAps = new();           // node Ids — written by PerApStrip
+    private HashSet<int>    _selectedAps = new();           // node Ids — kept for Phase 5 ComputeFilteredRows compatibility (PerApStrip removed in Phase 8)
     private HashSet<string> _selectedApLabels = new();      // hostname strings — written by AP FilterChipGroup
     private HashSet<string> _selectedStatuses = new();      // "Online" / "Offline" / "Stale"
     private List<string>    _allSsids = new();
@@ -184,15 +201,70 @@ else
     // "Showing X of Y" without re-running the LINQ pipeline a second time per render.
     private int _lastFilteredCount;
 
+    // --- Phase 8 NEW state (REQ-UI-22, REQ-UI-53, KpiTileBar wiring) ---
+    private bool _restored;                                                                  // PITFALLS.md Pitfall 7 prerender guard
+    private StatusFilter? _statusFilter;                                                     // KPI tile selection (bidirectionally synced with _selectedStatuses)
+    private List<DashboardKpiRow> _lastFilteredKpiRows = new();                              // projection passed to <KpiTileBar Rows="..."/>
+    private readonly HashSet<string> _changedRowMacs = new();                                // REQ-UI-53 row-status-changed hook (one render frame)
+    private Dictionary<string, OpenWrtApStats.Data.Models.Status> _prevRowStatus = new();    // diff source for DetectRowStatusChanges
+
     private string DashTenBody =>
         $"You have {_nodeCount} access point{(_nodeCount == 1 ? "" : "s")} configured, but every WLAN is disabled. Enable at least one WLAN to start seeing connected stations.";
 
     protected override async Task OnInitializedAsync()
     {
         await ReloadAsync();
+        // Build the initial KPI projection so the first <KpiTileBar Rows=...> render is non-empty.
+        RefreshFilteredKpiRows();
         // Subscribe AFTER initial load so the first Cycled event isn't lost between OnInit and Dispose.
         Notifier.Cycled += OnCycledAsync;
         _loading = false;
+    }
+
+    /// <summary>
+    /// REQ-UI-22 / CLAUDE.md prerender rule: localStorage / JS interop is FORBIDDEN during prerender.
+    /// Restore search / active-filters / sort-state / KPI selection from PreferencesService here, on the
+    /// first render only, guarded by `_restored` and explicit StateHasChanged() per PITFALLS.md Pitfall 7.
+    /// Any failure (interop unavailable, JSON malformed, etc.) is swallowed — the page stays functional
+    /// with default state.
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _restored) return;
+
+        try
+        {
+            var search = await Prefs.GetSearchTextAsync();
+            if (!string.IsNullOrEmpty(search)) _searchText = search;
+
+            var filters = await Prefs.GetActiveFiltersAsync();
+            if (filters.Ssids.Count > 0)     _selectedSsids = new HashSet<string>(filters.Ssids);
+            // Persisted DashboardFilters.Aps holds hostname strings (the AP FilterChipGroup option set);
+            // restore them into _selectedApLabels. _selectedAps (node-Id set) stays empty — PerApStrip
+            // is gone in Phase 8.
+            if (filters.Aps.Count > 0)       _selectedApLabels = new HashSet<string>(filters.Aps);
+            if (filters.Statuses.Count > 0)  _selectedStatuses = new HashSet<string>(filters.Statuses);
+
+            var sort = await Prefs.GetSortStateAsync();
+            if (sort is not null)
+            {
+                _sortColumn = sort.Column;
+                _sortDescending = sort.Descending;
+            }
+
+            _statusFilter = await Prefs.GetKpiSelectionAsync();
+            ApplyKpiToStatusFilter();   // mirror KPI selection -> _selectedStatuses (ComputeFilteredRows reads _selectedStatuses)
+            RefreshFilteredKpiRows();
+        }
+        catch (Exception)
+        {
+            // Prerender or interop unavailable; the page remains functional with default state.
+        }
+        finally
+        {
+            _restored = true;
+            StateHasChanged();
+        }
     }
 
     private async Task ReloadAsync()
@@ -225,6 +297,8 @@ else
             _cycleEndUtc = snapshot.CycleEndUtc;
             _lastPollUtc = snapshot.CycleEndUtc;
             await ReloadAsync();
+            DetectRowStatusChanges();      // REQ-UI-53 — must run AFTER ReloadAsync rebuilds _rows
+            RefreshFilteredKpiRows();      // KpiTileBar.Rows projection
             StateHasChanged();
         });
     }
@@ -294,9 +368,9 @@ else
             q = q.Where(r => _selectedSsids.Contains(r.Ssid));
         }
 
-        // AP filter — composes from BOTH the strip (_selectedAps by node Id) and the chip group
-        // (_selectedApLabels by hostname). Single source of truth: the strip writes node Ids and
-        // the chip group writes labels; both sets contribute via OR-within-AP filter.
+        // AP filter — composes from BOTH the legacy node-Id set (_selectedAps, always empty in Phase 8
+        // post-PerApStrip-delete) AND the chip group hostname set (_selectedApLabels). Single source
+        // of truth retained for backward compatibility.
         if (_selectedAps.Count > 0 || _selectedApLabels.Count > 0)
         {
             q = q.Where(r => _selectedAps.Contains(r.ApNodeId) || _selectedApLabels.Contains(r.ApHostname));
@@ -378,26 +452,152 @@ else
             _sortColumn = column;
             _sortDescending = false;
         }
+        // Phase 8: persist sort state to localStorage. Fire-and-forget — failures are swallowed
+        // upstream by SetJsonAsync.
+        _ = Prefs.SetSortStateAsync(new SortState(_sortColumn, _sortDescending));
     }
 
-    private void ToggleSsidFilter(string ssid)
+    // --- Phase 8 NEW handlers (REQ-UI-02 bidirectional sync, REQ-UI-22 persistence, REQ-UI-23 reset) ---
+
+    private async Task OnKpiSelectedAsync(StatusFilter? value)
+    {
+        _statusFilter = value;
+        ApplyKpiToStatusFilter();
+        await Prefs.SetKpiSelectionAsync(value);
+        await PersistFiltersAsync();
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Mirror _statusFilter into _selectedStatuses so the existing Phase 5 filter pipeline
+    /// (which reads _selectedStatuses) honors the KPI tile selection. Single direction
+    /// (KPI → status set); the reverse direction is handled by OnToggleStatusAsync.
+    /// </summary>
+    private void ApplyKpiToStatusFilter()
+    {
+        _selectedStatuses.Clear();
+        if (_statusFilter is StatusFilter.Online)  _selectedStatuses.Add("Online");
+        if (_statusFilter is StatusFilter.Stale)   _selectedStatuses.Add("Stale");
+        if (_statusFilter is StatusFilter.Offline) _selectedStatuses.Add("Offline");
+        // null -> no Status filter (All tile active).
+    }
+
+    private async Task OnSearchChangedAsync()
+    {
+        await Prefs.SetSearchTextAsync(_searchText);
+        StateHasChanged();
+    }
+
+    private async Task OnToggleSsidAsync(string ssid)
     {
         if (!_selectedSsids.Add(ssid)) _selectedSsids.Remove(ssid);
+        await PersistFiltersAsync();
     }
 
-    private void ToggleApFilterByLabel(string label)
+    private async Task OnToggleApAsync(string apHostname)
     {
-        if (!_selectedApLabels.Add(label)) _selectedApLabels.Remove(label);
+        if (!_selectedApLabels.Add(apHostname)) _selectedApLabels.Remove(apHostname);
+        await PersistFiltersAsync();
     }
 
-    private void ToggleApFilterById(int nodeId)
-    {
-        if (!_selectedAps.Add(nodeId)) _selectedAps.Remove(nodeId);
-    }
-
-    private void ToggleStatusFilter(string status)
+    private async Task OnToggleStatusAsync(string status)
     {
         if (!_selectedStatuses.Add(status)) _selectedStatuses.Remove(status);
+        // Mirror Status chip → KPI tile (REQ-UI-02 reverse direction).
+        // INFO #7 asymmetry: when the user has multiple statuses selected (e.g. Online+Stale),
+        // there is no single KPI tile that represents that compound filter, so we set
+        // _statusFilter = null (the "All" tile shows active in the bar even though the chip
+        // group filters to two values). Documented + accepted (plan-checker INFO 7).
+        _statusFilter = _selectedStatuses.Count == 1
+            ? (Enum.TryParse<StatusFilter>(_selectedStatuses.First(), out var sf) ? sf : (StatusFilter?)null)
+            : null;
+        await Prefs.SetKpiSelectionAsync(_statusFilter);
+        await PersistFiltersAsync();
+    }
+
+    private Task PersistFiltersAsync() => Prefs.SetActiveFiltersAsync(
+        new DashboardFilters(
+            _selectedSsids.ToList(),
+            _selectedApLabels.ToList(),                  // hostname strings (Phase 5 AP chip group)
+            _selectedStatuses.ToList()));
+
+    private async Task ResetFiltersAsync()
+    {
+        // REQ-UI-23: clear search/filters/sort/KPI; LEAVE theme/sidebar/notifications untouched.
+        _searchText = string.Empty;
+        _selectedSsids.Clear();
+        _selectedAps.Clear();              // node-Id set (post-PerApStrip-delete this is always empty, but reset for safety)
+        _selectedApLabels.Clear();         // hostname set written by AP FilterChipGroup
+        _selectedStatuses.Clear();
+        _statusFilter = null;
+        // Phase 5 default sort: column "lastSeen", descending true.
+        _sortColumn = "lastSeen";
+        _sortDescending = true;
+        await Prefs.ClearViewStateAsync();
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// REQ-UI-11 — AP chip status badge mapping. Looks up the AP's current status from `_nodes`
+    /// (Phase 5 IReadOnlyList&lt;WiFiNode&gt;) and translates to the Plan 03 BadgeState enum.
+    /// Phase 5 has no `_nodeIndex` — linear-scan `_nodes` by hostname (cheap; typical deployment &lt; 20 APs).
+    /// "Stale" for nodes is a UI-only sub-state computed via the same threshold formula Phase 5's
+    /// IsStale uses for stations: status == Offline AND elapsed &lt; 2 * pollingInterval.
+    /// </summary>
+    private FilterChipGroup.BadgeState MapNodeStatus(string apHostname)
+    {
+        OpenWrtApStats.Data.Models.WiFiNode? node = null;
+        foreach (var n in _nodes) { if (n.Hostname == apHostname) { node = n; break; } }
+        if (node is null) return FilterChipGroup.BadgeState.Hidden;
+        if (node.Status == OpenWrtApStats.Data.Models.Status.Online) return FilterChipGroup.BadgeState.Online;
+        var threshold = TimeSpan.FromSeconds(2 * Settings.PollingIntervalSeconds);
+        var elapsed = _cycleEndUtc - DateTime.SpecifyKind(node.LastPollDate, DateTimeKind.Utc);
+        return elapsed < threshold ? FilterChipGroup.BadgeState.Stale : FilterChipGroup.BadgeState.Offline;
+    }
+
+    /// <summary>
+    /// REQ-UI-53 — recompute the per-MAC Status diff cycle-over-cycle. Adds MACs whose status
+    /// changed to `_changedRowMacs`; the &lt;tr&gt; renders `class="row-status-changed"` for ONE
+    /// frame, then `ClearChangedAfterFrameAsync` schedules a microtask to clear the set so the
+    /// CSS animation (Plan 10) completes its 600ms cycle without re-triggering.
+    /// </summary>
+    private void DetectRowStatusChanges()
+    {
+        _changedRowMacs.Clear();
+        foreach (var row in _rows)
+        {
+            if (_prevRowStatus.TryGetValue(row.Mac, out var prev) && prev != row.StationStatus)
+            {
+                _changedRowMacs.Add(row.Mac);
+            }
+            _prevRowStatus[row.Mac] = row.StationStatus;
+        }
+        // Schedule a microtask to clear the set after this render frame.
+        _ = ClearChangedAfterFrameAsync();
+    }
+
+    private async Task ClearChangedAfterFrameAsync()
+    {
+        await Task.Yield();   // let the current render commit
+        await InvokeAsync(() =>
+        {
+            _changedRowMacs.Clear();
+            StateHasChanged();
+        });
+    }
+
+    /// <summary>
+    /// Project the unfiltered Phase 5 _rows into the public DashboardKpiRow shape consumed
+    /// by &lt;KpiTileBar Rows="..."/&gt;. Called once per Cycled (after ReloadAsync) and once
+    /// in OnInitializedAsync so the first <KpiTileBar> render is non-empty.
+    /// Note: KpiTileBar derives counts over the FULL row set (not the user's filter
+    /// selection) — clicking a tile filters DOWN; the totals stay consistent.
+    /// </summary>
+    private void RefreshFilteredKpiRows()
+    {
+        _lastFilteredKpiRows = _rows
+            .Select(r => new DashboardKpiRow(r.StationStatus, IsStale(r)))
+            .ToList();
     }
 
     private static string RelativeTime(DateTime t)
@@ -416,13 +616,13 @@ else
 
     private sealed record DashboardRow(
         string? Name,
-        string? Hostname,        // NEW Phase 5 — search predicate matches hostname per DASH-04
+        string? Hostname,        // Phase 5 — search predicate matches hostname per DASH-04
         string Mac,
         string? Vendor,
         string? Ip,
         string Ssid,
         string ApHostname,
-        int ApNodeId,            // NEW Phase 5 — AP filter-by-Id (PerApStrip integration)
+        int ApNodeId,            // Phase 5 — kept for backward compat (legacy AP filter-by-Id semantics)
         int? Rss,
         DateTime LastSeen,
         Status StationStatus);
