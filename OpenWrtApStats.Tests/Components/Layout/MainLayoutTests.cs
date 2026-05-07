@@ -2,7 +2,9 @@ using Bunit;
 using Bunit.TestDoubles;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using OpenWrtApStats.Components.Layout;
+using OpenWrtApStats.Services;
 using OpenWrtApStats.Services.Gating;
 using OpenWrtApStats.Services.Polling;
 using OpenWrtApStats.Services.Settings;
@@ -21,6 +23,15 @@ namespace OpenWrtApStats.Tests.Components.Layout;
 /// test fixture registers ICircuitGate, PollNotifier, and IAppSettingsService so the
 /// new badges render; the assertion now verifies those badges instead of the
 /// placeholder anchor text.
+///
+/// Phase 8 Plan 09 update: MainLayout.razor now mounts <ThemeToggle /> as the last
+/// child of the topbar right cluster (REQ-UI-31) and <ToastHost /> at the body root
+/// (REQ-UI-40, REQ-UI-44). The fixture additionally registers PreferencesService +
+/// INotificationsGate (FakeGate) + ToastService and a Loose-mode bUnit JSInterop
+/// module mock for `./js/preferences.js` and `./js/theme.js` so those components can
+/// resolve their @inject dependencies. This mirrors the Plan 08-08 pattern adopted
+/// by DashboardTests.cs and StaleHysteresisTests.cs (Rule 3 blocking — Phase 8 plan
+/// 08-09 deviation #1).
 /// </summary>
 public sealed class MainLayoutTests
 {
@@ -36,6 +47,11 @@ public sealed class MainLayoutTests
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }
 
+    private sealed class FakeGate : INotificationsGate
+    {
+        public bool IsEnabled { get; init; } = true;
+    }
+
     [Fact]
     public void Renders_AdminLte_Chrome_With_Phase5_LivePausedBadge_And_PollCountdown()
     {
@@ -48,6 +64,18 @@ public sealed class MainLayoutTests
         ctx.Services.AddSingleton<ICircuitGate, AlwaysLiveGate>();
         ctx.Services.AddSingleton(new PollNotifier());
         ctx.Services.AddSingleton<IAppSettingsService>(new StubSettings());
+        // Phase 8 Plan 09 — ThemeToggle injects PreferencesService; ToastHost injects ToastService.
+        // Loose JS interop mode covers the OnAfterRenderAsync(firstRender:true) hydration paths
+        // in ThemeToggle (preferences.js + theme.js) — same pattern as DashboardTests Build helper.
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.JSInterop.SetupModule("./js/preferences.js");
+        ctx.JSInterop.SetupModule("./js/theme.js");
+        ctx.Services.AddSingleton(new PreferencesService(ctx.JSInterop.JSRuntime));
+        ctx.Services.AddSingleton<INotificationsGate>(new FakeGate { IsEnabled = true });
+        ctx.Services.AddSingleton<ToastService>(sp =>
+            new ToastService(
+                sp.GetRequiredService<INotificationsGate>(),
+                NullLogger<ToastService>.Instance));
 
         // MainLayout inherits LayoutComponentBase, which exposes the slot as `Body` not
         // `ChildContent`. bUnit's AddChildContent looks for [Parameter] ChildContent on the
@@ -89,6 +117,28 @@ public sealed class MainLayoutTests
         var brand = aside.QuerySelector(".sidebar-brand .brand-text");
         Assert.NotNull(brand);
         Assert.Equal("OpenWRT-AP-Stats", brand!.TextContent.Trim());
+
+        // Phase 8 Plan 09 — REQ-UI-70: branded SVG logo replaces the AdminLTE default PNG
+        // in the sidebar brand-link. AdminLTELogo.png MUST NOT appear anywhere; /img/logo.svg
+        // MUST be referenced; the brand-image must NOT carry the opacity-75/shadow classes.
+        var brandImg = aside.QuerySelector(".sidebar-brand .brand-link img.brand-image");
+        Assert.NotNull(brandImg);
+        Assert.Equal("/img/logo.svg", brandImg!.GetAttribute("src"));
+        Assert.Equal("OpenWRT-AP-Stats logo", brandImg.GetAttribute("alt"));
+        Assert.DoesNotContain("AdminLTELogo", cut.Markup);
+        Assert.DoesNotContain("opacity-75", brandImg.GetAttribute("class") ?? string.Empty);
+
+        // Phase 8 Plan 09 — REQ-UI-31: ThemeToggle is the LAST child of the topbar right cluster.
+        // Locate the cluster div, then its sun/moon button (BootstrapIcons bi-sun-fill/bi-moon-stars-fill).
+        var rightCluster = topnav.QuerySelector("div.d-flex.align-items-center.gap-2.me-3");
+        Assert.NotNull(rightCluster);
+        var themeBtn = rightCluster!.QuerySelector("button i.bi.bi-sun-fill, button i.bi.bi-moon-stars-fill");
+        Assert.NotNull(themeBtn);
+
+        // Phase 8 Plan 09 — REQ-UI-40 / REQ-UI-44: ToastHost mounts exactly once at body root.
+        // ToastHost renders a position-fixed toast-container with aria-live="polite".
+        var toastContainers = cut.FindAll("div.toast-container.position-fixed[aria-live='polite']");
+        Assert.Single(toastContainers);
 
         // NavMenu rendered (3-item: Dashboard / Nodes / Settings; the 4th placeholder is reserved)
         var navItems = aside.QuerySelectorAll(".sidebar-menu .nav-item .nav-link");

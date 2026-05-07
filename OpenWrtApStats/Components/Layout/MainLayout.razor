@@ -26,10 +26,13 @@
            Adjacent pills (UI-SPEC line 615 LOCK — NOT a combined pill). The slot
            originally reserved by Phase 3 for "Phase 6" is claimed by Phase 5; Phase 6
            will swap the gate source (DI replacement of ICircuitGate impl) without
-           touching this markup. *@
+           touching this markup. Phase 8 (REQ-UI-31, 08-UI-SPEC §Topbar replacement)
+           appends <ThemeToggle /> as the LAST child of the cluster — ordering
+           LivePausedBadge -> PollCountdown -> ThemeToggle is locked. *@
         <div class="d-flex align-items-center gap-2 me-3">
             <LivePausedBadge />
             <PollCountdown />
+            <ThemeToggle />
         </div>
         <ul class="navbar-nav ms-auto">
             <AuthorizeView>
@@ -59,11 +62,15 @@
 
 <aside class="app-sidebar bg-body-secondary shadow" data-bs-theme="dark">
     <div class="sidebar-brand">
+        @* Phase 8 (REQ-UI-70, D-14): branded SVG logo replaces the AdminLTE default
+           PNG. Logo is currentColor-driven (REQ-UI-72), so it inherits the brand-link
+           text color in both light and dark themes — NO color override here. The
+           opacity-75/shadow classes from the AdminLTE default were removed for full
+           clarity. Wordmark stays as HTML text per D-14. *@
         <a href="/" class="brand-link">
-            <img class="brand-image opacity-75 shadow"
-                 src="/lib/adminlte/img/AdminLTELogo.png"
-                 alt="OpenWRT-AP-Stats" />
-            <span class="brand-text fw-light">OpenWRT-AP-Stats</span>
+            <img src="/img/logo.svg" alt="OpenWRT-AP-Stats logo"
+                 class="brand-image" style="width: 32px; height: 32px;" />
+            <span class="brand-text fw-semibold">OpenWRT-AP-Stats</span>
         </a>
     </div>
     <div class="sidebar-wrapper">
@@ -90,6 +97,14 @@
         <span>Self-hosted dashboard</span>
     </div>
 </footer>
+
+@* Phase 8 (REQ-UI-40, REQ-UI-44 / D-08): single ToastHost mount at the MainLayout
+   body root, AFTER the app-main + app-footer block and BEFORE the .app-wrapper
+   close. ToastHost.razor's container is position:fixed top-0 end-0, so DOM
+   placement does not affect visual position — but mounting once here is the
+   layout-singleton lockdown: every page rendered under MainLayout sees toasts
+   without per-page mounts (which would duplicate the queue). *@
+<ToastHost />
 
 </div>
 
