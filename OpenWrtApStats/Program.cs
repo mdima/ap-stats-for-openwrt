@@ -93,6 +93,12 @@ try
     //     adds Dashboard subscribers; raising the event from day 1 makes Phase 5 additive only.
     builder.Services.AddSingleton<OpenWrtAdapterCache>();
     builder.Services.AddSingleton<PollNotifier>();
+    // Phase 8 D-09: PreferencesService is Singleton — wraps wwwroot/js/preferences.js
+    // (per-browser localStorage) with a thin async interop layer + cached
+    // IsNotificationsEnabled hot-path. Registered AFTER PollNotifier per CONTEXT.md
+    // integration-points, BEFORE Wave 2 services (ToastService, EventDetectionService)
+    // which will land in subsequent plans.
+    builder.Services.AddSingleton<OpenWrtApStats.Services.PreferencesService>();
     builder.Services.AddSingleton<PollOrchestrator>();
     builder.Services.AddTransient<ISshSession, RealSshSession>();
     // NodePoller is INTENTIONALLY NOT in the DI container. Its primary-ctor takes
