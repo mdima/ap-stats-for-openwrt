@@ -16,6 +16,20 @@ public interface IStationRepo
     Task SetNameAsync(string macAddress, string? name, CancellationToken ct = default);
 
     /// <summary>
+    /// Phase 8 Plan 08-07 D-06 — read-only enumeration of every distinct <see cref="WLANStation.MacAddress"/>
+    /// currently in the database. Used by <c>EventDetectionService</c> exactly once on its first
+    /// <c>PollNotifier.Cycled</c> event to seed the in-memory <c>HashSet&lt;string&gt;</c> of "known" MACs
+    /// (the closest faithful approximation to "MAC never recorded in DB" without a <c>FirstSeenAt</c>
+    /// column — Phase 8 hard-blocked from schema changes).
+    /// <para>
+    /// Read-only: implemented as <c>AsNoTracking().Select(s =&gt; s.MacAddress).Distinct().ToListAsync</c>.
+    /// NEVER calls <c>SaveChangesAsync</c>, <c>ExecuteUpdate</c>, or <c>ExecuteDelete</c>. The
+    /// orchestrator-only-writes invariant (CLAUDE.md, PER-04) is preserved because this is a READ.
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<string>> GetAllMacsAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// D-14 (Phase 5) operator-initiated delete (DASH-16). Single-statement
     /// <c>ExecuteDeleteAsync</c> (CR-02-safe — never <c>db.WLANStations.Remove(entity)</c>
     /// after a Find which would re-track the row, RESEARCH §Pitfall 5). Repo-owned only;

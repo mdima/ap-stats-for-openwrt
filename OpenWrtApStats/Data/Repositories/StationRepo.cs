@@ -26,6 +26,18 @@ public sealed class StationRepo(IDbContextFactory<DatabaseContext> factory) : IS
             .FirstOrDefaultAsync(s => s.MacAddress == macAddress, ct);
     }
 
+    // Phase 8 Plan 08-07 D-06 — read-only MAC enumeration for EventDetectionService bootstrap.
+    // No SaveChangesAsync, no ExecuteUpdate, no ExecuteDelete: pure projection query.
+    public async Task<IReadOnlyList<string>> GetAllMacsAsync(CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        return await db.WLANStations
+            .AsNoTracking()
+            .Select(s => s.MacAddress)
+            .Distinct()
+            .ToListAsync(ct);
+    }
+
     public async Task SetNameAsync(string macAddress, string? name, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);

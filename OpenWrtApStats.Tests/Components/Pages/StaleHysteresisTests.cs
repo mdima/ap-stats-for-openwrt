@@ -61,6 +61,7 @@ public sealed class StaleHysteresisTests
         public List<WLANStation> Stations { get; } = new();
         public Task<IReadOnlyList<WLANStation>> GetAllAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<WLANStation>>(Stations);
         public Task<WLANStation?> GetByMacAsync(string macAddress, CancellationToken ct = default) => Task.FromResult<WLANStation?>(Stations.FirstOrDefault(s => s.MacAddress == macAddress));
+        public Task<IReadOnlyList<string>> GetAllMacsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<string>>(Stations.Select(s => s.MacAddress).Distinct().ToList());
         public Task SetNameAsync(string macAddress, string? name, CancellationToken ct = default) => Task.CompletedTask;
         public Task DeleteByMacAsync(string macAddress, CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkAllOfflineAsync(CancellationToken ct = default) => Task.CompletedTask;

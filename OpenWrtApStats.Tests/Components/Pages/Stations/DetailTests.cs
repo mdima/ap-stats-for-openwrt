@@ -33,6 +33,8 @@ public sealed class DetailTests
             RequestedMac = macAddress;
             return Task.FromResult(Existing?.MacAddress == macAddress ? Existing : null);
         }
+        public Task<IReadOnlyList<string>> GetAllMacsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<string>>(Existing is null ? Array.Empty<string>() : new[] { Existing.MacAddress });
         public Task SetNameAsync(string macAddress, string? name, CancellationToken ct = default)
         {
             SetNameCallCount++;

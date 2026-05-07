@@ -64,6 +64,8 @@ public sealed class DashboardTests
             Task.FromResult<IReadOnlyList<WLANStation>>(_stations);
         public Task<WLANStation?> GetByMacAsync(string macAddress, CancellationToken ct = default) =>
             Task.FromResult<WLANStation?>(_stations.FirstOrDefault(s => s.MacAddress == macAddress));
+        public Task<IReadOnlyList<string>> GetAllMacsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<string>>(_stations.Select(s => s.MacAddress).Distinct().ToList());
         public Task SetNameAsync(string macAddress, string? name, CancellationToken ct = default) => Task.CompletedTask;
         public Task DeleteByMacAsync(string macAddress, CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkAllOfflineAsync(CancellationToken ct = default) => Task.CompletedTask;
