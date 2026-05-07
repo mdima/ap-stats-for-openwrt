@@ -16,7 +16,7 @@
 
 @* Dashboard.razor — Phase 5 live-push view (REORGANIZED Phase 8 — REQ-UI-10..13, REQ-UI-22, REQ-UI-23, REQ-UI-53).
    Phase 5 mechanics (Virtualize table, sort, search predicate, ComputeFilteredRows, IsStale, OnCycledAsync) preserved verbatim.
-   Phase 8 reorg: PerApStrip removed, KpiTileBar mounted above filters, search + 3 chips wrapped in AdminLTE filter card with
+   Phase 8 reorg: per-AP strip removed, KpiTileBar mounted above filters, search + 3 chips wrapped in AdminLTE filter card with
    Reset filters button, view-state restored from PreferencesService at first render, AP chip status badges via
    FilterChipGroup.StatusBadgeFor (Plan 03 extension), per-row Status-change CSS hook for the Plan 10 fade animation. *@
 
@@ -183,7 +183,7 @@ else
     private string _sortColumn = "lastSeen";
     private bool   _sortDescending = true;
     private HashSet<string> _selectedSsids = new();
-    private HashSet<int>    _selectedAps = new();           // node Ids — kept for Phase 5 ComputeFilteredRows compatibility (PerApStrip removed in Phase 8)
+    private HashSet<int>    _selectedAps = new();           // node Ids — kept for Phase 5 ComputeFilteredRows compatibility (legacy strip removed in Phase 8)
     private HashSet<string> _selectedApLabels = new();      // hostname strings — written by AP FilterChipGroup
     private HashSet<string> _selectedStatuses = new();      // "Online" / "Offline" / "Stale"
     private List<string>    _allSsids = new();
@@ -240,8 +240,8 @@ else
             var filters = await Prefs.GetActiveFiltersAsync();
             if (filters.Ssids.Count > 0)     _selectedSsids = new HashSet<string>(filters.Ssids);
             // Persisted DashboardFilters.Aps holds hostname strings (the AP FilterChipGroup option set);
-            // restore them into _selectedApLabels. _selectedAps (node-Id set) stays empty — PerApStrip
-            // is gone in Phase 8.
+            // restore them into _selectedApLabels. _selectedAps (node-Id set) stays empty — the
+            // legacy per-AP strip is gone in Phase 8.
             if (filters.Aps.Count > 0)       _selectedApLabels = new HashSet<string>(filters.Aps);
             if (filters.Statuses.Count > 0)  _selectedStatuses = new HashSet<string>(filters.Statuses);
 
@@ -369,7 +369,7 @@ else
         }
 
         // AP filter — composes from BOTH the legacy node-Id set (_selectedAps, always empty in Phase 8
-        // post-PerApStrip-delete) AND the chip group hostname set (_selectedApLabels). Single source
+        // post-strip-delete) AND the chip group hostname set (_selectedApLabels). Single source
         // of truth retained for backward compatibility.
         if (_selectedAps.Count > 0 || _selectedApLabels.Count > 0)
         {
@@ -526,7 +526,7 @@ else
         // REQ-UI-23: clear search/filters/sort/KPI; LEAVE theme/sidebar/notifications untouched.
         _searchText = string.Empty;
         _selectedSsids.Clear();
-        _selectedAps.Clear();              // node-Id set (post-PerApStrip-delete this is always empty, but reset for safety)
+        _selectedAps.Clear();              // node-Id set (post-strip-delete this is always empty, but reset for safety)
         _selectedApLabels.Clear();         // hostname set written by AP FilterChipGroup
         _selectedStatuses.Clear();
         _statusFilter = null;
