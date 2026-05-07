@@ -83,38 +83,49 @@ public sealed class ThemeToggleTests
         Assert.DoesNotContain("bi-sun-fill", cut.Markup);
     }
 
-    // 3. Click flips theme + calls SetTheme + calls applyTheme. ---------------------------------
+    // 3. Click flips theme + calls SetTheme + calls applyTheme (both directions). ---------------
     [Fact]
     public void Click_Flips_Theme_And_Calls_SetTheme_And_ApplyTheme()
     {
         var (ctx, prefsModule, themeModule) = CreateContext();
         using var _ = ctx;
-        // Start from light (no key persisted; system pref returns "light").
-        prefsModule.Setup<string?>("get", PreferencesService.KeyTheme).SetResult(null);
-        themeModule.Setup<string>("getSystemPreference").SetResult("light");
+        // Start from light. PreferencesService default for an absent `theme` key is "light".
+        prefsModule.Setup<string?>("get", PreferencesService.KeyTheme).SetResult("light");
 
         var cut = ctx.Render<ThemeToggle>();
         cut.WaitForAssertion(() => Assert.Contains("bi-sun-fill", cut.Markup));
 
+        // First click: light → dark. Exercises the "_isDark = !false → true" branch.
         cut.Find("button").Click();
-
-        // After click, markup flips to moon (dark).
         cut.WaitForAssertion(() => Assert.Contains("bi-moon-stars-fill", cut.Markup));
 
-        // PreferencesService.SetThemeAsync uses preferences.js `set` (RAW string contract).
-        // Assert that `set("theme", "dark")` was invoked exactly once.
-        Assert.Single(
-            prefsModule.Invocations,
-            i => i.Identifier == "set"
-                 && i.Arguments.Count >= 2
-                 && (i.Arguments[0] as string) == PreferencesService.KeyTheme
-                 && (i.Arguments[1] as string) == "dark");
+        // Second click: dark → light. Exercises the "_isDark = !true → false" branch
+        // (closes the ToggleAsync ternary 50% branch coverage gap).
+        cut.Find("button").Click();
+        cut.WaitForAssertion(() => Assert.Contains("bi-sun-fill", cut.Markup));
 
-        // Assert applyTheme was invoked with "dark" (the click flip).
+        // PreferencesService.SetThemeAsync uses preferences.js `set` (RAW string contract).
+        // Both `set("theme", "dark")` and `set("theme", "light")` should have been invoked.
+        Assert.Contains(prefsModule.Invocations, i =>
+            i.Identifier == "set"
+            && i.Arguments.Count >= 2
+            && (i.Arguments[0] as string) == PreferencesService.KeyTheme
+            && (i.Arguments[1] as string) == "dark");
+        Assert.Contains(prefsModule.Invocations, i =>
+            i.Identifier == "set"
+            && i.Arguments.Count >= 2
+            && (i.Arguments[0] as string) == PreferencesService.KeyTheme
+            && (i.Arguments[1] as string) == "light");
+
+        // Both applyTheme("dark") and applyTheme("light") should have been invoked from clicks.
         Assert.Contains(themeModule.Invocations, i =>
             i.Identifier == "applyTheme"
             && i.Arguments.Count >= 1
             && (i.Arguments[0] as string) == "dark");
+        Assert.Contains(themeModule.Invocations, i =>
+            i.Identifier == "applyTheme"
+            && i.Arguments.Count >= 1
+            && (i.Arguments[0] as string) == "light");
     }
 
     // 4. OnAfterRenderAsync(firstRender:true) hydrates _isDark from persisted value. ------------
@@ -133,6 +144,33 @@ public sealed class ThemeToggleTests
         cut.WaitForAssertion(() => Assert.Contains("bi-moon-stars-fill", cut.Markup));
 
         // applyTheme called with "dark" during hydration (anti-FOUC re-apply path).
+        Assert.Contains(themeModule.Invocations, i =>
+            i.Identifier == "applyTheme"
+            && i.Arguments.Count >= 1
+            && (i.Arguments[0] as string) == "dark");
+    }
+
+    // 5. REQ-UI-31 system-preference fallback when persisted theme is empty/null. ----------------
+    // PreferencesService.GetThemeAsync defaults to "light", but if the underlying preferences.js
+    // `get` returns an empty string (e.g. localStorage explicitly storing ""), the service
+    // returns "" — the IsNullOrEmpty(theme) branch fires and ThemeToggle calls
+    // theme.js getSystemPreference() per REQ-UI-31. This test exercises that branch and locks
+    // in the "system pref says dark → moon icon" semantics.
+    [Fact]
+    public void OnAfterRenderAsync_EmptyPersistedTheme_FallsBackToSystemPreference_Dark()
+    {
+        var (ctx, prefsModule, themeModule) = CreateContext();
+        using var _ = ctx;
+        // Empty string persisted — triggers IsNullOrEmpty branch (REQ-UI-31).
+        prefsModule.Setup<string?>("get", PreferencesService.KeyTheme).SetResult(string.Empty);
+        themeModule.Setup<string>("getSystemPreference").SetResult("dark");
+
+        var cut = ctx.Render<ThemeToggle>();
+
+        cut.WaitForAssertion(() => Assert.Contains("bi-moon-stars-fill", cut.Markup));
+        // System-pref fallback was actually called — Pitfall 7 lock.
+        Assert.Contains(themeModule.Invocations, i => i.Identifier == "getSystemPreference");
+        // applyTheme called with "dark" (the value derived from system pref).
         Assert.Contains(themeModule.Invocations, i =>
             i.Identifier == "applyTheme"
             && i.Arguments.Count >= 1
