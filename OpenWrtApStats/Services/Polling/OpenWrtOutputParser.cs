@@ -99,7 +99,9 @@ public static class OpenWrtOutputParser
                     || bssid.Equals("00:00:00:00:00:00", StringComparison.Ordinal)
                     || ssid.Equals("unknown", StringComparison.OrdinalIgnoreCase))
                 {
-                    log.LogWarning("Parse error in iwinfo output line: {RawLine}. Skipped.", block);
+                    // Inactive WLAN placeholder block (radio off / iface down / not associated / not
+                    // broadcasting). NOT a parse error — silently skip. The catch block below stays
+                    // LogWarning for genuine exceptions.
                     continue;
                 }
                 result.Add(new WiFiNetwork
