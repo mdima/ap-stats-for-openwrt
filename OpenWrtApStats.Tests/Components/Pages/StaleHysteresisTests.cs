@@ -2,6 +2,7 @@ using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using OpenWrtApStats.Data.Models;
 using OpenWrtApStats.Data.Repositories;
+using OpenWrtApStats.Services;
 using OpenWrtApStats.Services.Polling;
 using OpenWrtApStats.Services.Settings;
 using OpenWrtApStats.Services.Vendor;
@@ -105,12 +106,18 @@ public sealed class StaleHysteresisTests
 
         var notifier = new PollNotifier();
         using var ctx = new BunitContext();
+        // Phase 8: Dashboard.razor injects PreferencesService — register a Loose-mode
+        // preferences.js module + Singleton PreferencesService so the Phase 5 hysteresis
+        // tests survive the new @inject without DI failure.
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.JSInterop.SetupModule("./js/preferences.js");
         ctx.Services.AddSingleton<INodeRepo>(nodeRepo);
         ctx.Services.AddSingleton<INetworkRepo>(netRepo);
         ctx.Services.AddSingleton<IStationRepo>(stationRepo);
         ctx.Services.AddSingleton<IOuiLookup>(new StubOuiLookup());
         ctx.Services.AddSingleton<IAppSettingsService>(new StubSettings { PollingIntervalSeconds = 10 });
         ctx.Services.AddSingleton(notifier);
+        ctx.Services.AddSingleton(new PreferencesService(ctx.JSInterop.JSRuntime));
 
         var cut = ctx.Render<Dashboard>();
 
@@ -152,12 +159,18 @@ public sealed class StaleHysteresisTests
 
         var notifier = new PollNotifier();
         using var ctx = new BunitContext();
+        // Phase 8: Dashboard.razor injects PreferencesService — register a Loose-mode
+        // preferences.js module + Singleton PreferencesService so the Phase 5 hysteresis
+        // tests survive the new @inject without DI failure.
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.JSInterop.SetupModule("./js/preferences.js");
         ctx.Services.AddSingleton<INodeRepo>(nodeRepo);
         ctx.Services.AddSingleton<INetworkRepo>(netRepo);
         ctx.Services.AddSingleton<IStationRepo>(stationRepo);
         ctx.Services.AddSingleton<IOuiLookup>(new StubOuiLookup());
         ctx.Services.AddSingleton<IAppSettingsService>(new StubSettings { PollingIntervalSeconds = 10 });
         ctx.Services.AddSingleton(notifier);
+        ctx.Services.AddSingleton(new PreferencesService(ctx.JSInterop.JSRuntime));
 
         var cut = ctx.Render<Dashboard>();
 
@@ -204,12 +217,18 @@ public sealed class StaleHysteresisTests
 
         var notifier = new PollNotifier();
         using var ctx = new BunitContext();
+        // Phase 8: Dashboard.razor injects PreferencesService — register a Loose-mode
+        // preferences.js module + Singleton PreferencesService so the Phase 5 hysteresis
+        // tests survive the new @inject without DI failure.
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.JSInterop.SetupModule("./js/preferences.js");
         ctx.Services.AddSingleton<INodeRepo>(nodeRepo);
         ctx.Services.AddSingleton<INetworkRepo>(netRepo);
         ctx.Services.AddSingleton<IStationRepo>(stationRepo);
         ctx.Services.AddSingleton<IOuiLookup>(new StubOuiLookup());
         ctx.Services.AddSingleton<IAppSettingsService>(new StubSettings { PollingIntervalSeconds = 10 });
         ctx.Services.AddSingleton(notifier);
+        ctx.Services.AddSingleton(new PreferencesService(ctx.JSInterop.JSRuntime));
 
         var cut = ctx.Render<Dashboard>();
         await notifier.RaiseAsync(new PollSnapshot(1, 0, 0, 1, cycleEndUtc));
@@ -245,12 +264,18 @@ public sealed class StaleHysteresisTests
 
         var notifier = new PollNotifier();
         using var ctx = new BunitContext();
+        // Phase 8: Dashboard.razor injects PreferencesService — register a Loose-mode
+        // preferences.js module + Singleton PreferencesService so the Phase 5 hysteresis
+        // tests survive the new @inject without DI failure.
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.JSInterop.SetupModule("./js/preferences.js");
         ctx.Services.AddSingleton<INodeRepo>(nodeRepo);
         ctx.Services.AddSingleton<INetworkRepo>(netRepo);
         ctx.Services.AddSingleton<IStationRepo>(stationRepo);
         ctx.Services.AddSingleton<IOuiLookup>(new StubOuiLookup());
         ctx.Services.AddSingleton<IAppSettingsService>(new StubSettings { PollingIntervalSeconds = 10 });
         ctx.Services.AddSingleton(notifier);
+        ctx.Services.AddSingleton(new PreferencesService(ctx.JSInterop.JSRuntime));
 
         var cut = ctx.Render<Dashboard>();
         await notifier.RaiseAsync(new PollSnapshot(1, 0, 0, 1, cycleEndUtc));
@@ -287,12 +312,18 @@ public sealed class StaleHysteresisTests
 
         var notifier = new PollNotifier();
         using var ctx = new BunitContext();
+        // Phase 8: Dashboard.razor injects PreferencesService — register a Loose-mode
+        // preferences.js module + Singleton PreferencesService so the Phase 5 hysteresis
+        // tests survive the new @inject without DI failure.
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.JSInterop.SetupModule("./js/preferences.js");
         ctx.Services.AddSingleton<INodeRepo>(nodeRepo);
         ctx.Services.AddSingleton<INetworkRepo>(netRepo);
         ctx.Services.AddSingleton<IStationRepo>(stationRepo);
         ctx.Services.AddSingleton<IOuiLookup>(new StubOuiLookup());
         ctx.Services.AddSingleton<IAppSettingsService>(new StubSettings { PollingIntervalSeconds = 10 });
         ctx.Services.AddSingleton(notifier);
+        ctx.Services.AddSingleton(new PreferencesService(ctx.JSInterop.JSRuntime));
 
         var cut = ctx.Render<Dashboard>();
         await notifier.RaiseAsync(new PollSnapshot(1, 1, 0, 1, cycleEndUtc));
