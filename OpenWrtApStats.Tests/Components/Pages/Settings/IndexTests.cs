@@ -76,12 +76,19 @@ public sealed class IndexTests
     private static (BunitContext ctx, StubSettings settings, CapturingHasher hasher, CapturingNodeRepo nodes) Build(string? initialHash = null, int initialInterval = 30)
     {
         var ctx = new BunitContext();
+        // Phase 8 Plan 08-07 — Settings/Index.razor now hosts a 4th "UI preferences" card
+        // (REQ-UI-44) that injects PreferencesService. Loose-mode JSInterop with a faked
+        // ./js/preferences.js module lets the page render end-to-end without a real JS runtime.
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.JSInterop.SetupModule("./js/preferences.js");
         var settings = new StubSettings { UIPasswordHash = initialHash, PollingIntervalSeconds = initialInterval };
         var hasher = new CapturingHasher();
         var nodes = new CapturingNodeRepo();
         ctx.Services.AddSingleton<IAppSettingsService>(settings);
         ctx.Services.AddSingleton<IUIPasswordHasher>(hasher);
         ctx.Services.AddSingleton<INodeRepo>(nodes);
+        ctx.Services.AddSingleton<OpenWrtApStats.Services.PreferencesService>(
+            new OpenWrtApStats.Services.PreferencesService(ctx.JSInterop.JSRuntime));
         return (ctx, settings, hasher, nodes);
     }
 

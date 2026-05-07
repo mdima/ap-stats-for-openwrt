@@ -12,6 +12,9 @@
 @inject IAppSettingsService Settings
 @inject IUIPasswordHasher Hasher
 @inject INodeRepo Nodes
+@* Phase 8 Plan 08-07 REQ-UI-44 — the new UI preferences card consumes PreferencesService
+   ONLY. NEVER IAppSettingsService — per-browser preference, not a DB setting. *@
+@inject OpenWrtApStats.Services.PreferencesService Prefs
 
 <PageHeader Title="Settings" />
 
@@ -116,6 +119,34 @@
     </div>
 </div>
 
+@* ==== Card 4: UI preferences (Phase 8 Plan 08-07 REQ-UI-44) ====
+   This card uses PreferencesService ONLY — NEVER IAppSettingsService.
+   Per-browser preference (localStorage); CLAUDE.md "DB writes orchestrator-only"
+   invariant is preserved because this card never touches the AppSetting table. *@
+<div class="card mb-4">
+    <div class="card-header py-2 px-3">
+        <h5 class="card-title mb-0">UI preferences</h5>
+        <small class="text-body-secondary">
+            Browser-only preferences. Saved to this browser's localStorage; not stored in the database.
+        </small>
+    </div>
+    <div class="card-body">
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch"
+                   id="notifications-toggle"
+                   checked="@_notificationsEnabled"
+                   @onchange="OnNotificationsToggleChangedAsync" />
+            <label class="form-check-label" for="notifications-toggle">
+                <i class="bi @(_notificationsEnabled ? "bi-bell-fill" : "bi-bell-slash-fill") me-2" aria-hidden="true"></i>
+                Enable toast notifications
+            </label>
+            <small class="form-text d-block text-body-secondary">
+                When off, toasts for new stations and AP status changes are suppressed in this browser.
+            </small>
+        </div>
+    </div>
+</div>
+
 @* ==== Modals ==== *@
 <ConfirmationModal IsOpen="_clearPwdModal"
                    IsOpenChanged="@((bool v) => { _clearPwdModal = v; })"
@@ -157,6 +188,29 @@
         // re-warm idempotently to handle edge cases like a fresh in-memory test DB.
         await Settings.WarmAsync();
         _intervalForm.Seconds = Settings.PollingIntervalSeconds;
+    }
+
+    // ── Card 4 (Phase 8 Plan 08-07 REQ-UI-44) — UI preferences state ────────
+    private bool _notificationsEnabled = true;
+    private bool _restored;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // CLAUDE.md prerender rule + PITFALLS.md Pitfall 7: localStorage interop is
+        // ONLY safe in OnAfterRenderAsync(firstRender:true). Internal _restored gate
+        // prevents re-restore on subsequent renders. Explicit StateHasChanged after
+        // the read so the toggle reflects the persisted value.
+        if (!firstRender || _restored) return;
+        _notificationsEnabled = await Prefs.IsNotificationsEnabledAsync();
+        _restored = true;
+        StateHasChanged();
+    }
+
+    private async Task OnNotificationsToggleChangedAsync(ChangeEventArgs e)
+    {
+        var newValue = e.Value is bool b && b;
+        _notificationsEnabled = newValue;
+        await Prefs.SetNotificationsEnabledAsync(newValue);
     }
 
     // ── Card 1 handlers ─────────────────────────────────────────────────────

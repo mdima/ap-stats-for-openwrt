@@ -163,6 +163,39 @@ public sealed class SettingsUiPreferencesCardTests
         Assert.True(prefs.IsNotificationsEnabled);
     }
 
+    // 3b. Coverage tightener — fire the @onchange handler with a non-boolean payload so the
+    //     `e.Value is bool b && b` pattern's "not-a-bool" branch lights up. In practice no
+    //     real <input type="checkbox"> emits non-boolean change values, but the pattern was
+    //     written defensively, and exercising the branch is needed to clear the D-18 gate.
+    [Fact]
+    public void Toggle_WithNonBooleanChangeValue_DefaultsFalse()
+    {
+        var (ctx, module, prefs) = BuildContext();
+        using var _disp = ctx;
+        module.Setup<bool?>("getJson", PreferencesService.KeyNotificationsEnabled).SetResult(true);
+
+        var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+        cut.WaitForAssertion(() => Assert.Contains("bi-bell-fill", cut.Markup));
+
+        // Fire @onchange with a string value — exercises the non-bool branch of
+        // `e.Value is bool b && b` (defaults to false). In practice this never happens
+        // for a checkbox <input>; we are exclusively raising branch coverage here.
+        cut.Find("input#notifications-toggle").Change("not-a-bool");
+
+        cut.WaitForAssertion(() =>
+        {
+            // Defaulted to false → icon flipped to bi-bell-slash-fill.
+            Assert.Contains("bi-bell-slash-fill", cut.Markup);
+            Assert.Contains(module.Invocations, i =>
+                i.Identifier == "setJson"
+                && i.Arguments.Count >= 2
+                && (i.Arguments[0] as string) == PreferencesService.KeyNotificationsEnabled
+                && i.Arguments[1] is bool b && b == false);
+        });
+
+        Assert.False(prefs.IsNotificationsEnabled);
+    }
+
     // 4. Structural lockdown — the rendered Razor source contains the new card markers and
     //    wires through PreferencesService.SetNotificationsEnabledAsync only (REQ-UI-44 lockdown).
     [Fact]
