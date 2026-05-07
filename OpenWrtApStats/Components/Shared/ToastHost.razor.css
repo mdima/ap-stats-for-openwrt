@@ -1,0 +1,26 @@
+/* Phase 8 — REQ-UI-40 / REQ-UI-43 toast animations.
+   LOCKED in 08-UI-SPEC.md §Components/Shared/ToastHost.razor anatomy:
+     "transition: transform 0.25s ease-out, opacity 0.25s ease-out;
+      from transform: translateY(-12px); opacity: 0;
+      to   transform: none;            opacity: 1;
+      applied via .toast.show { animation: toast-slide-in 0.25s ease-out; }"
+
+   Slide-in from -12px above; fade-in over 250ms ease-out. Pure CSS — no JS lifecycle hook. */
+@keyframes toast-slide-in {
+    0%   { transform: translateY(-12px); opacity: 0; }
+    100% { transform: none;               opacity: 1; }
+}
+
+.toast.show {
+    animation: toast-slide-in 0.25s ease-out;
+}
+
+/* Mobile container override — < 576px the right:1rem default + Bootstrap's 350px toast
+   max-width overflow the viewport, so we span the full viewport width minus 1rem either side
+   per 08-UI-SPEC.md §Anatomy mobile rule. */
+@media (max-width: 575.98px) {
+    .toast-container.position-fixed {
+        left: 1rem !important;
+        right: 1rem !important;
+    }
+}

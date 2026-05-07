@@ -150,4 +150,49 @@ public sealed class ToastHostTests
             Assert.DoesNotContain("<script>alert(1)</script>", cut.Markup);
         });
     }
+
+    // 7. Coverage tightener — exercise the 3 remaining IconFor switch arms (success / warning /
+    //    danger) AND the Dispose loop body with non-empty _timers (queue is still populated when
+    //    the context is disposed). The `_` default arm of IconFor is unreachable in production
+    //    because ToastService validates severity against the same 4-element set BEFORE emission
+    //    (Test 3 of ToastServiceTests locks that throw). 08-UI-SPEC §Anatomy locks the 4 severity
+    //    → bi-* mappings byte-for-byte; this test asserts each verbatim.
+    //    Also covers the Dispose try-block path (cts.Cancel + cts.Dispose) for in-flight timers
+    //    that have NOT yet auto-dismissed — the Dispose foreach loop walks _timers and cancels.
+    [Fact]
+    public async Task AllSeverities_RenderExpectedIcons_AndDisposeCancelsPendingTimers()
+    {
+        var (ctx, svc) = CreateContext();
+        var cut = ctx.Render<ToastHost>();
+
+        // Emit one toast of each remaining severity (info already covered by Test 2).
+        // FIFO cap is 5; we are emitting 4, so all four queue entries survive.
+        await svc.Show("S", "success body", "success");
+        await svc.Show("W", "warning body", "warning");
+        await svc.Show("D", "danger body",  "danger");
+        await svc.Show("I", "info body",    "info");
+
+        cut.WaitForAssertion(() =>
+        {
+            // All four icon classes present in markup → IconFor switch arms covered.
+            Assert.Contains("bi-check-circle-fill",        cut.Markup);   // success
+            Assert.Contains("bi-exclamation-triangle-fill", cut.Markup);  // warning
+            Assert.Contains("bi-x-octagon-fill",            cut.Markup);  // danger
+            Assert.Contains("bi-info-circle-fill",          cut.Markup);  // info
+
+            // role="alert" for danger (08-UI-SPEC §ToastHost.razor markup contract).
+            Assert.Contains("role=\"alert\"",  cut.Markup);
+            Assert.Contains("role=\"status\"", cut.Markup);
+        });
+
+        // Dispose the context with 4 in-flight auto-dismiss timers — this walks the Dispose
+        // foreach loop body (cts.Cancel + cts.Dispose), exercising the lines that no other
+        // test reaches because Tests 1+4+5+6 leave _timers empty by the time the context is
+        // torn down (auto-dismiss fired or manual dismiss happened).
+        ctx.Dispose();
+
+        // Sanity: subsequent Show calls on the disposed-circuit ToastService MUST NOT throw —
+        // the host unsubscribed in Dispose, so there are simply no remaining subscribers.
+        await svc.Show("Title-after-dispose", "should be ignored by host", "info");
+    }
 }
