@@ -99,6 +99,16 @@ try
     // integration-points, BEFORE Wave 2 services (ToastService, EventDetectionService)
     // which will land in subsequent plans.
     builder.Services.AddSingleton<OpenWrtApStats.Services.PreferencesService>();
+    // Phase 8 Plan 08-06 D-10 — INotificationsGate forwards to the same PreferencesService
+    // Singleton. ToastService consumes the interface (NOT PreferencesService directly) so
+    // its tests can substitute a FakeGate without bringing the JS interop machinery along.
+    builder.Services.AddSingleton<OpenWrtApStats.Services.INotificationsGate>(sp =>
+        sp.GetRequiredService<OpenWrtApStats.Services.PreferencesService>());
+    // Phase 8 Plan 08-06 D-08 — ToastService is the in-process event bus consumed by
+    // ToastHost (Wave 3 mount in MainLayout) and emitted to by EventDetectionService.
+    // Registered as Singleton AFTER PreferencesService + INotificationsGate so the DI
+    // graph resolves cleanly at startup.
+    builder.Services.AddSingleton<OpenWrtApStats.Services.ToastService>();
     builder.Services.AddSingleton<PollOrchestrator>();
     builder.Services.AddTransient<ISshSession, RealSshSession>();
     // NodePoller is INTENTIONALLY NOT in the DI container. Its primary-ctor takes

@@ -4,6 +4,21 @@ using Microsoft.JSInterop;
 namespace OpenWrtApStats.Services;
 
 /// <summary>
+/// Phase 8 Plan 08-06 D-10 — minimal abstraction PreferencesService implements
+/// to expose the cached <c>IsNotificationsEnabled</c> boolean to <see cref="ToastService"/>
+/// (and Wave 3's <c>EventDetectionService</c>) without dragging the full PreferencesService
+/// surface into their constructor or test fixtures.
+///
+/// Hot-path gate ONLY (D-09): `IsEnabled` reads the cached field on PreferencesService — no
+/// JS interop, no async cost. Tests construct ToastService with a hand-rolled FakeGate;
+/// production wires PreferencesService into INotificationsGate via DI forwarding in Program.cs.
+/// </summary>
+public interface INotificationsGate
+{
+    bool IsEnabled { get; }
+}
+
+/// <summary>
 /// Phase 8 D-09/D-12: Singleton wrapper over wwwroot/js/preferences.js.
 /// Strongly-typed methods per preference (NOT generic Get&lt;T&gt;/Set&lt;T&gt;).
 /// Internally prepends 'openwrt-ap-stats:' to every localStorage key.
@@ -25,8 +40,12 @@ namespace OpenWrtApStats.Services;
 /// - 'active-filters'       → JSON-encoded DashboardFilters (object).
 /// - 'sort-state'           → JSON-encoded SortState? (object/null).
 /// - 'kpi-selection'        → JSON-encoded StatusFilter? (string/null).
+///
+/// Plan 08-06 additive change: implements <see cref="INotificationsGate"/> via explicit
+/// interface impl, forwarding to the existing <see cref="IsNotificationsEnabled"/> property.
+/// Plan 01 behavior is unchanged.
 /// </summary>
-public sealed class PreferencesService
+public sealed class PreferencesService : INotificationsGate
 {
     // Key constants (D-12 lockdown)
     public const string KeyTheme = "theme";
@@ -61,6 +80,13 @@ public sealed class PreferencesService
     /// seeded it; otherwise the spec-default <c>true</c> (D-09 hot-path).
     /// </summary>
     public bool IsNotificationsEnabled => _notificationsCached ? _notificationsEnabled : true;
+
+    // Plan 08-06 D-10 — explicit INotificationsGate impl forwards to the cached property.
+    // Explicit implementation (rather than interface-implicit) keeps the public C# surface
+    // unchanged: callers that already hold a PreferencesService reference continue to use
+    // `IsNotificationsEnabled` directly; only services that take INotificationsGate (e.g.
+    // ToastService) see the interface member.
+    bool INotificationsGate.IsEnabled => IsNotificationsEnabled;
 
     // --- Theme: RAW string (anti-FOUC contract — see class doc) ---
     // Theme is persisted as the literal 4-character string 'dark' (or 'light') so
