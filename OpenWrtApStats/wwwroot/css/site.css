@@ -48,3 +48,37 @@
 .rssi-seg-filled.text-bg-success { background-color: var(--bs-success); }
 .rssi-seg-filled.text-bg-warning { background-color: var(--bs-warning); }
 .rssi-seg-filled.text-bg-danger { background-color: var(--bs-danger); }
+
+/* === Phase 8 — Dark mode tokens (D-03 LOCKED) ============================
+   Derived from the Phase 5 light palette (LOCK at site.css:8-21) by
+   lifting brightness to meet WCAG AA contrast on the Bootstrap 5 dark
+   body (#212529) and dark table surface (#2b3035). The intentional
+   --bs-primary == --bs-warning hex collision (Phase 5 D-02) is preserved
+   in dark mode for the same reason: operator distinguishes CTA from
+   "Stale" by label + shape, not hue.
+   ========================================================================= */
+[data-bs-theme="dark"] {
+  --bs-primary:   #ffb444;
+  --bs-success:   #26c281;
+  --bs-warning:   #ffb444;
+  --bs-danger:    #ef6e5e;
+  --bs-info:      #33d3ff;
+  --bs-secondary: #adb5bd;
+}
+
+/* Dark-mode override for the WCAG-AA first-column link rule. Light
+   value #b6741a fails contrast on dark surfaces (1.79:1 on #2b3035);
+   #ffc266 = 9.37:1 AAA. */
+[data-bs-theme="dark"] .table a { color: #ffc266; }
+
+/* Dark-mode hover row — inverts the cream #fff8d6 to a warm bronze
+   that reads as "hovered" without overpowering body text. 9.48:1 vs
+   Bootstrap dark body text. */
+[data-bs-theme="dark"] .table-hover tbody tr:hover {
+  background-color: #3a3415;
+}
+
+/* Empty RSSI segment in dark mode. */
+[data-bs-theme="dark"] .rssi-seg-empty {
+  background-color: rgba(255, 255, 255, 0.15);
+}
