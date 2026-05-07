@@ -1,0 +1,119 @@
+@* KpiTileBar.razor — Phase 8 (REQ-UI-01..04). Row container of four <KpiTile>
+   (All / Online / Stale / Offline) wired to PollNotifier.Cycled for live counts and
+   bidirectionally synced with FilterChipGroup Status chip via OnActiveChanged.
+
+   Markup contract LOCKED in 08-UI-SPEC.md §Components/Shared/KpiTileBar.razor.
+   Responsive breakpoints LOCKED:
+     ≥768px (md): 4 tiles in a row, equal width (col-md-3)
+     576-768px (sm): 2x2 grid (col-sm-6)
+     <576px: stacked, full-width (col-12)
+
+   Subscription discipline (CLAUDE.md / Pitfall 7):
+     - Subscribe in OnInitialized; unsubscribe in Dispose
+     - Handler is `async Task OnCycledAsync(PollSnapshot)` — NEVER `async void`
+     - State changes wrapped in `await InvokeAsync(StateHasChanged)`
+
+   PollNotifier event signature (resolved against Services/Polling/PollNotifier.cs):
+     `public event Func<PollSnapshot, Task>? Cycled;`
+
+   Bucket derivation (matches Phase 5 Dashboard.ComputeFilteredRows status filter):
+     - Online  iff StationStatus == Status.Online
+     - Stale   iff StationStatus == Status.Offline AND IsStale (UI-only sub-state from Phase 5)
+     - Offline iff StationStatus == Status.Offline AND !IsStale
+     (Polling rows count toward _total only — they never appear in dashboard rows in Phase 5.)
+*@
+
+@inject PollNotifier Notifier
+@implements IDisposable
+@using OpenWrtApStats.Services
+@using OpenWrtApStats.Services.Polling
+
+<div class="kpi-bar mb-3" role="group" aria-label="Status filter — KPI tiles">
+    <div class="row g-3">
+        <div class="col-md-3 col-sm-6 col-12">
+            <KpiTile Label="All" Count="@_total" IconClass="bi-collection-fill"
+                     IsActive="@(Active is null)"
+                     OnSelected="@(() => SelectAsync(null))" />
+        </div>
+        <div class="col-md-3 col-sm-6 col-12">
+            <KpiTile Label="Online" Count="@_online" IconClass="bi-wifi"
+                     IsActive="@(Active == StatusFilter.Online)"
+                     OnSelected="@(() => SelectAsync(StatusFilter.Online))" />
+        </div>
+        <div class="col-md-3 col-sm-6 col-12">
+            <KpiTile Label="Stale" Count="@_stale" IconClass="bi-exclamation-triangle-fill"
+                     IsActive="@(Active == StatusFilter.Stale)"
+                     OnSelected="@(() => SelectAsync(StatusFilter.Stale))" />
+        </div>
+        <div class="col-md-3 col-sm-6 col-12">
+            <KpiTile Label="Offline" Count="@_offline" IconClass="bi-wifi-off"
+                     IsActive="@(Active == StatusFilter.Offline)"
+                     OnSelected="@(() => SelectAsync(StatusFilter.Offline))" />
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<DashboardKpiRow> Rows { get; set; } = Array.Empty<DashboardKpiRow>();
+    [Parameter] public StatusFilter? Active { get; set; }
+    [Parameter] public EventCallback<StatusFilter?> OnActiveChanged { get; set; }
+
+    private int _total;
+    private int _online;
+    private int _stale;
+    private int _offline;
+
+    protected override void OnInitialized()
+    {
+        Recompute();
+        Notifier.Cycled += OnCycledAsync;
+    }
+
+    protected override void OnParametersSet() => Recompute();
+
+    private void Recompute()
+    {
+        _total = Rows.Count;
+        _online = 0;
+        _stale = 0;
+        _offline = 0;
+        foreach (var r in Rows)
+        {
+            if (r.StationStatus == OpenWrtApStats.Data.Models.Status.Online)
+            {
+                _online++;
+            }
+            else if (r.IsStale)
+            {
+                _stale++;
+            }
+            else
+            {
+                _offline++;
+            }
+        }
+    }
+
+    // PollNotifier.Cycled handler — matches `Func<PollSnapshot, Task>?` exactly.
+    // The snapshot payload is unused; counts derive from Rows (the parent reassigns/mutates
+    // Rows on each Cycled before the handler runs — see Plan 08-08 Dashboard reorganization).
+    private async Task OnCycledAsync(PollSnapshot _)
+    {
+        Recompute();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SelectAsync(StatusFilter? next)
+    {
+        // REQ-UI-04: clicking the active non-All tile deselects → null (All becomes active).
+        // Clicking the active All tile (Active==null && next==null) emits null again — the
+        // parent treats this as a no-op semantically (already null).
+        var emit = (Active == next) ? (StatusFilter?)null : next;
+        await OnActiveChanged.InvokeAsync(emit);
+    }
+
+    public void Dispose()
+    {
+        Notifier.Cycled -= OnCycledAsync;
+    }
+}
