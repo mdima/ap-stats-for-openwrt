@@ -292,7 +292,56 @@ public sealed class EventDetectionServiceTests
         Assert.Single(h.Captured, t => t.Title == "Polling failure");
     }
 
-    // 8. Architectural — EventDetectionService NEVER references IDbContextFactory directly.
+    // 8. Coverage tightener — exercise the DisplayName fallback chain (Name → Hostname →
+    //    IPAddress → "Unknown") and the RelativeTime branches (default DateTime → "unknown
+    //    time"; elapsed > 60s → minutes-formatted; elapsed < 0 (clock skew) → clamped to 0s).
+    //    These are pure-string formatters whose branches the D-04..D-07 tests above don't
+    //    light up; raising the EventDetectionService.cs branch-rate above the D-18 ≥ 80% gate.
+    [Fact]
+    public async Task DisplayName_AndRelativeTime_BranchesCovered_ViaToastMessages()
+    {
+        using var h = new Harness();
+        // Cover all four DisplayName arms (Name / Hostname / IPAddress / Unknown) by emitting
+        // four new MACs in a single cycle, each with exactly one of those fields populated.
+        h.StationRepo.AllStations = new()
+        {
+            new WLANStation { MacAddress = "11:11:11:11:11:11", Name = "Phone",                                  Status = Status.Online, LastPollDate = DateTime.UtcNow },
+            new WLANStation { MacAddress = "22:22:22:22:22:22", Hostname = "kitchen-tv",                         Status = Status.Online, LastPollDate = DateTime.UtcNow },
+            new WLANStation { MacAddress = "33:33:33:33:33:33", IPAddress = "192.168.1.42",                      Status = Status.Online, LastPollDate = DateTime.UtcNow },
+            new WLANStation { MacAddress = "44:44:44:44:44:44",                                                  Status = Status.Online, LastPollDate = DateTime.UtcNow },
+        };
+        // Cover RelativeTime branches via a node that flips Online → Offline with a well-aged
+        // LastPollDate (RelativeTime emits the minute-formatted branch); plus a default-DateTime
+        // node that flips later in the same harness so the "unknown time" branch fires.
+        h.NodeRepo.AllNodes = new()
+        {
+            Node(50, "ap-attic", Status.Online),
+            Node(51, "ap-cellar", Status.Online),
+        };
+        using var svc = h.Build();
+        await h.RaiseAsync();
+
+        // Cycle 2 — flip both nodes Offline; one with a 90-second-old LastPollDate (> 60s
+        // → minutes branch) and one with default DateTime (→ "unknown time" branch).
+        h.NodeRepo.AllNodes = new()
+        {
+            new WiFiNode { Id = 50, Hostname = "ap-attic",  Username = "root", Password = "", Status = Status.Offline, LastPollDate = DateTime.UtcNow.AddSeconds(-90) },
+            new WiFiNode { Id = 51, Hostname = "ap-cellar", Username = "root", Password = "", Status = Status.Offline, LastPollDate = default },
+        };
+        h.Captured.Clear();
+        await h.RaiseAsync();
+
+        // Both AP→Offline toasts fired.
+        Assert.Equal(2, h.Captured.Count(t => t.Title == "Access point offline"));
+        // RelativeTime > 60s — should render an "m ago" suffix in the "ap-attic" toast.
+        var attic = h.Captured.Single(t => t.Message.Contains("ap-attic"));
+        Assert.Contains("m ago", attic.Message);
+        // RelativeTime default DateTime — "unknown time" branch on the "ap-cellar" toast.
+        var cellar = h.Captured.Single(t => t.Message.Contains("ap-cellar"));
+        Assert.Contains("unknown time", cellar.Message);
+    }
+
+    // 9. Architectural — EventDetectionService NEVER references IDbContextFactory directly.
     //    PER-04: only repositories may inject IDbContextFactory. Plan 08-07 hard constraint #1.
     [Fact]
     public void Type_DoesNotInjectIDbContextFactory_Directly()

@@ -109,6 +109,13 @@ try
     // Registered as Singleton AFTER PreferencesService + INotificationsGate so the DI
     // graph resolves cleanly at startup.
     builder.Services.AddSingleton<OpenWrtApStats.Services.ToastService>();
+    // Phase 8 Plan 08-07 D-08/D-11 — EventDetectionService subscribes to PollNotifier.Cycled
+    // in its constructor. Singletons are constructed lazily on first resolve, so we register
+    // an eager-start IHostedService shim that resolves the Singleton at app startup; without
+    // it, a session with no UI activity would never instantiate the detector. Ordered AFTER
+    // ToastService (its dependency) and BEFORE the polling pipeline registrations so the DI
+    // graph remains acyclic.
+    builder.Services.AddSingleton<OpenWrtApStats.Services.EventDetectionService>();
     builder.Services.AddSingleton<PollOrchestrator>();
     builder.Services.AddTransient<ISshSession, RealSshSession>();
     // NodePoller is INTENTIONALLY NOT in the DI container. Its primary-ctor takes
@@ -226,6 +233,11 @@ try
     builder.Services.AddHostedService<DataProtectionHealthHostedService>(); // 3rd — D-12
     builder.Services.AddHostedService<AppSettingsBootstrapHostedService>(); // 4th
     builder.Services.AddHostedService<PollingHostedService>();              // 5th — Phase 2
+    // Phase 8 Plan 08-07 — eager-start shim that forces the EventDetectionService Singleton
+    // to instantiate (and therefore subscribe to PollNotifier.Cycled) at app startup, before
+    // any UI page is opened. Order is irrelevant within the hosted-service group: this shim
+    // does no work in StartAsync — DI resolution alone wires up the Cycled subscription.
+    builder.Services.AddHostedService<OpenWrtApStats.Services.EventDetectionEagerStartHostedService>(); // 6th — Phase 8
 
     // 7. Razor components (Phase 3 starts here). Auth + ratelimit + forwarded headers are
     //    added in Plan 03-03; this Plan 03-01 only lights up the Razor seam so the smoke
