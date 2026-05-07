@@ -33,6 +33,18 @@
             body.classList.remove(MOBILE_OPEN);
             body.classList.add(COLLAPSED);
         }
+
+        // Phase 8 D-17 EXTENSION — dispatch custom event AFTER the toggle so
+        // sidebar-state.js (the only listener) can persist the collapsed bool
+        // to localStorage. The document-delegated handler binding above stays
+        // unchanged; this is a pure additive notification.
+        // Wrapped in try/catch in case CustomEvent constructor is unsupported
+        // (very old browsers); UX must continue to work even if dispatch fails.
+        try {
+            document.dispatchEvent(new CustomEvent('openwrt-ap-stats:sidebar-toggled', {
+                detail: { collapsed: body.classList.contains(COLLAPSED) }
+            }));
+        } catch (e) { /* CustomEvent constructor unsupported — ignore */ }
     }
 
     document.addEventListener('click', function (event) {
