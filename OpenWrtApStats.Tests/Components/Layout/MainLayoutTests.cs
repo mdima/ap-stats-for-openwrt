@@ -129,8 +129,8 @@ public sealed class MainLayoutTests
         Assert.DoesNotContain("opacity-75", brandImg.GetAttribute("class") ?? string.Empty);
 
         // Phase 8 Plan 09 — REQ-UI-31: ThemeToggle is the LAST child of the topbar right cluster.
-        // Locate the cluster div, then its sun/moon button (BootstrapIcons bi-sun-fill/bi-moon-stars-fill).
-        var rightCluster = topnav.QuerySelector("div.d-flex.align-items-center.gap-2.me-3");
+        // Locate the cluster <li class="nav-item ..."> wrapper, then its sun/moon button (BootstrapIcons bi-sun-fill/bi-moon-stars-fill).
+        var rightCluster = topnav.QuerySelector("li.nav-item.d-flex.align-items-center.gap-2.me-3");
         Assert.NotNull(rightCluster);
         var themeBtn = rightCluster!.QuerySelector("button i.bi.bi-sun-fill, button i.bi.bi-moon-stars-fill");
         Assert.NotNull(themeBtn);

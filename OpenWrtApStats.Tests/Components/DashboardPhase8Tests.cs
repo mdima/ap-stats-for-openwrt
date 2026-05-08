@@ -661,9 +661,9 @@ public sealed class DashboardPhase8Tests
         // the rendered HTML. This proves the button moved out of the card.
         var markup = cut.Markup;
         var resetIdx = markup.IndexOf("aria-label=\"Reset filters\"", StringComparison.Ordinal);
-        var filterCardTitleIdx = markup.IndexOf("<h6 class=\"card-title mb-0\">Filters</h6>", StringComparison.Ordinal);
+        var filterCardTitleIdx = markup.IndexOf("<h6 class=\"card-sub-title mb-0\">Filters</h6>", StringComparison.Ordinal);
         Assert.True(resetIdx >= 0, "Reset filters button should be rendered.");
-        Assert.True(filterCardTitleIdx >= 0, "Filter card 'Filters' card-title should be rendered.");
+        Assert.True(filterCardTitleIdx >= 0, "Filter card 'Filters' card-sub-title should be rendered.");
         Assert.True(resetIdx < filterCardTitleIdx,
             $"Reset filters should render BEFORE the filter card header — it now lives in PageHeader.HeaderActions. " +
             $"resetIdx={resetIdx}, filterCardTitleIdx={filterCardTitleIdx}.");
