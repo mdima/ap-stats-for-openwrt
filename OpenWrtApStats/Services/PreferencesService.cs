@@ -4,14 +4,21 @@ using Microsoft.JSInterop;
 namespace OpenWrtApStats.Services;
 
 /// <summary>
-/// Phase 8 Plan 08-06 D-10 — minimal abstraction PreferencesService implements
-/// to expose the cached <c>IsNotificationsEnabled</c> boolean to <see cref="ToastService"/>
-/// (and Wave 3's <c>EventDetectionService</c>) without dragging the full PreferencesService
-/// surface into their constructor or test fixtures.
+/// Phase 8 Plan 08-06 D-10 — minimal abstraction <see cref="NotificationsGate"/> implements
+/// to expose the cached <c>IsEnabled</c> boolean to <see cref="ToastService"/> and
+/// <see cref="EventDetectionService"/> without dragging the full PreferencesService surface
+/// into their constructor or test fixtures.
 ///
-/// Hot-path gate ONLY (D-09): `IsEnabled` reads the cached field on PreferencesService — no
-/// JS interop, no async cost. Tests construct ToastService with a hand-rolled FakeGate;
-/// production wires PreferencesService into INotificationsGate via DI forwarding in Program.cs.
+/// Hot-path gate ONLY (D-09): <c>IsEnabled</c> reads a volatile field on the Singleton
+/// <see cref="NotificationsGate"/> — no JS interop, no async cost. Tests construct
+/// ToastService with a hand-rolled FakeGate; production wires
+/// <see cref="NotificationsGate"/> as a Singleton and routes <see cref="INotificationsGate"/>
+/// to it via DI forwarding in Program.cs.
+///
+/// Phase 8 deviation note (2026-05-08): the original D-09 line said "PreferencesService is
+/// Singleton". That was a captive-dep bug — PreferencesService captures <see cref="IJSRuntime"/>
+/// (Scoped per Blazor circuit). The fix splits the gate (Singleton) from the JS-touching
+/// service (Scoped). See <c>.planning/debug/resolved/phase8-prefs-captive-dep.md</c>.
 /// </summary>
 public interface INotificationsGate
 {
@@ -19,11 +26,49 @@ public interface INotificationsGate
 }
 
 /// <summary>
-/// Phase 8 D-09/D-12: Singleton wrapper over wwwroot/js/preferences.js.
+/// Phase 8 D-09 (post-fix) — Singleton holder of the cached
+/// <c>notifications-enabled</c> boolean. Hot-path read is volatile and lock-free; writes
+/// arrive from the Scoped <see cref="PreferencesService"/> on cache-seed
+/// (<see cref="PreferencesService.IsNotificationsEnabledAsync"/>) and on every
+/// <see cref="PreferencesService.SetNotificationsEnabledAsync"/>.
+///
+/// Why split from PreferencesService: PreferencesService captures
+/// <see cref="IJSRuntime"/> (Scoped per Blazor circuit), so it CANNOT itself be Singleton
+/// without a captive-dependency violation. The Singleton seam moves here; the Scoped
+/// service mirrors its cached value into this gate so consumers (ToastService,
+/// EventDetectionService) keep their lock-free Singleton-typed dependency.
+///
+/// Default = <c>true</c> (notifications-on) until any circuit seeds otherwise.
+/// </summary>
+public sealed class NotificationsGate : INotificationsGate
+{
+    // Volatile read/write so cross-circuit visibility is guaranteed without a lock.
+    private volatile bool _isEnabled = true;
+
+    /// <inheritdoc />
+    public bool IsEnabled => _isEnabled;
+
+    /// <summary>
+    /// Mirror the per-circuit cached value into the Singleton gate. Called from
+    /// <see cref="PreferencesService.IsNotificationsEnabledAsync"/> on first seed and
+    /// from <see cref="PreferencesService.SetNotificationsEnabledAsync"/> on every write.
+    /// </summary>
+    public void Set(bool value) => _isEnabled = value;
+}
+
+/// <summary>
+/// Phase 8 D-12 (post-fix): Scoped wrapper over wwwroot/js/preferences.js.
 /// Strongly-typed methods per preference (NOT generic Get&lt;T&gt;/Set&lt;T&gt;).
 /// Internally prepends 'openwrt-ap-stats:' to every localStorage key.
 /// IsNotificationsEnabled boolean is cached in memory after first read for
-/// fast hot-path access by ToastService and EventDetectionService (D-09, D-10).
+/// fast hot-path access; the value is mirrored into the Singleton
+/// <see cref="NotificationsGate"/> so cross-circuit consumers (ToastService,
+/// EventDetectionService — both Singletons) see the same flag without ever
+/// touching PreferencesService directly (D-09 / D-10).
+///
+/// Lifetime: Scoped (per Blazor circuit). Was Singleton in the original Plan 08-01
+/// registration; that was a captive-dep bug — see class-doc on
+/// <see cref="NotificationsGate"/>.
 ///
 /// MUST NOT touch IAppSettingsService, IDbContextFactory, or any repository —
 /// preferences are per-browser, never persisted to the database (Phase 8 hard constraint).
@@ -40,10 +85,6 @@ public interface INotificationsGate
 /// - 'active-filters'       → JSON-encoded DashboardFilters (object).
 /// - 'sort-state'           → JSON-encoded SortState? (object/null).
 /// - 'kpi-selection'        → JSON-encoded StatusFilter? (string/null).
-///
-/// Plan 08-06 additive change: implements <see cref="INotificationsGate"/> via explicit
-/// interface impl, forwarding to the existing <see cref="IsNotificationsEnabled"/> property.
-/// Plan 01 behavior is unchanged.
 /// </summary>
 public sealed class PreferencesService : INotificationsGate
 {
@@ -67,26 +108,46 @@ public sealed class PreferencesService : INotificationsGate
     };
 
     private readonly IJSRuntime _js;
+    private readonly NotificationsGate _gate;
     private IJSObjectReference? _module;
     private readonly SemaphoreSlim _moduleLock = new(1, 1);
     private bool _notificationsCached;
     private bool _notificationsEnabled = true;
 
-    public PreferencesService(IJSRuntime js) => _js = js;
+    /// <summary>
+    /// Production constructor — DI provides both the per-circuit <see cref="IJSRuntime"/>
+    /// and the Singleton <see cref="NotificationsGate"/> mirror target.
+    /// </summary>
+    public PreferencesService(IJSRuntime js, NotificationsGate gate)
+    {
+        _js = js;
+        _gate = gate;
+    }
 
     /// <summary>
-    /// Synchronous fast-path access used by ToastService / EventDetectionService.
-    /// Returns the cached value once <see cref="IsNotificationsEnabledAsync"/> has
-    /// seeded it; otherwise the spec-default <c>true</c> (D-09 hot-path).
+    /// Test convenience constructor — fabricates a private <see cref="NotificationsGate"/>
+    /// when one is not supplied. Tests that hold a <see cref="PreferencesService"/>
+    /// reference and assert <see cref="IsNotificationsEnabled"/> after a Set continue to
+    /// see the same per-instance value because the constructed gate is mirrored on every
+    /// write. Production code paths NEVER hit this overload — the Program.cs registration
+    /// always passes the Singleton gate.
+    /// </summary>
+    public PreferencesService(IJSRuntime js) : this(js, new NotificationsGate()) { }
+
+    /// <summary>
+    /// Synchronous fast-path access used by tests + the Settings UI checkbox. Returns the
+    /// cached value once <see cref="IsNotificationsEnabledAsync"/> has seeded it; otherwise
+    /// the spec-default <c>true</c>. ToastService / EventDetectionService consume the
+    /// Singleton <see cref="INotificationsGate"/> instead — they MUST NOT depend on the
+    /// per-circuit instance (D-09 hot-path).
     /// </summary>
     public bool IsNotificationsEnabled => _notificationsCached ? _notificationsEnabled : true;
 
-    // Plan 08-06 D-10 — explicit INotificationsGate impl forwards to the cached property.
-    // Explicit implementation (rather than interface-implicit) keeps the public C# surface
-    // unchanged: callers that already hold a PreferencesService reference continue to use
-    // `IsNotificationsEnabled` directly; only services that take INotificationsGate (e.g.
-    // ToastService) see the interface member.
-    bool INotificationsGate.IsEnabled => IsNotificationsEnabled;
+    // Transitional shim (commit 1 of phase8-prefs-captive-dep fix): keeps the existing
+    // INotificationsGate forwarding factory in Program.cs compiling until commit 2 reroutes
+    // it to the new Singleton NotificationsGate. Commit 2 removes both this member and the
+    // implements-clause above.
+    bool INotificationsGate.IsEnabled => _gate.IsEnabled;
 
     // --- Theme: RAW string (anti-FOUC contract — see class doc) ---
     // Theme is persisted as the literal 4-character string 'dark' (or 'light') so
@@ -120,6 +181,9 @@ public sealed class PreferencesService : INotificationsGate
         if (_notificationsCached) return _notificationsEnabled;
         _notificationsEnabled = await GetJsonStructOrDefaultAsync<bool>(KeyNotificationsEnabled, true);
         _notificationsCached = true;
+        // Mirror to the Singleton gate on first seed so cross-circuit consumers see the
+        // operator's persisted preference rather than the spec-default (D-10).
+        _gate.Set(_notificationsEnabled);
         return _notificationsEnabled;
     }
     public async Task SetNotificationsEnabledAsync(bool value)
@@ -127,6 +191,9 @@ public sealed class PreferencesService : INotificationsGate
         await SetJsonAsync(KeyNotificationsEnabled, value);
         _notificationsEnabled = value;
         _notificationsCached = true;
+        // Mirror to the Singleton gate on every write — this is the hot-path update path
+        // for ToastService / EventDetectionService (D-10 defense-in-depth).
+        _gate.Set(value);
     }
 
     // --- Filters / Sort / KPI: JSON-encoded (inline script never reads these) ---
