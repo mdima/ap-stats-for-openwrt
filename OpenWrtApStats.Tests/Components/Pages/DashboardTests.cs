@@ -333,19 +333,22 @@ public sealed class DashboardTests
         {
             var cut = ctx.Render<Dashboard>();
 
-            // Default sort = lastSeen desc; the lastSeen th has aria-sort="descending".
-            var lastSeenTh = cut.FindAll("th").First(t => t.TextContent.Contains("Last seen"));
-            Assert.Equal("descending", lastSeenTh.GetAttribute("aria-sort"));
-
-            // Click the Name header — should set _sortColumn=name, _sortDescending=false.
-            cut.FindAll("button").First(b => b.TextContent.Contains("Name")).Click();
+            // Default sort = name asc (260508-dns); the Name th has aria-sort="ascending".
             var nameTh = cut.FindAll("th").First(t => t.TextContent.Contains("Name"));
             Assert.Equal("ascending", nameTh.GetAttribute("aria-sort"));
 
-            // Click again — flips to descending.
+            // Click the Name header — Name is the active column, so direction flips to descending.
             cut.FindAll("button").First(b => b.TextContent.Contains("Name")).Click();
             nameTh = cut.FindAll("th").First(t => t.TextContent.Contains("Name"));
             Assert.Equal("descending", nameTh.GetAttribute("aria-sort"));
+
+            // Click MAC header — column switches; new column starts ascending and Name clears its aria-sort.
+            cut.FindAll("button").First(b => b.TextContent.Contains("MAC")).Click();
+            var macTh = cut.FindAll("th").First(t => t.TextContent.Contains("MAC"));
+            Assert.Equal("ascending", macTh.GetAttribute("aria-sort"));
+            nameTh = cut.FindAll("th").First(t => t.TextContent.Contains("Name"));
+            Assert.NotEqual("ascending", nameTh.GetAttribute("aria-sort"));
+            Assert.NotEqual("descending", nameTh.GetAttribute("aria-sort"));
         }
     }
 
@@ -444,12 +447,15 @@ public sealed class DashboardTests
         Assert.Contains("ItemSize=\"40\"", source);
     }
 
-    // ── Revision 1 W5 — D-05 default sort tiebreaker by MAC asc ────────────────────
+    // ── Revision 1 W5 — D-05 lastSeen-desc tiebreaker by MAC asc ───────────────────
     [Fact]
-    public void Dashboard_DefaultSort_TiebreaksByMacAsc()
+    public void Dashboard_LastSeenDescSort_TiebreaksByMacAsc()
     {
-        // Two stations with the SAME LastPollDate — secondary stable sort by MAC asc must
-        // place AA:00:... before BB:00:... in the rendered HTML.
+        // Two stations with the SAME LastPollDate — when sorted by lastSeen desc, the
+        // secondary stable sort by MAC asc must place AA:00:... before BB:00:... in the
+        // rendered HTML. (Default sort is now name asc per 260508-dns; this test routes
+        // through the UI to switch to lastSeen desc, where the MAC tiebreaker is the
+        // load-bearing behavior under test.)
         var node = new WiFiNode { Id = 1, Hostname = "ap-A", Username = "root", Password = "x", Status = Status.Online, LastPollDate = DateTime.UtcNow };
         var net  = new WiFiNetwork { Id = 10, WiFiNodeId = 1, MacAddress = "00:11:22:33:44:55", SSID = "guest", Enabled = true };
         var sameTime = DateTime.UtcNow.AddSeconds(-5);
@@ -462,7 +468,13 @@ public sealed class DashboardTests
         {
             var cut = ctx.Render<Dashboard>();
 
-            // Default sort is lastSeen desc; identical LastPollDate → MAC asc tiebreaker.
+            // Switch sort column to lastSeen desc via the UI (twice = column switch then flip).
+            cut.FindAll("button").First(b => b.TextContent.Contains("Last seen")).Click();
+            cut.FindAll("button").First(b => b.TextContent.Contains("Last seen")).Click();
+            var lastSeenTh = cut.FindAll("th").First(t => t.TextContent.Contains("Last seen"));
+            Assert.Equal("descending", lastSeenTh.GetAttribute("aria-sort"));
+
+            // Identical LastPollDate → primary key ties → MAC asc tiebreaker engages.
             var aaIndex = cut.Markup.IndexOf("AA:00:00:00:00:01", StringComparison.Ordinal);
             var bbIndex = cut.Markup.IndexOf("BB:00:00:00:00:02", StringComparison.Ordinal);
             Assert.True(aaIndex >= 0, "AA:00:00:00:00:01 not rendered");

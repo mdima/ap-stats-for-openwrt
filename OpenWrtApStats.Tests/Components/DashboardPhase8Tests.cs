@@ -353,15 +353,15 @@ public sealed class DashboardPhase8Tests
             && (i.Arguments[0] as string) == PreferencesService.KeyNotificationsEnabled);
 
         // In-memory state cleared: search empty, filter sets empty, _statusFilter null,
-        // sort defaults restored.
+        // sort defaults restored (default = name asc, 260508-dns).
         Assert.Equal(string.Empty, GetField<string>(cut.Instance, "_searchText"));
         Assert.Empty(GetField<HashSet<string>>(cut.Instance, "_selectedSsids")!);
         Assert.Empty(GetField<HashSet<string>>(cut.Instance, "_selectedApLabels")!);
         Assert.Empty(GetField<HashSet<string>>(cut.Instance, "_selectedStatuses")!);
         Assert.Empty(GetField<HashSet<int>>(cut.Instance, "_selectedAps")!);
         Assert.Null(GetField<StatusFilter?>(cut.Instance, "_statusFilter"));
-        Assert.Equal("lastSeen", GetField<string>(cut.Instance, "_sortColumn"));
-        Assert.True(GetField<bool>(cut.Instance, "_sortDescending"));
+        Assert.Equal("name", GetField<string>(cut.Instance, "_sortColumn"));
+        Assert.False(GetField<bool>(cut.Instance, "_sortDescending"));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -639,5 +639,33 @@ public sealed class DashboardPhase8Tests
         mi.Invoke(cut.Instance, null);
         var changedAgain = GetField<HashSet<string>>(cut.Instance, "_changedRowMacs");
         Assert.Empty(changedAgain!);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Test 13 — Reset filters button mounts in PageHeader.HeaderActions, not the
+    // filter card-header (operator-driven move; supersedes the original REQ-UI-12
+    // "Reset button at right" of the filter card placement).
+    // ─────────────────────────────────────────────────────────────────────────
+    [Fact]
+    public void ResetFiltersButton_RendersInPageHeader_NotInFilterCardHeader()
+    {
+        var (h, cut) = RenderPopulated();
+        using var _ = h.Ctx;
+
+        // The Reset filters button is rendered exactly once.
+        var resetButtons = cut.FindAll("button[aria-label='Reset filters']");
+        Assert.Single(resetButtons);
+
+        // Markup-order assertion: PageHeader renders above the filter card, so the
+        // Reset button's aria-label must appear BEFORE the "Filters" card-header in
+        // the rendered HTML. This proves the button moved out of the card.
+        var markup = cut.Markup;
+        var resetIdx = markup.IndexOf("aria-label=\"Reset filters\"", StringComparison.Ordinal);
+        var filterCardTitleIdx = markup.IndexOf("<h6 class=\"card-title mb-0\">Filters</h6>", StringComparison.Ordinal);
+        Assert.True(resetIdx >= 0, "Reset filters button should be rendered.");
+        Assert.True(filterCardTitleIdx >= 0, "Filter card 'Filters' card-title should be rendered.");
+        Assert.True(resetIdx < filterCardTitleIdx,
+            $"Reset filters should render BEFORE the filter card header — it now lives in PageHeader.HeaderActions. " +
+            $"resetIdx={resetIdx}, filterCardTitleIdx={filterCardTitleIdx}.");
     }
 }

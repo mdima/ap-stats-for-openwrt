@@ -22,28 +22,22 @@
                 </button>
             </li>
         </ul>
-        @* Phase 5 D-12 / DASH-08: Live/Paused indicator + paired poll countdown.
-           Adjacent pills (UI-SPEC line 615 LOCK — NOT a combined pill). The slot
-           originally reserved by Phase 3 for "Phase 6" is claimed by Phase 5; Phase 6
-           will swap the gate source (DI replacement of ICircuitGate impl) without
-           touching this markup. Phase 8 (REQ-UI-31, 08-UI-SPEC §Topbar replacement)
-           appends <ThemeToggle /> as the LAST child of the cluster — ordering
-           LivePausedBadge -> PollCountdown -> ThemeToggle is locked. *@
-        <div class="d-flex align-items-center gap-2 me-3">
-            <LivePausedBadge />
-            <PollCountdown />
-            <ThemeToggle />
-        </div>
         <ul class="navbar-nav ms-auto">
+            @* Phase 5 D-12 / DASH-08: Live/Paused indicator + paired poll countdown.
+               Adjacent pills (UI-SPEC line 615 LOCK — NOT a combined pill). The slot
+               originally reserved by Phase 3 for "Phase 6" is claimed by Phase 5; Phase 6
+               will swap the gate source (DI replacement of ICircuitGate impl) without
+               touching this markup. Phase 8 (REQ-UI-31, 08-UI-SPEC §Topbar replacement)
+               appends <ThemeToggle /> as the LAST child of the cluster — ordering
+               LivePausedBadge -> PollCountdown -> ThemeToggle is locked. *@
+            <li class="nav-item d-flex align-items-center gap-2 me-3">
+                <LivePausedBadge />
+                <PollCountdown />
+                <ThemeToggle />
+            </li>
             <AuthorizeView>
                 <Authorized>
-                    <li class="nav-item dropdown user-menu">
-                        <span class="nav-link">
-                            <i class="bi bi-person-circle me-1" aria-hidden="true"></i>
-                            <span>Operator</span>
-                        </span>
-                    </li>
-                    <li class="nav-item">
+                    <li class="nav-item d-flex  align-items-center gap-2">
                         <form action="/Logout" method="post" class="d-inline">
                             <AntiforgeryToken />
                             <button type="submit" class="btn btn-outline-danger btn-sm">

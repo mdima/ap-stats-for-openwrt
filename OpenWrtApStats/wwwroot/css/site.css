@@ -125,3 +125,16 @@
 .sidebar-brand .brand-link {
   color: var(--bs-emphasis-color);
 }
+
+.filterLabel {min-width: 40px;}
+
+/* KPI Backgrounds */
+.KpiOnline {
+    background-color: rgba(var(--bs-success-rgb), 0.2) !important;
+}
+.KpiStale {
+    background-color: rgba(var(--bs-warning-rgb), 0.2) !important;
+}
+.KpiOffline {
+    background-color: rgba(var(--bs-secondary-rgb), 0.2) !important;
+}

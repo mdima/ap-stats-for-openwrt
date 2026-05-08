@@ -20,7 +20,20 @@
    Reset filters button, view-state restored from PreferencesService at first render, AP chip status badges via
    FilterChipGroup.StatusBadgeFor (Plan 03 extension), per-row Status-change CSS hook for the Plan 10 fade animation. *@
 
-<PageHeader Title="Dashboard" />
+<PageHeader Title="Dashboard">
+    <HeaderActions>
+        @* Reset filters lives next to the page title (operator-driven move from the filter
+           card header). Rendered only on the populated branch — when EmptyState is showing
+           there are no filters to reset. Same visual aspect as before: btn-link + icon. *@
+        @if (!_loading && _nodeCount > 0 && _anyEnabledWlan)
+        {
+            <button type="button" class="btn btn-link btn-sm"
+                    aria-label="Reset filters" @onclick="ResetFiltersAsync">
+                <i class="bi bi-arrow-counterclockwise me-1" aria-hidden="true"></i>Reset filters
+            </button>
+        }
+    </HeaderActions>
+</PageHeader>
 
 @if (_loading)
 {
@@ -61,14 +74,10 @@ else
     <KpiTileBar Rows="_lastFilteredKpiRows" Active="_statusFilter" OnActiveChanged="OnKpiSelectedAsync" />
 
     @* 3. Filter card — Phase 8 (REQ-UI-12). AdminLTE card with header "Filters",
-       Reset button at right, search + 3 chip groups in a 5/7 grid. *@
+       search + 3 chip groups in a 5/7 grid. Reset filters lives in PageHeader actions. *@
     <div class="card mb-3">
-        <div class="card-header py-2 px-3 d-flex align-items-center">
-            <h6 class="card-title mb-0">Filters</h6>
-            <button type="button" class="btn btn-link btn-sm ms-auto"
-                    aria-label="Reset filters" @onclick="ResetFiltersAsync">
-                <i class="bi bi-arrow-counterclockwise me-1" aria-hidden="true"></i>Reset filters
-            </button>
+        <div class="card-header py-2 px-3">
+            <h6 class="card-sub-title mb-0">Filters</h6>
         </div>
         <div class="card-body p-3">
             <div class="row g-3">
@@ -161,7 +170,7 @@ else
                             <text>Showing @_lastFilteredCount of @_rows.Count entries (filtered)</text>
                         }
                     </span>
-                    <span>Last poll: @RelativeTime(_lastPollUtc)</span>
+                    <span class="ms-auto text-end">Last poll: @RelativeTime(_lastPollUtc)</span>
                 </div>
             </div>
         </div>
@@ -180,8 +189,8 @@ else
 
     // Filter / sort / search state — survives Cycled re-queries naturally (only _rows + _nodes + _cycleEndUtc replaced).
     private string _searchText = "";
-    private string _sortColumn = "lastSeen";
-    private bool   _sortDescending = true;
+    private string _sortColumn = "name";
+    private bool   _sortDescending = false;
     private HashSet<string> _selectedSsids = new();
     private HashSet<int>    _selectedAps = new();           // node Ids — kept for Phase 5 ComputeFilteredRows compatibility (legacy strip removed in Phase 8)
     private HashSet<string> _selectedApLabels = new();      // hostname strings — written by AP FilterChipGroup
@@ -530,9 +539,9 @@ else
         _selectedApLabels.Clear();         // hostname set written by AP FilterChipGroup
         _selectedStatuses.Clear();
         _statusFilter = null;
-        // Phase 5 default sort: column "lastSeen", descending true.
-        _sortColumn = "lastSeen";
-        _sortDescending = true;
+        // Default sort: column "name", ascending (operator-driven, 260508-dns).
+        _sortColumn = "name";
+        _sortDescending = false;
         await Prefs.ClearViewStateAsync();
         StateHasChanged();
     }

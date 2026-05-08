@@ -16,7 +16,7 @@
    Inline Style Exceptions: the typography exception is bounded to the .kpi-count selector. *@
 
 <button type="button"
-        class="card kpi-tile w-100 text-start p-0 border-0 @(IsActive ? "kpi-tile-active" : "")"
+        class="card kpi-tile w-100 text-start p-0 border-0 @(IsActive ? "kpi-tile-active" : "") @BackgroundClass"
         aria-pressed="@IsActive.ToString().ToLowerInvariant()"
         @onclick="OnSelectedAsync">
     <div class="card-body p-3">
@@ -34,6 +34,7 @@
     [Parameter, EditorRequired] public string IconClass { get; set; } = "bi-collection-fill";
     [Parameter] public bool IsActive { get; set; }
     [Parameter] public EventCallback OnSelected { get; set; }
+    [Parameter] public string BackgroundClass { get; set; } = "";
 
     private Task OnSelectedAsync() => OnSelected.InvokeAsync();
 }
