@@ -116,11 +116,12 @@
   100% { background-color: transparent; }
 }
 
-/* === Phase 8 polish — brand-link color match (260508-blc). =====================
-   The sidebar brand-link had no explicit color and was falling back to body
-   text — making the currentColor-driven logo (REQ-UI-72) visibly darker than
-   the nav-link items below it. Inherit the AdminLTE --lte-sidebar-color so the
-   logo + wordmark stay coherent with the menu in both light and dark themes. */
+/* === Phase 8 polish — brand-link emphasis color (260508-blc). ==================
+   Initial pass used --lte-sidebar-color (muted gray) but the operator wanted
+   the brand mark to read crisper. Switched to --bs-emphasis-color which, on
+   the sidebar's hardcoded data-bs-theme="dark" surface (MainLayout.razor:63),
+   resolves to #fff — a clean white wordmark + currentColor-driven logo (per
+   REQ-UI-72) against the dark sidebar background. */
 .sidebar-brand .brand-link {
-  color: var(--lte-sidebar-color);
+  color: var(--bs-emphasis-color);
 }
