@@ -93,17 +93,25 @@ try
     //     adds Dashboard subscribers; raising the event from day 1 makes Phase 5 additive only.
     builder.Services.AddSingleton<OpenWrtAdapterCache>();
     builder.Services.AddSingleton<PollNotifier>();
-    // Phase 8 D-09: PreferencesService is Singleton — wraps wwwroot/js/preferences.js
-    // (per-browser localStorage) with a thin async interop layer + cached
-    // IsNotificationsEnabled hot-path. Registered AFTER PollNotifier per CONTEXT.md
-    // integration-points, BEFORE Wave 2 services (ToastService, EventDetectionService)
-    // which will land in subsequent plans.
-    builder.Services.AddSingleton<OpenWrtApStats.Services.PreferencesService>();
-    // Phase 8 Plan 08-06 D-10 — INotificationsGate forwards to the same PreferencesService
-    // Singleton. ToastService consumes the interface (NOT PreferencesService directly) so
-    // its tests can substitute a FakeGate without bringing the JS interop machinery along.
+    // Phase 8 D-09 (post-fix 2026-05-08): the gate is the Singleton seam; PreferencesService
+    // itself is Scoped because it captures IJSRuntime (Scoped per Blazor circuit). The
+    // original Plan 08-01 Singleton registration of PreferencesService was a captive-dep
+    // bug — see .planning/debug/resolved/phase8-prefs-captive-dep.md.
+    //
+    // Registration order (load-bearing — DI graph must be acyclic at root):
+    //   1) NotificationsGate (Singleton)            — hot-path bool, no captures.
+    //   2) INotificationsGate factory (Singleton)   — forwards to NotificationsGate.
+    //   3) PreferencesService (Scoped)              — captures IJSRuntime + the gate.
+    //   4) ToastService / EventDetectionService     — Singletons consuming INotificationsGate.
+    builder.Services.AddSingleton<OpenWrtApStats.Services.NotificationsGate>();
     builder.Services.AddSingleton<OpenWrtApStats.Services.INotificationsGate>(sp =>
-        sp.GetRequiredService<OpenWrtApStats.Services.PreferencesService>());
+        sp.GetRequiredService<OpenWrtApStats.Services.NotificationsGate>());
+    // Phase 8 D-09 (post-fix): PreferencesService is Scoped — wraps wwwroot/js/preferences.js
+    // (per-browser localStorage) with a thin async interop layer + cached
+    // IsNotificationsEnabled hot-path. The cached value is mirrored into the Singleton
+    // NotificationsGate on first read and on every Set so cross-circuit consumers
+    // (ToastService, EventDetectionService) see the operator's preference.
+    builder.Services.AddScoped<OpenWrtApStats.Services.PreferencesService>();
     // Phase 8 Plan 08-06 D-08 — ToastService is the in-process event bus consumed by
     // ToastHost (Wave 3 mount in MainLayout) and emitted to by EventDetectionService.
     // Registered as Singleton AFTER PreferencesService + INotificationsGate so the DI

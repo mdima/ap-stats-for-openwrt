@@ -86,7 +86,7 @@ public sealed class NotificationsGate : INotificationsGate
 /// - 'sort-state'           → JSON-encoded SortState? (object/null).
 /// - 'kpi-selection'        → JSON-encoded StatusFilter? (string/null).
 /// </summary>
-public sealed class PreferencesService : INotificationsGate
+public sealed class PreferencesService
 {
     // Key constants (D-12 lockdown)
     public const string KeyTheme = "theme";
@@ -142,12 +142,6 @@ public sealed class PreferencesService : INotificationsGate
     /// per-circuit instance (D-09 hot-path).
     /// </summary>
     public bool IsNotificationsEnabled => _notificationsCached ? _notificationsEnabled : true;
-
-    // Transitional shim (commit 1 of phase8-prefs-captive-dep fix): keeps the existing
-    // INotificationsGate forwarding factory in Program.cs compiling until commit 2 reroutes
-    // it to the new Singleton NotificationsGate. Commit 2 removes both this member and the
-    // implements-clause above.
-    bool INotificationsGate.IsEnabled => _gate.IsEnabled;
 
     // --- Theme: RAW string (anti-FOUC contract — see class doc) ---
     // Theme is persisted as the literal 4-character string 'dark' (or 'light') so
