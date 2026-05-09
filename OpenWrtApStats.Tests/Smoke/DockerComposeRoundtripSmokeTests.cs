@@ -127,7 +127,7 @@ public sealed class DockerComposeRoundtripSmokeTests(DockerSmokeFixture fixture)
             .WithVolumeMount(_fixture.LogsVolume, "/logs")
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Production")
             .WithWaitStrategy(Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(r =>
-                r.ForPath("/health").ForStatusCode(HttpStatusCode.OK)))
+                r.ForPath("/health").ForPort(8080).ForStatusCode(HttpStatusCode.OK)))
             .Build();
 
     private static async Task PostAddNodeAsync(
