@@ -26,6 +26,13 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
 {
     private readonly DockerSmokeFixture _fixture = fixture;
 
+    /// <summary>
+    /// Builds a container instance against the smoke image with the default
+    /// /health-200 wait strategy used by the JSON-shape and UID smoke tests.
+    /// The healthcheck-status test below uses <see cref="BuildHealthyContainer"/>
+    /// instead — it must wait on the docker daemon's reported Health.Status, not
+    /// just on /health responding.
+    /// </summary>
     private IContainer BuildContainer() =>
         new ContainerBuilder("openwrtapstats:smoke")
             .WithPortBinding(8080, assignRandomHostPort: true)
@@ -36,39 +43,54 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
                 r.ForPath("/health").ForPort(8080).ForStatusCode(HttpStatusCode.OK)))
             .Build();
 
+    /// <summary>
+    /// Variant of <see cref="BuildContainer"/> that waits on the docker daemon's
+    /// reported HEALTHCHECK status (Health.Status == healthy) rather than on a
+    /// raw HTTP probe. Required for INF-08 because that is exactly the surface
+    /// the test asserts. <c>UntilContainerIsHealthy(failingStreak)</c> polls the
+    /// container's State.Health each cycle and returns success the moment the
+    /// daemon flips to <c>healthy</c>; on the production Dockerfile this happens
+    /// after the first successful CMD (~5–10s after start, well inside
+    /// <c>start-period=30s</c>).
+    /// </summary>
+    private IContainer BuildHealthyContainer() =>
+        new ContainerBuilder("openwrtapstats:smoke")
+            .WithPortBinding(8080, assignRandomHostPort: true)
+            .WithVolumeMount(_fixture.DataVolume, "/data")
+            .WithVolumeMount(_fixture.LogsVolume, "/logs")
+            .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Production")
+            .WithWaitStrategy(Wait.ForUnixContainer().UntilContainerIsHealthy())
+            .Build();
+
     [Fact]
     public async Task Container_ReachesHealthy_WithinStartPeriod()
     {
-        // Testcontainers 4.11.0 IWaitForContainerOS does NOT expose UntilHealthy()
-        // (the API surface in earlier docs is not present in this release; verified
-        // via in-tree compile probe). Workaround: wait for the HTTP /health endpoint
-        // to return 200 (which is the same surface the Dockerfile HEALTHCHECK CMD
-        // probes via curl), then poll IContainer.Health until it transitions to
-        // Healthy. start-period=30s + first interval=30s is the worst-case window
-        // before docker has a chance to report `healthy`; we give 120s of headroom.
+        // INF-08 live arm: assert the docker-daemon-reported Health.Status reaches
+        // `healthy`. We rely on Testcontainers 4.11's `UntilContainerIsHealthy()`
+        // wait strategy, which inspects the container each interval and returns
+        // success once `State.Health.Status == "healthy"`.
+        //
+        // Why not poll IContainer.Health from a manual loop?  In Testcontainers
+        // 4.11, DockerContainer keeps a *cached* ContainerInspectResponse
+        // (`_container`) that is only refreshed in a few lifecycle hooks
+        // (StartAsync, StopAsync, the wait-strategy CheckReadinessAsync loop, and
+        // pause/unpause). After StartAsync returns, no public API forces a re-
+        // inspect, so the property reads stale data forever — typically still
+        // "starting" because the snapshot was taken just seconds after run.
+        // That's the trap the previous implementation fell into; using a real
+        // wait strategy is the only correct path.
         var ct = TestContext.Current.CancellationToken;
-        var container = BuildContainer();
+        var container = BuildHealthyContainer();
         try
         {
             await container.StartAsync(ct);
 
-            // The /health probe already returned 200 (gated by WithWaitStrategy).
-            // Now poll the docker daemon's Health.Status until it reports Healthy.
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(120);
-            while (DateTime.UtcNow < deadline)
-            {
-                if (container.Health == TestcontainersHealthStatus.Healthy)
-                {
-                    return; // Success — assertion satisfied.
-                }
-                await Task.Delay(TimeSpan.FromSeconds(2), ct);
-            }
-
-            Assert.Fail(
-                $"Container did not reach `Healthy` within 120s; current status: {container.Health}. " +
-                "INF-08 live arm regression — the Dockerfile HEALTHCHECK directive is not " +
-                "succeeding inside the container (curl missing? /health returning 503? " +
-                "start-period too short?).");
+            // StartAsync returning successfully under UntilContainerIsHealthy()
+            // is itself the assertion — the daemon reported Health.Status =
+            // healthy. We re-read the (now-fresh) cached value as a paranoia
+            // check so a regression in Testcontainers' wait strategy surfaces
+            // here rather than silently passing.
+            Assert.Equal(TestcontainersHealthStatus.Healthy, container.Health);
         }
         finally
         {
