@@ -599,7 +599,7 @@ public sealed class DashboardPhase8Tests
     // lifecycle that the Plan 10 CSS animation rides on).
     // ─────────────────────────────────────────────────────────────────────────
     [Fact]
-    public void RowStatusChanged_AddsClassForOneFrame()
+    public async Task RowStatusChanged_AddsClassForOneFrame()
     {
         var (h, cut) = RenderPopulated();
         using var _ = h.Ctx;
@@ -619,26 +619,49 @@ public sealed class DashboardPhase8Tests
         SetField(cut.Instance, "_changedRowMacs", new HashSet<string>());
 
         var mi = typeof(Dashboard).GetMethod("DetectRowStatusChanges", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        mi.Invoke(cut.Instance, null);
 
-        var changed = GetField<HashSet<string>>(cut.Instance, "_changedRowMacs");
-        Assert.NotNull(changed);
-        Assert.Contains("AA:BB:CC:00:00:01", changed!);
+        // Race-free read: DetectRowStatusChanges fires-and-forgets ClearChangedAfterFrameAsync,
+        // which awaits Task.Yield() then InvokeAsync(...) to clear _changedRowMacs on the
+        // renderer dispatcher. We invoke + snapshot inside the SAME cut.InvokeAsync block so
+        // the clear-microtask's dispatcher work item is queued AFTER our snapshot. Reading
+        // the field outside the dispatcher slot is racy and was the source of the
+        // intermittent "set is empty" failure (the microtask wins on faster machines).
+        HashSet<string>? changedSnapshot = null;
+        Dictionary<string, Status>? prevSnapshot = null;
+        await cut.InvokeAsync(() =>
+        {
+            mi.Invoke(cut.Instance, null);
+            // Snapshot a copy of _changedRowMacs while still on the dispatcher — any later
+            // .Clear() from ClearChangedAfterFrameAsync runs on a queued continuation that
+            // cannot interleave with this synchronous block.
+            var live = GetField<HashSet<string>>(cut.Instance, "_changedRowMacs");
+            changedSnapshot = live is null ? null : new HashSet<string>(live);
+            var livePrev = GetField<Dictionary<string, Status>>(cut.Instance, "_prevRowStatus");
+            prevSnapshot = livePrev is null ? null : new Dictionary<string, Status>(livePrev);
+        });
+
+        Assert.NotNull(changedSnapshot);
+        Assert.Contains("AA:BB:CC:00:00:01", changedSnapshot!);
         // Exactly one MAC flagged for the diff this cycle (the one whose status changed).
-        Assert.Single(changed!);
+        Assert.Single(changedSnapshot!);
 
         // _prevRowStatus is updated to the current state so the next call won't re-flag
-        // the same MAC unless its status changes again — re-running DetectRowStatusChanges
-        // with no further mutation produces an empty _changedRowMacs.
-        var updated = GetField<Dictionary<string, Status>>(cut.Instance, "_prevRowStatus");
-        Assert.Equal(Status.Online, updated!["AA:BB:CC:00:00:01"]);
+        // the same MAC unless its status changes again.
+        Assert.NotNull(prevSnapshot);
+        Assert.Equal(Status.Online, prevSnapshot!["AA:BB:CC:00:00:01"]);
 
-        // Second call with no Status change — set is now empty (the ClearChangedAfterFrameAsync
-        // microtask inside DetectRowStatusChanges is irrelevant: the call itself begins by
-        // clearing the set, then re-adds only MACs whose status flipped).
-        mi.Invoke(cut.Instance, null);
-        var changedAgain = GetField<HashSet<string>>(cut.Instance, "_changedRowMacs");
-        Assert.Empty(changedAgain!);
+        // Second call with no Status change — set is empty after the call itself clears at
+        // the start of the body and finds no Status flips to re-add. Same dispatcher-slot
+        // snapshot pattern to avoid racing the ClearChangedAfterFrameAsync microtask.
+        HashSet<string>? changedAgainSnapshot = null;
+        await cut.InvokeAsync(() =>
+        {
+            mi.Invoke(cut.Instance, null);
+            var live = GetField<HashSet<string>>(cut.Instance, "_changedRowMacs");
+            changedAgainSnapshot = live is null ? null : new HashSet<string>(live);
+        });
+        Assert.NotNull(changedAgainSnapshot);
+        Assert.Empty(changedAgainSnapshot!);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
