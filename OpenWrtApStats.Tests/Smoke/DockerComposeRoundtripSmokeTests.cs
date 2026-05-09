@@ -56,8 +56,11 @@ public sealed class DockerComposeRoundtripSmokeTests(DockerSmokeFixture fixture)
             // Wait for /health.lastPollAge to flip from null to a non-null value,
             // indicating the orchestrator has committed at least one poll cycle.
             // Bound the wait at 90s (default 10s polling interval × 6 cycles + slack).
-            // The visitor gate kicks in via the Blazor circuit opened by the
-            // /Nodes/Add page hit; /health probes do not arm the gate (POLL-06).
+            // Smoke-test path: BuildContainer sets Polling__GateMode=AlwaysLive (debug session
+            // smoke-poll-gate-not-armed, 2026-05-09), so AlwaysLiveGate is registered and the
+            // orchestrator's cold-start kick fires immediately — no Blazor circuit needed.
+            // (The earlier comment claim that /Nodes/Add hit opens a circuit was wrong — bare
+            // HTTP GET does not negotiate the SignalR /_blazor handshake.)
             await WaitForLastPollAgeNonNullAsync(http1, timeout: TimeSpan.FromSeconds(90), ct);
         }
         finally
@@ -75,9 +78,11 @@ public sealed class DockerComposeRoundtripSmokeTests(DockerSmokeFixture fixture)
             using var http2 = new HttpClient { BaseAddress = new Uri($"http://localhost:{port2}") };
 
             // 1. The node row from container 1 still exists. Hit /Nodes Index and
-            //    assert the hostname appears in the rendered HTML. We DO this BEFORE
-            //    the lastPollAge wait so that hitting /Nodes opens a Blazor circuit
-            //    and arms the visitor gate (cold-start kick fires the orchestrator).
+            //    assert the hostname appears in the rendered HTML. (Note: bare HTTP GET
+            //    does NOT open a Blazor SignalR circuit — the SSR-rendered HTML is enough
+            //    to assert the hostname. Container 2 also runs with Polling__GateMode=
+            //    AlwaysLive so the orchestrator does not need a circuit to fire its cold-
+            //    start cycle.)
             var nodesIndex = await http2.GetStringAsync("/Nodes", ct);
             Assert.Contains("10.255.255.254", nodesIndex);
 
@@ -126,6 +131,14 @@ public sealed class DockerComposeRoundtripSmokeTests(DockerSmokeFixture fixture)
             .WithVolumeMount(_fixture.DataVolume, "/data")
             .WithVolumeMount(_fixture.LogsVolume, "/logs")
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Production")
+            // Debug session smoke-poll-gate-not-armed (2026-05-09): opt out of the visitor gate.
+            // The roundtrip test drives /Nodes/Add via raw HTTP and never opens a Blazor circuit,
+            // so CircuitTrackerGate never arms. Polling__GateMode=AlwaysLive makes Program.cs
+            // register AlwaysLiveGate (permanently Live) instead, so the orchestrator's cold-
+            // start kick fires immediately and /health.lastPollAge advances on the first cycle.
+            // Applied to BOTH container1 and container2 instances (roundtrip uses the same
+            // BuildContainer for both boots) — second-boot lastPollAge check needs it too.
+            .WithEnvironment("Polling__GateMode", "AlwaysLive")
             .WithWaitStrategy(Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(r =>
                 r.ForPath("/health").ForPort(8080).ForStatusCode(HttpStatusCode.OK)))
             .Build();
@@ -137,22 +150,48 @@ public sealed class DockerComposeRoundtripSmokeTests(DockerSmokeFixture fixture)
         string password,
         CancellationToken ct)
     {
-        // Mirrors the existing NodesPageTests / WizardSignInRoundTripTests
-        // antiforgery round-trip: GET /Nodes/Add → extract __RequestVerificationToken
-        // → POST same. If the route or field-name shape differs in production HTML,
-        // the Hostname/Username/Password fallback names and the regex are designed to
-        // handle minor variation; the test fails-loud on missing antiforgery.
+        // SSR-fallback POST round-trip for /Nodes/Add (debug session addnode-post-400,
+        // 2026-05-09). After the chained add-form-noninteractive + blazor-js-404 fixes,
+        // the rendered Blazor SSR form requires three additional pieces beyond the
+        // antiforgery token to bind successfully:
+        //
+        //  1. `_handler=node-form` — the form-name discriminator emitted as a hidden
+        //     input by <EditForm FormName="node-form">. Without it, Blazor's SSR
+        //     binder rejects the post with empty-body 400 (canonical antiforgery
+        //     fingerprint, but actually triggered by the form-name dispatcher missing
+        //     the discriminator).
+        //
+        //  2. `_model.*` field-name prefix — Add.razor's [SupplyParameterFromForm]
+        //     property is named `_model`, and the SSR binder maps body keys against
+        //     the property name. The rendered <input name="..."> attributes use
+        //     `Model.*` (because _NodeForm.razor's <EditForm Model="Model"> uses the
+        //     parameter expression "Model" as its prefix), but the binder routes by
+        //     property name `_model`. This is a latent mismatch in the SSR-fallback
+        //     path: a real browser without a Blazor circuit would also need to post
+        //     `_model.Hostname` for the form to bind — the rendered HTML alone is
+        //     insufficient for a hand-rolled POST. Recorded as a follow-up in the
+        //     debug session evidence.
+        //
+        //  3. Cookie persistence — HttpClient's default handler (UseCookies = true)
+        //     carries the antiforgery cookie set on the GET back into the POST. The
+        //     `http` instance MUST be reused across GET and POST.
+        //
+        // The empirical curl roundtrip in the debug session confirmed this exact body
+        // shape produces a 302 → /Nodes?saved=1 with the row persisted.
         var addNodeForm = await http.GetStringAsync("/Nodes/Add", ct);
         var token = ExtractAntiforgeryTokenFromHtml(addNodeForm);
         var body = new FormUrlEncodedContent(new[]
         {
             new KeyValuePair<string, string>("__RequestVerificationToken", token),
-            new KeyValuePair<string, string>("Hostname", hostname),
-            new KeyValuePair<string, string>("Username", username),
-            new KeyValuePair<string, string>("Password", password),
+            new KeyValuePair<string, string>("_handler", "node-form"),
+            new KeyValuePair<string, string>("_model.Hostname", hostname),
+            new KeyValuePair<string, string>("_model.Username", username),
+            new KeyValuePair<string, string>("_model.Password", password),
         });
         var response = await http.PostAsync("/Nodes/Add", body, ct);
-        // Successful AddNode redirects to /Nodes (302); accept 200 fallback if route differs.
+        // Successful AddNode redirects to /Nodes?saved=1 (302). HttpClient's default
+        // handler follows redirects automatically, so we usually observe OK at this
+        // point — both are accepted.
         Assert.True(
             response.StatusCode == HttpStatusCode.Redirect ||
             response.StatusCode == HttpStatusCode.OK,

@@ -39,6 +39,13 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
             .WithVolumeMount(_fixture.DataVolume, "/data")
             .WithVolumeMount(_fixture.LogsVolume, "/logs")
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Production")
+            // Debug session smoke-poll-gate-not-armed (2026-05-09): opt out of the visitor gate.
+            // Smoke tests drive the app via raw HTTP only — no Blazor circuit, so CircuitTrackerGate
+            // would never arm and the orchestrator would park forever on WaitForVisitorAsync().
+            // Polling__GateMode=AlwaysLive binds to IConfiguration key Polling:GateMode and
+            // makes Program.cs register AlwaysLiveGate instead. Production deployments leave
+            // this unset and keep CircuitTrackerGate.
+            .WithEnvironment("Polling__GateMode", "AlwaysLive")
             .WithWaitStrategy(Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(r =>
                 r.ForPath("/health").ForPort(8080).ForStatusCode(HttpStatusCode.OK)))
             .Build();
@@ -59,6 +66,12 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
             .WithVolumeMount(_fixture.DataVolume, "/data")
             .WithVolumeMount(_fixture.LogsVolume, "/logs")
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Production")
+            // Same opt-out as BuildContainer — see debug session smoke-poll-gate-not-armed.
+            // Even the healthcheck-status test benefits: the daemon healthcheck reaches healthy
+            // off /health responding 200 (DbHealthCheck + DataProtectionHealthCheck), independent
+            // of whether the orchestrator ever fires a cycle. AlwaysLive does not change that
+            // behavior, so this env var is safe to set on the healthy-wait variant too.
+            .WithEnvironment("Polling__GateMode", "AlwaysLive")
             .WithWaitStrategy(Wait.ForUnixContainer().UntilContainerIsHealthy())
             .Build();
 
