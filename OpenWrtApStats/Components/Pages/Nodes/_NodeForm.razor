@@ -6,9 +6,14 @@
 @* Shared form for /Nodes/Add and /Nodes/{id}/Edit. UI-SPEC §Node Add lines 332-358 +
    §Node Edit lines 360-376. Edit pre-fills hostname + username; password ALWAYS empty
    (D-08). The Test Connection button calls ITestConnectionService.TestAsync; the Save
-   button submits via OnSave EventCallback so Add and Edit can wire different repo paths. *@
+   button submits via OnSave EventCallback so Add and Edit can wire different repo paths.
 
-<EditForm Model="Model" OnValidSubmit="HandleSaveAsync" FormName="node-form">
+   method="post": load-bearing for the SSR-fallback Save path (debug add-form-noninteractive,
+   2026-05-09). Without it, the rendered <form> has no method and a no-circuit submit cannot
+   round-trip to the SSR endpoint. Mirrors Login.razor's <EditForm method="post" FormName="login">
+   pattern. The InteractiveServer circuit still intercepts submits when present. *@
+
+<EditForm Model="Model" method="post" OnValidSubmit="HandleSaveAsync" FormName="node-form">
     <DataAnnotationsValidator />
 
     @if (!string.IsNullOrEmpty(_testBanner))

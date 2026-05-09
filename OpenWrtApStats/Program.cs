@@ -212,8 +212,28 @@ try
     // CircuitOptions.DisconnectedCircuitRetentionPeriod = 3 min (D-03 — hard-coded, NOT App Settings
     // in v1; total grace = 3 min + 30s in CircuitTracker semantics).
     builder.Services.AddSingleton<OpenWrtApStats.Services.Gating.CircuitTracker>();
-    builder.Services.AddSingleton<OpenWrtApStats.Services.Gating.ICircuitGate,
-                                  OpenWrtApStats.Services.Gating.CircuitTrackerGate>();
+    // Phase 7+ smoke-test escape hatch (debug session smoke-poll-gate-not-armed, 2026-05-09):
+    // The visitor gate is normally CircuitTrackerGate, which only releases its TaskCompletionSource
+    // when the Blazor framework opens a real SignalR circuit (browser executes blazor.web.js).
+    // Smoke tests that drive the app via raw HTTP only (no browser) never open a circuit, so the
+    // orchestrator parks indefinitely on tracker.WaitForVisitorAsync() and /health.lastPollAge
+    // stays null forever. To opt out, set the env var Polling__GateMode=AlwaysLive (which binds
+    // to the IConfiguration key Polling:GateMode per .NET conventions) and we register the
+    // permanently-Live AlwaysLiveGate instead. Default (unset, or any other value) is unchanged
+    // production behavior - CircuitTrackerGate. AlwaysLiveGate.WaitForVisitorAsync returns
+    // Task.CompletedTask, so the cold-start kick in PollingHostedService fires immediately.
+    var gateMode = builder.Configuration["Polling:GateMode"];
+    if (string.Equals(gateMode, "AlwaysLive", StringComparison.OrdinalIgnoreCase))
+    {
+        builder.Services.AddSingleton<OpenWrtApStats.Services.Gating.ICircuitGate,
+                                      OpenWrtApStats.Services.Gating.AlwaysLiveGate>();
+        Log.Information("Polling:GateMode=AlwaysLive - registering AlwaysLiveGate (visitor gate disabled). Smoke/test path only.");
+    }
+    else
+    {
+        builder.Services.AddSingleton<OpenWrtApStats.Services.Gating.ICircuitGate,
+                                      OpenWrtApStats.Services.Gating.CircuitTrackerGate>();
+    }
     builder.Services.AddScoped<Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler,
                                OpenWrtApStats.Services.Gating.CircuitTrackerHandler>();
     builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions>(o =>
@@ -381,6 +401,22 @@ try
 
         return Microsoft.AspNetCore.Http.Results.Redirect("/setup/nodes");
     }).AllowAnonymous();   // wizard skip must be reachable regardless of auth state
+
+    // Blazor Web App framework asset endpoints — see .planning/debug/resolved/blazor-js-404.md.
+    // .NET 9 introduced MapStaticAssets() as the canonical replacement for UseStaticFiles() for
+    // Blazor Web Apps; it registers endpoint routes for the static-web-assets manifest including
+    // the virtual `_framework/blazor.web.js` runtime script and any fingerprinted scoped CSS. Without
+    // this call the runtime JS is unreachable (flat 404 from Kestrel — no endpoint matches), the
+    // browser never establishes the SignalR circuit, and every InteractiveServer page silently
+    // falls back to static SSR (broken Save buttons, dead Test Connection, etc.).
+    // UseStaticFiles() is intentionally retained above — it serves the physical files vendored under
+    // wwwroot/ (AdminLTE, Bootstrap Icons, Source Sans 3, app.css, favicons). MapStaticAssets only
+    // owns the publish-time static-web-assets manifest endpoints.
+    // Mapped here (after the auth/wizard endpoints, immediately before MapRazorComponents) so the
+    // framework asset endpoints inherit the same routing context as Blazor itself; the static-web-
+    // assets endpoints carry their own AllowAnonymous metadata so the ConditionalAuthRequirement
+    // fallback policy does not redirect them to /Login.
+    app.MapStaticAssets();
 
     app.MapRazorComponents<OpenWrtApStats.Components.App>()
         .AddInteractiveServerRenderMode();
