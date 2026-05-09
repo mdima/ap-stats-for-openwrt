@@ -27,7 +27,6 @@
             <tr>
                 <th>Hostname</th>
                 <th>Username</th>
-                <th>Status</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -37,16 +36,6 @@
                 <tr>
                     <td>@node.Hostname</td>
                     <td>@node.Username</td>
-                    <td>
-                        @if (node.Status == Status.Online)
-                        {
-                            <span class="badge text-bg-success">Online</span>
-                        }
-                        else
-                        {
-                            <span class="badge text-bg-secondary">Offline</span>
-                        }
-                    </td>
                     <td>
                         @{
                             var capturedId = node.Id;

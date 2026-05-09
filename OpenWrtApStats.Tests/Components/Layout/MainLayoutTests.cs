@@ -151,6 +151,6 @@ public sealed class MainLayoutTests
         var footer = cut.Find("footer.app-footer");
         Assert.NotNull(footer);
         Assert.Contains("OpenWRT-AP-Stats", footer.TextContent);
-        Assert.Contains("Self-hosted dashboard", footer.TextContent);
+        Assert.Contains("GitHub", footer.TextContent);
     }
 }

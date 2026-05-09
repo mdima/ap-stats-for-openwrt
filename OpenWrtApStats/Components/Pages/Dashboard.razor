@@ -117,7 +117,7 @@ else
         <div class="card">
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-striped table-hover align-middle mb-0">
+                    <table class="table table-striped table-hover align-middle mb-0 table-sm">
                         <thead class="sticky-top bg-body">
                             <tr>
                                 <SortHeaderCell Column="name"     CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">Name</SortHeaderCell>
@@ -149,7 +149,7 @@ else
                                         </td>
                                         <td><code class="font-monospace">@(string.IsNullOrEmpty(row.Ip) ? "—" : row.Ip)</code></td>
                                         <td>@row.Ssid</td>
-                                        <td>@row.ApHostname</td>
+                                        <td class="text-nowrap">@row.ApHostname</td>
                                         <td><RssiCell Rss="row.Rss" /></td>
                                         <td>@RelativeTime(row.LastSeen)</td>
                                         <td><StatusBadge Status="row.StationStatus" IsStale="@IsStale(row)" /></td>

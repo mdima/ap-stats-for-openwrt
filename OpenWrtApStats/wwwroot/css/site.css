@@ -138,3 +138,15 @@
 .KpiOffline {
     background-color: rgba(var(--bs-secondary-rgb), 0.2) !important;
 }
+
+.KpiOnline:hover, .KpiStale:hover, .KpiOffline:hover {
+    filter: brightness(1.2);
+}
+
+[data-bs-theme="dark"] .small-box .bi {
+    color: dimgray;
+}
+
+.kpi-tile-active {
+    box-shadow: inset 3px 0 0 0 var(--bs-primary), 0 0 1px rgba(var(--bs-body-color-rgb), .125), 0 1px 3px rgba(var(--bs-body-color-rgb), .2) !important;
+}
