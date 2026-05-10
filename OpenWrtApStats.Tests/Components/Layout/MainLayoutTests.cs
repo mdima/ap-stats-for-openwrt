@@ -41,9 +41,12 @@ public sealed class MainLayoutTests
         public string? UIPasswordHash         { get; } = null;
         public bool    WizardDismissed        { get; } = true;
         public int     RefreshIntervalSeconds { get; } = 3600;
+        public IReadOnlyList<string> LocalDomainSuffixes { get; } = Array.Empty<string>();
         public Task SetPollingIntervalSecondsAsync(int s, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetUIPasswordHashAsync(string? h, CancellationToken ct = default)     => Task.CompletedTask;
         public Task SetWizardDismissedAsync(bool d, CancellationToken ct = default)       => Task.CompletedTask;
+        public Task SetRefreshIntervalSecondsAsync(int s, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default) => Task.CompletedTask;
         public Task WarmAsync(CancellationToken ct = default)                              => Task.CompletedTask;
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }

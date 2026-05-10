@@ -24,9 +24,14 @@ public sealed class IndexTests
         public string? UIPasswordHash { get; set; }
         public int PollingIntervalSeconds { get; set; } = 30;
         public bool WizardDismissed => false;
-        public int RefreshIntervalSeconds => 3600;
+        public int RefreshIntervalSeconds { get; set; } = 3600;
+        public IReadOnlyList<string> LocalDomainSuffixes { get; set; } = Array.Empty<string>();
         public bool ChangedFiredOnSetPassword;
         public bool ChangedFiredOnSetInterval;
+        public int? LastSetRefreshIntervalSeconds;
+        public IReadOnlyList<string>? LastSetLocalDomainSuffixes;
+        public int SetLocalDomainSuffixesCallCount;
+        public int SetRefreshIntervalSecondsCallCount;
 
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default)
         {
@@ -41,6 +46,21 @@ public sealed class IndexTests
             return Task.CompletedTask;
         }
         public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetRefreshIntervalSecondsAsync(int seconds, CancellationToken ct = default)
+        {
+            RefreshIntervalSeconds = seconds;
+            LastSetRefreshIntervalSeconds = seconds;
+            SetRefreshIntervalSecondsCallCount++;
+            return Task.CompletedTask;
+        }
+        public Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default)
+        {
+            var arr = suffixes.ToArray();
+            LocalDomainSuffixes = arr;
+            LastSetLocalDomainSuffixes = arr;
+            SetLocalDomainSuffixesCallCount++;
+            return Task.CompletedTask;
+        }
         public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }

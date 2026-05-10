@@ -133,6 +133,7 @@ public sealed class WlansPageTests
         public string? UIPasswordHash => null;
         public bool WizardDismissed { get; private set; }
         public int RefreshIntervalSeconds => 3600;
+        public IReadOnlyList<string> LocalDomainSuffixes { get; } = Array.Empty<string>();
 
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default)
             => Task.CompletedTask;
@@ -145,6 +146,12 @@ public sealed class WlansPageTests
             WizardDismissed = dismissed;
             return Task.CompletedTask;
         }
+
+        public Task SetRefreshIntervalSecondsAsync(int seconds, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default)
+            => Task.CompletedTask;
 
         public Task WarmAsync(CancellationToken ct = default)
             => Task.CompletedTask;

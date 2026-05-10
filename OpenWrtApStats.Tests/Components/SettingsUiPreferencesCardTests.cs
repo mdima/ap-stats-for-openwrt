@@ -33,9 +33,12 @@ public sealed class SettingsUiPreferencesCardTests
         public string? UIPasswordHash         { get; private set; }
         public bool    WizardDismissed        { get; private set; } = true;
         public int     RefreshIntervalSeconds { get; private set; } = 3600;
+        public IReadOnlyList<string> LocalDomainSuffixes { get; private set; } = Array.Empty<string>();
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default) { PollingIntervalSeconds = seconds; return Task.CompletedTask; }
         public Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default) { UIPasswordHash = hash; return Task.CompletedTask; }
         public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default) { WizardDismissed = dismissed; return Task.CompletedTask; }
+        public Task SetRefreshIntervalSecondsAsync(int seconds, CancellationToken ct = default) { RefreshIntervalSeconds = seconds; return Task.CompletedTask; }
+        public Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default) { LocalDomainSuffixes = suffixes.ToArray(); return Task.CompletedTask; }
         public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }
