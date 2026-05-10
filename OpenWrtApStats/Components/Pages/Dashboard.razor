@@ -4,6 +4,7 @@
 @using OpenWrtApStats.Services.Polling
 @using OpenWrtApStats.Services.Settings
 @using OpenWrtApStats.Services.Vendor
+@using OpenWrtApStats.Web.Helpers
 @implements IDisposable
 
 @inject INodeRepo Nodes
@@ -134,9 +135,20 @@ else
                         <tbody>
                             <Virtualize Items="ComputeFilteredRows()" ItemSize="40" Context="row">
                                 <ItemContent>
-                                    <tr class="@(_changedRowMacs.Contains(row.Mac) ? "row-status-changed" : null)">
-                                        <td><a href="@($"/Stations/{Uri.EscapeDataString(row.Mac)}")">@(string.IsNullOrEmpty(row.Name) ? (string.IsNullOrEmpty(row.Hostname) ? row.Mac : row.Hostname) : row.Name)</a></td>
-                                        <td><code class="font-monospace">@row.Mac</code></td>
+                                    <tr class="@(_changedRowMacs.Contains(row.Mac) ? "row-status-changed" : null)"
+                                        title="@BuildRowTooltip(row)">
+                                        <td><a href="@($"/Stations/{Uri.EscapeDataString(row.Mac)}")">@(string.IsNullOrEmpty(row.Name) ? (string.IsNullOrEmpty(row.Hostname) ? row.Mac : HostnameDisplay.StripLocalSuffix(row.Hostname, Settings.LocalDomainSuffixes)) : row.Name)</a></td>
+                                        <td>
+                                            <code class="font-monospace">@row.Mac</code>
+                                            @if (row.IsRandomMac)
+                                            {
+                                                <span class="badge text-bg-warning ms-2"
+                                                      title="Locally administered MAC — likely a privacy-randomized address. Toggle on the station detail page if this is a stable virtualized MAC.">
+                                                    <i class="bi bi-shuffle" aria-hidden="true"></i>
+                                                    <span class="visually-hidden">Random MAC</span>
+                                                </span>
+                                            }
+                                        </td>
                                         <td>
                                             @if (!string.IsNullOrEmpty(row.Vendor))
                                             {
@@ -350,7 +362,8 @@ else
                 ApNodeId: net.ApNodeId,
                 Rss: s.RSS,
                 LastSeen: s.LastPollDate,
-                StationStatus: s.Status));
+                StationStatus: s.Status,
+                IsRandomMac: s.IsRandomMac));
         }
         return rows;
     }
@@ -609,6 +622,22 @@ else
             .ToList();
     }
 
+    /// <summary>
+    /// Phase 10 DASH-20 — row hover tooltip exposing the full identifier set per
+    /// CONTEXT D-07. Bar-separated single-line format (newline behavior in HTML title
+    /// attributes is browser-inconsistent; the bar is the safest cross-browser shape).
+    /// HostnameDisplay.StripLocalSuffix produces the short form; the persisted FQDN is
+    /// also surfaced verbatim. Random-MAC indicator mirrors DASH-21.
+    /// </summary>
+    private string BuildRowTooltip(DashboardRow row)
+    {
+        var shortHostname = HostnameDisplay.StripLocalSuffix(row.Hostname, Settings.LocalDomainSuffixes) ?? string.Empty;
+        var name = string.IsNullOrEmpty(row.Name) ? string.Empty : row.Name;
+        var fqdn = row.Hostname ?? string.Empty;
+        var random = row.IsRandomMac ? "Yes" : "No";
+        return $"Name: {name} | Hostname: {shortHostname} | FQDN: {fqdn} | MAC: {row.Mac} | Random MAC: {random}";
+    }
+
     private static string RelativeTime(DateTime t)
     {
         if (t == default) return "Never";
@@ -634,5 +663,6 @@ else
         int ApNodeId,            // Phase 5 — kept for backward compat (legacy AP filter-by-Id semantics)
         int? Rss,
         DateTime LastSeen,
-        Status StationStatus);
+        Status StationStatus,
+        bool IsRandomMac);       // Phase 10 DASH-21 / DASH-23 — sourced from persisted WLANStation.IsRandomMac
 }
