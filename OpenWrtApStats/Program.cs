@@ -124,6 +124,10 @@ try
     // ToastService (its dependency) and BEFORE the polling pipeline registrations so the DI
     // graph remains acyclic.
     builder.Services.AddSingleton<OpenWrtApStats.Services.EventDetectionService>();
+    // Phase 10 ORCH-07 — TimeProvider DI lets PollOrchestrator's enrichment loop accept an injected
+    // clock (TimeProvider.System in production; a fake in tests). Required for the trigger evaluator
+    // and the LastEnrichmentRefreshAt write timestamp.
+    builder.Services.AddSingleton(TimeProvider.System);
     builder.Services.AddSingleton<PollOrchestrator>();
     builder.Services.AddTransient<ISshSession, RealSshSession>();
     // Phase 9 — Subnet sweep + reverse DNS probes (purely additive surface; orchestrator does NOT
@@ -146,6 +150,75 @@ try
         var poller = ActivatorUtilities.CreateInstance<NodePoller>(sp, node);
         return poller.PollAsync(ct);
     });
+    // Phase 10 ORCH-01..08 — enrichment factory. Mirrors the v0.9 probeFactory pattern (one
+    // DI-registered Func captured by PollOrchestrator's primary ctor). This factory opens its
+    // OWN ISshSession per node (separate from NodePoller's), connects, invokes SubnetSweepProbe
+    // and ReverseDnsProbe, returns POCO EnrichmentDelta. Cost: one extra SSH connect per node
+    // per refresh tick (default <= once per hour at RefreshIntervalSeconds=3600). The orchestrator
+    // gates this factory call on EnrichmentRefreshTrigger.ShouldRefresh — it is NOT invoked
+    // when the trigger does not fire (SC4 isolation invariant inverted in Phase 10).
+    builder.Services.AddSingleton<Func<WiFiNode, IReadOnlyList<string>, string, CancellationToken, Task<OpenWrtApStats.Services.Polling.EnrichmentDelta?>>>(sp =>
+        async (node, ipsForReverseDns, peerIp, ct) =>
+        {
+            // W-03 fix: only resolve services we actually use. The probes (sweepLocal, dnsLocal)
+            // are constructed per-call from the just-connected session — sp-resolved Transient
+            // SubnetSweepProbe / ReverseDnsProbe instances would be unused here and trigger
+            // IDE0059/CS0219 warnings under warnings-as-errors.
+            var session = sp.GetRequiredService<OpenWrtApStats.Services.Polling.Ssh.ISshSession>();
+            var dpp     = sp.GetRequiredService<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>();
+            var log     = sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<OpenWrtApStats.Services.Polling.PollOrchestrator>>();
+
+            try
+            {
+                string plaintext;
+                try
+                {
+                    plaintext = dpp.CreateProtector("node-creds").Unprotect(node.Password);
+                }
+                catch (System.Security.Cryptography.CryptographicException ex)
+                {
+                    log.LogWarning(ex, "Node {Hostname} (Id={NodeId}): enrichment skipped — password decrypt failed.", node.Hostname, node.Id);
+                    return null;
+                }
+
+                await session.ConnectAsync(node, plaintext,
+                    expectedFingerprint: string.IsNullOrEmpty(node.HostKeyFingerprint) ? null : node.HostKeyFingerprint,
+                    onHostKeyAccepted: null,
+                    ct: ct);
+
+                // The probe constructors take ISshSession via DI; the registered Transient session
+                // injected into them above is the SAME instance because GetRequiredService<ISshSession>
+                // returns a fresh transient and the probes ALSO request a transient — they may resolve
+                // DIFFERENT instances. Defensive shape: construct the probes inline binding the just-
+                // connected session, mirroring the SubnetSweepProbeTests / ReverseDnsProbeTests
+                // composition. This avoids a second connect inside the probes.
+                var sweepLocal = new OpenWrtApStats.Services.Polling.SubnetSweepProbe(session,
+                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<OpenWrtApStats.Services.Polling.SubnetSweepProbe>>());
+                var dnsLocal = new OpenWrtApStats.Services.Polling.ReverseDnsProbe(session,
+                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<OpenWrtApStats.Services.Polling.ReverseDnsProbe>>());
+
+                var sweepRes = await sweepLocal.PollAsync(node, peerIp, ct);
+                var sweepMap = sweepRes is OpenWrtApStats.Services.Polling.SubnetSweepProbeResult.Success ss
+                    ? ss.MacToIp
+                    : (IReadOnlyDictionary<string, string>)new Dictionary<string, string>(StringComparer.Ordinal);
+
+                var dnsRes = await dnsLocal.PollAsync(node, ipsForReverseDns, ct);
+                var dnsMap = dnsRes is OpenWrtApStats.Services.Polling.ReverseDnsProbeResult.Success ds
+                    ? ds.IpToHostname
+                    : (IReadOnlyDictionary<string, string?>)new Dictionary<string, string?>(StringComparer.Ordinal);
+
+                return new OpenWrtApStats.Services.Polling.EnrichmentDelta(node.Id, sweepMap, dnsMap);
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "Node {Hostname} (Id={NodeId}): enrichment factory failed; persisted IPs/Hostnames preserved (DB-as-cache).", node.Hostname, node.Id);
+                return null;     // null = orchestrator skips delta-merge for this node this cycle (DB-as-cache preserves last-known).
+            }
+            finally
+            {
+                try { await session.DisposeAsync(); } catch { /* Pitfall 5 dispose-hang */ }
+            }
+        });
     // PollingHostedService consumes a runCycleAsync delegate (not PollOrchestrator directly) so the
     // host stays unit-testable. The runtime delegate resolves PollOrchestrator from the host scope.
     builder.Services.AddSingleton<Func<CancellationToken, Task>>(sp => ct =>

@@ -66,6 +66,10 @@ public sealed class CompositionRootValidationTests
         // 5b — the exact registrations from Program.cs (sans dead AddTransient<NodePoller>).
         services.AddSingleton<OpenWrtAdapterCache>();
         services.AddSingleton<PollNotifier>();
+        // Phase 10 ORCH-07 — TimeProvider + Phase 9 probes (additive registrations from Program.cs).
+        services.AddSingleton(TimeProvider.System);
+        services.AddTransient<OpenWrtApStats.Services.Polling.SubnetSweepProbe>();
+        services.AddTransient<OpenWrtApStats.Services.Polling.ReverseDnsProbe>();
         services.AddSingleton<PollOrchestrator>();
         services.AddTransient<ISshSession, RealSshSession>();
         // NOTE: NodePoller is intentionally NOT registered (GAP-02-A). The probe factory below
@@ -76,6 +80,10 @@ public sealed class CompositionRootValidationTests
             var poller = ActivatorUtilities.CreateInstance<NodePoller>(sp, node);
             return poller.PollAsync(ct);
         });
+        // Phase 10 — enrichmentFactory delegate (validation-only stub returning null; the production
+        // factory body lives in Program.cs and is exercised by integration tests).
+        services.AddSingleton<Func<WiFiNode, IReadOnlyList<string>, string, CancellationToken, Task<OpenWrtApStats.Services.Polling.EnrichmentDelta?>>>(sp =>
+            (n, ips, peerIp, ct) => Task.FromResult<OpenWrtApStats.Services.Polling.EnrichmentDelta?>(null));
         services.AddSingleton<Func<CancellationToken, Task>>(sp => ct =>
             sp.GetRequiredService<PollOrchestrator>().RunCycleAsync(ct));
 

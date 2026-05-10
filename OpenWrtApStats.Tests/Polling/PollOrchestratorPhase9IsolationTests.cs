@@ -38,8 +38,14 @@ public sealed class PollOrchestratorPhase9IsolationTests(SqliteInMemoryFixture f
         "ip -4 addr show", // SubnetDeriver auto-derivation step 2
     };
 
+    /// <summary>
+    /// Phase 10 C-10 — Inverted SC4 Case A: when the composite refresh trigger does NOT fire
+    /// (LastEnrichmentRefreshAt = recent), the orchestrator must NOT issue any of the new
+    /// Phase 9 commands on either the NodePoller path or the enrichmentFactory path. Mirrors
+    /// the original Phase 9 SC4 invariant unchanged.
+    /// </summary>
     [Fact]
-    public async Task RunCycleAsync_AgainstSeededNode_DoesNotIssueAnyPhase9NewCommands()
+    public async Task RunCycleAsync_TriggerNotFired_DoesNotIssuePhase9NewCommands()
     {
         var ct = TestContext.Current.CancellationToken;
 
@@ -60,6 +66,10 @@ public sealed class PollOrchestratorPhase9IsolationTests(SqliteInMemoryFixture f
             Password = encrypted,
             Status = Status.Offline,
             HostKeyFingerprint = null,    // First-connect TOFU
+            // Phase 10: LastEnrichmentRefreshAt = UtcNow ensures the trigger does NOT fire
+            // (interval = 3600s, elapsed < 1s). This validates the inverted SC4 invariant
+            // for Case A: no Phase 9 commands when the trigger is silent.
+            LastEnrichmentRefreshAt = DateTimeOffset.UtcNow,
         });
         await db.SaveChangesAsync(ct);
 
@@ -136,6 +146,145 @@ public sealed class PollOrchestratorPhase9IsolationTests(SqliteInMemoryFixture f
             "Expected at least one SSH command to be issued during the cycle; " +
             "zero commands suggests the orchestrator short-circuited before reaching " +
             "the probe path. Either fix the test setup or revisit the SC4 invariant.");
+    }
+
+    /// <summary>
+    /// Phase 10 C-10 — Inverted SC4 Case B: when the composite refresh trigger fires AND
+    /// SubnetScanEnabled is true, the orchestrator MUST invoke the enrichmentFactory.
+    /// We assert this by recording into a SECOND FakeSshSession bound to the factory delegate.
+    /// </summary>
+    [Fact]
+    public async Task RunCycleAsync_TriggerFired_AndScanEnabled_InvokesEnrichmentFactory()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        await using var db = _fixture.CreateContext();
+        var dpp = new EphemeralDataProtectionProvider();
+        var protector = dpp.CreateProtector("node-creds");
+        var encrypted = protector.Protect("dummy-password");
+        var hostname = $"isolation-trigger-{Guid.NewGuid():N}";
+
+        db.WiFiNodes.Add(new WiFiNode
+        {
+            Hostname = hostname,
+            Username = "operator",
+            Password = encrypted,
+            Status = Status.Offline,
+            HostKeyFingerprint = null,
+            SubnetScanEnabled = true,
+            LastEnrichmentRefreshAt = null,    // null forces trigger ON (cold-start case).
+        });
+        await db.SaveChangesAsync(ct);
+
+        var fixtureDir = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT");
+        var nodeSession = new FakeSshSession(fixtureDir);
+
+        var dpFactory = new TestDbContextFactory(_fixture.Options);
+        var notifier = new PollNotifier();
+        var adapterCache = new OpenWrtAdapterCache();
+        var nodeRepo = new NodeRepo(dpFactory);
+        var networkRepo = new NetworkRepo(dpFactory);
+        var stationRepo = new StationRepo(dpFactory);
+        var settings = new StubSettings(pollingIntervalSeconds: 30);
+
+        Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeFactory = (n, c) =>
+            new NodePoller(n, nodeSession, adapterCache, dpp, NullLogger<NodePoller>.Instance).PollAsync(c);
+
+        var enrichmentInvocationCount = 0;
+        Func<WiFiNode, IReadOnlyList<string>, string, CancellationToken, Task<EnrichmentDelta?>> enrichmentFactory =
+            (n, ips, peerIp, c) =>
+            {
+                enrichmentInvocationCount++;
+                // Return a minimal non-null delta to confirm the orchestrator integrates with the factory.
+                return Task.FromResult<EnrichmentDelta?>(new EnrichmentDelta(
+                    n.Id,
+                    new Dictionary<string, string>(StringComparer.Ordinal),
+                    new Dictionary<string, string?>(StringComparer.Ordinal)));
+            };
+
+        var orchestrator = new PollOrchestrator(
+            dpFactory, nodeRepo, networkRepo, stationRepo, probeFactory, notifier,
+            NullLogger<PollOrchestrator>.Instance, settings, enrichmentFactory, TimeProvider.System);
+
+        await orchestrator.RunCycleAsync(ct);
+
+        // Trigger fired (LastEnrichmentRefreshAt = null + SubnetScanEnabled = true) → factory invoked.
+        Assert.True(enrichmentInvocationCount >= 1,
+            $"Expected enrichmentFactory to be invoked at least once when trigger fires; actual={enrichmentInvocationCount}");
+
+        // The NodePoller path STILL must not leak Phase-9-new commands — those flow through the
+        // factory's own session, not nodeSession.
+        foreach (var token in Phase9NewCommandTokens)
+        {
+            Assert.DoesNotContain(nodeSession.CommandsIssued, c => c.Contains(token, StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// Phase 10 C-10 — Inverted SC4 Case C: when SubnetScanEnabled is false, the trigger
+    /// short-circuits to false regardless of other inputs (D-09 operator opt-out). The
+    /// enrichmentFactory MUST NOT be invoked.
+    /// </summary>
+    [Fact]
+    public async Task RunCycleAsync_TriggerCondition_ButScanDisabled_DoesNotInvokeEnrichmentFactory()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        await using var db = _fixture.CreateContext();
+        var dpp = new EphemeralDataProtectionProvider();
+        var protector = dpp.CreateProtector("node-creds");
+        var encrypted = protector.Protect("dummy-password");
+        var hostname = $"isolation-scandisabled-{Guid.NewGuid():N}";
+
+        db.WiFiNodes.Add(new WiFiNode
+        {
+            Hostname = hostname,
+            Username = "operator",
+            Password = encrypted,
+            Status = Status.Offline,
+            HostKeyFingerprint = null,
+            SubnetScanEnabled = false,    // operator opt-out → trigger MUST short-circuit
+            LastEnrichmentRefreshAt = null,
+        });
+        await db.SaveChangesAsync(ct);
+
+        var fixtureDir = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT");
+        var nodeSession = new FakeSshSession(fixtureDir);
+
+        var dpFactory = new TestDbContextFactory(_fixture.Options);
+        var notifier = new PollNotifier();
+        var adapterCache = new OpenWrtAdapterCache();
+        var nodeRepo = new NodeRepo(dpFactory);
+        var networkRepo = new NetworkRepo(dpFactory);
+        var stationRepo = new StationRepo(dpFactory);
+        var settings = new StubSettings(pollingIntervalSeconds: 30);
+
+        Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeFactory = (n, c) =>
+            new NodePoller(n, nodeSession, adapterCache, dpp, NullLogger<NodePoller>.Instance).PollAsync(c);
+
+        var enrichmentInvocationCount = 0;
+        Func<WiFiNode, IReadOnlyList<string>, string, CancellationToken, Task<EnrichmentDelta?>> enrichmentFactory =
+            (n, ips, peerIp, c) =>
+            {
+                enrichmentInvocationCount++;
+                return Task.FromResult<EnrichmentDelta?>(null);
+            };
+
+        var orchestrator = new PollOrchestrator(
+            dpFactory, nodeRepo, networkRepo, stationRepo, probeFactory, notifier,
+            NullLogger<PollOrchestrator>.Instance, settings, enrichmentFactory, TimeProvider.System);
+
+        await orchestrator.RunCycleAsync(ct);
+
+        // Trigger short-circuited on SubnetScanEnabled=false → enrichmentFactory was NOT invoked.
+        Assert.Equal(0, enrichmentInvocationCount);
+
+        // No Phase-9-new commands appear on the nodeSession path either (orchestrator's NodePoller
+        // path is the v0.9 command set only).
+        foreach (var token in Phase9NewCommandTokens)
+        {
+            Assert.DoesNotContain(nodeSession.CommandsIssued, c => c.Contains(token, StringComparison.Ordinal));
+        }
     }
 
     /// <summary>
