@@ -32,6 +32,7 @@ public sealed class SettingsUiPreferencesCardTests
         public int     PollingIntervalSeconds { get; private set; } = 30;
         public string? UIPasswordHash         { get; private set; }
         public bool    WizardDismissed        { get; private set; } = true;
+        public int     RefreshIntervalSeconds { get; private set; } = 3600;
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default) { PollingIntervalSeconds = seconds; return Task.CompletedTask; }
         public Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default) { UIPasswordHash = hash; return Task.CompletedTask; }
         public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default) { WizardDismissed = dismissed; return Task.CompletedTask; }

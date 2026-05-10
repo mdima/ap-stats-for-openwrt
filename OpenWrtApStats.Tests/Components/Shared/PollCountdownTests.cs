@@ -18,6 +18,7 @@ public sealed class PollCountdownTests
         public int     PollingIntervalSeconds { get; set; } = 30;
         public string? UIPasswordHash         { get; } = null;
         public bool    WizardDismissed        { get; } = true;
+        public int     RefreshIntervalSeconds { get; } = 3600;
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default) => Task.CompletedTask;

@@ -146,6 +146,7 @@ public sealed class PollOrchestratorPhase9IsolationTests(SqliteInMemoryFixture f
         public int     PollingIntervalSeconds => pollingIntervalSeconds;
         public string? UIPasswordHash         => null;
         public bool    WizardDismissed        => false;
+        public int     RefreshIntervalSeconds => 3600;
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
 
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;

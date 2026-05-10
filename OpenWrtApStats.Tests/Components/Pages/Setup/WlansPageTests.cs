@@ -129,6 +129,7 @@ public sealed class WlansPageTests
         public int PollingIntervalSeconds => 30;
         public string? UIPasswordHash => null;
         public bool WizardDismissed { get; private set; }
+        public int RefreshIntervalSeconds => 3600;
 
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default)
             => Task.CompletedTask;

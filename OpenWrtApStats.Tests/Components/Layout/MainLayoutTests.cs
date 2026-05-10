@@ -40,6 +40,7 @@ public sealed class MainLayoutTests
         public int     PollingIntervalSeconds { get; } = 30;
         public string? UIPasswordHash         { get; } = null;
         public bool    WizardDismissed        { get; } = true;
+        public int     RefreshIntervalSeconds { get; } = 3600;
         public Task SetPollingIntervalSecondsAsync(int s, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetUIPasswordHashAsync(string? h, CancellationToken ct = default)     => Task.CompletedTask;
         public Task SetWizardDismissedAsync(bool d, CancellationToken ct = default)       => Task.CompletedTask;

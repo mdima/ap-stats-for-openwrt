@@ -52,6 +52,7 @@ public sealed class PollingHostedServiceTests
         public int PollingIntervalSeconds { get; set; } = pollingIntervalSeconds;
         public string? UIPasswordHash => null;
         public bool WizardDismissed => false;
+        public int RefreshIntervalSeconds => 3600;
         public event Action<IAppSettingsService>? Changed;
 
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default)

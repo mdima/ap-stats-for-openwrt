@@ -24,6 +24,7 @@ public sealed class IndexTests
         public string? UIPasswordHash { get; set; }
         public int PollingIntervalSeconds { get; set; } = 30;
         public bool WizardDismissed => false;
+        public int RefreshIntervalSeconds => 3600;
         public bool ChangedFiredOnSetPassword;
         public bool ChangedFiredOnSetInterval;
 

@@ -14,17 +14,19 @@ namespace OpenWrtApStats.Services.Settings;
 public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsService
 {
     // Well-known keys — never strings in callers (D-11)
-    private const string KeyPollingInterval = "PollingIntervalSeconds";
-    private const string KeyUIPasswordHash  = "UIPasswordHash";
-    private const string KeyWizardDismissed = "WizardDismissed";
+    private const string KeyPollingInterval        = "PollingIntervalSeconds";
+    private const string KeyUIPasswordHash         = "UIPasswordHash";
+    private const string KeyWizardDismissed        = "WizardDismissed";
+    private const string KeyRefreshIntervalSeconds = "RefreshIntervalSeconds";
 
     // Immutable snapshot; replaced atomically via Interlocked.Exchange.
-    private sealed record Snapshot(int PollingIntervalSeconds, string? UIPasswordHash, bool WizardDismissed);
-    private Snapshot _current = new(30, null, false); // safe defaults until WarmAsync runs
+    private sealed record Snapshot(int PollingIntervalSeconds, string? UIPasswordHash, bool WizardDismissed, int RefreshIntervalSeconds);
+    private Snapshot _current = new(30, null, false, 3600); // safe defaults until WarmAsync runs (3600 matches Phase 9 SCHEMA-06 seed)
 
     public int     PollingIntervalSeconds => Volatile.Read(ref _current).PollingIntervalSeconds;
     public string? UIPasswordHash         => Volatile.Read(ref _current).UIPasswordHash;
     public bool    WizardDismissed        => Volatile.Read(ref _current).WizardDismissed;
+    public int     RefreshIntervalSeconds => Volatile.Read(ref _current).RefreshIntervalSeconds;
 
     public event Action<IAppSettingsService>? Changed;
 
@@ -32,9 +34,10 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
     {
         var rows = await repo.GetAllAsync(ct);
         var snap = new Snapshot(
-            PollingIntervalSeconds: rows.TryGetValue(KeyPollingInterval, out var pi) ? pi.IntValue ?? 30 : 30,
-            UIPasswordHash:         rows.TryGetValue(KeyUIPasswordHash,  out var uh) ? uh.StringValue : null,
-            WizardDismissed:        rows.TryGetValue(KeyWizardDismissed, out var wd) ? wd.BoolValue ?? false : false);
+            PollingIntervalSeconds:    rows.TryGetValue(KeyPollingInterval,        out var pi) ? pi.IntValue ?? 30   : 30,
+            UIPasswordHash:            rows.TryGetValue(KeyUIPasswordHash,         out var uh) ? uh.StringValue       : null,
+            WizardDismissed:           rows.TryGetValue(KeyWizardDismissed,        out var wd) ? wd.BoolValue ?? false: false,
+            RefreshIntervalSeconds:    rows.TryGetValue(KeyRefreshIntervalSeconds, out var ri) ? ri.IntValue ?? 3600 : 3600);
         Interlocked.Exchange(ref _current, snap);
     }
 
