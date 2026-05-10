@@ -92,3 +92,24 @@ phase9_ips_used: 192.168.1.42, 192.168.1.43, 192.168.1.44 (RFC-1918)
 phase9_theory_row_status: |
   After Plan 09-03 lands these files, OpenWrtOutputParserTests.ParseArpingPingOutput_AcrossAllSupportedVersions_*
   flips from SKIP to PASS for this version slot.
+
+---
+
+## Phase 9 capture wave (Plan 09-04)
+
+phase9_04_provenance: public-sample (synthesized)
+phase9_04_captured: 2026-05-10
+phase9_04_captured_by: Plan 09-04 executor (autonomous)
+phase9_04_files_added:
+  - nslookup.txt            (synthesized BusyBox nslookup shape — Server preamble + Name: line + answer Address line)
+phase9_04_synthesis_rationale: |
+  Plan 09-04 ships the ReverseDnsProbe surface; the BusyBox nslookup output shape (Server: header,
+  blank line, Name: <fqdn>, Address 1: <ip> <fqdn>) is stable across the 21.02 / 22.03 / 23.05
+  release branches. Synthesized representative content matches the parser contract verbatim
+  (OpenWrtOutputParser.ParseNslookupOutput consumes the `Name:` line first; BIND fallback `name = `
+  shape is also covered but not exercised by this fixture). Operator-driven live capture remains
+  the canonical path for the 23.05-SNAPSHOT slot per the Plan 09-03 hand-off procedure.
+phase9_04_ips_used: 192.168.1.1 (synthesized resolver), 192.168.1.42 (synthesized lookup target)
+phase9_04_theory_row_status: |
+  After Plan 09-04 lands this file, OpenWrtOutputParserTests.ParseNslookupOutput_AcrossAllSupportedVersions_*
+  AND ReverseDnsProbeTests.PollAsync_AcrossAllSupportedVersions_* flip from SKIP to PASS for this version slot.

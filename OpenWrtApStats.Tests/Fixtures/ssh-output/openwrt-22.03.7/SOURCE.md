@@ -82,3 +82,21 @@ phase9_synthesis_rationale: |
 phase9_theory_row_status: |
   After Plan 09-03 lands these files, OpenWrtOutputParserTests.ParseArpingPingOutput_AcrossAllSupportedVersions_*
   flips from SKIP to PASS for this version slot.
+
+---
+
+## Phase 9 capture wave (Plan 09-04)
+
+phase9_04_provenance: public-sample (synthesized)
+phase9_04_captured: 2026-05-10
+phase9_04_captured_by: Plan 09-04 executor (autonomous)
+phase9_04_files_added:
+  - nslookup.txt            (synthesized BusyBox nslookup shape — Server preamble + Name: line + answer Address line)
+phase9_04_synthesis_rationale: |
+  Same as 21.02.7 sibling: BusyBox nslookup shape is stable across release branches; synthesized
+  representative content is identical to the 21.02.7 fixture so the parser contract assertion
+  produces identical normalized output regardless of which version slot the [Theory] row probes.
+phase9_04_ips_used: 192.168.1.1 (synthesized resolver), 192.168.1.42 (synthesized lookup target)
+phase9_04_theory_row_status: |
+  After Plan 09-04 lands this file, OpenWrtOutputParserTests.ParseNslookupOutput_AcrossAllSupportedVersions_*
+  AND ReverseDnsProbeTests.PollAsync_AcrossAllSupportedVersions_* flip from SKIP to PASS for this version slot.

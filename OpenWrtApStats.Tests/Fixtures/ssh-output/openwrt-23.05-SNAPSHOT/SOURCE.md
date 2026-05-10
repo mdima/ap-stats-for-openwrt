@@ -118,3 +118,25 @@ phase9_theory_row_status: |
   After Plan 09-03 lands these files, OpenWrtOutputParserTests.ParseArpingPingOutput_AcrossAllSupportedVersions_*
   flips from SKIP to PASS for this version slot. Replacing the placeholder with live-captured content does
   not change the row count — content is parser-tolerant by construction.
+
+---
+
+## Phase 9 capture wave (Plan 09-04)
+
+phase9_04_provenance: synthesized-placeholder (live-capture pending operator hand-off)
+phase9_04_captured: 2026-05-10
+phase9_04_captured_by: Plan 09-04 executor (autonomous)
+phase9_04_files_added:
+  - nslookup.txt            (synthesized BusyBox nslookup shape — Server preamble + Name: line + answer Address line; parser-tolerant by construction so live-capture overwrite is invisible to row count)
+phase9_04_operator_handoff: |
+  Plan 09-04 ships PLACEHOLDER content for the 23.05-SNAPSHOT slot. The Phase-2-style operator-driven
+  live-capture (per D-10/D-11) is the next manual step, mirroring the Plan 09-03 hand-off:
+    1. Extend tools/FixtureCapture's command list to include:
+         nslookup <one IP from local subnet>
+    2. Run against the operator's real OpenWrt 23.05-SNAPSHOT AP via the existing .live-credentials.local.env flow.
+    3. Re-run the existing redaction script (support/redact-fixtures/redact-23.05-SNAPSHOT.sh).
+    4. Commit the overwritten file under the same provenance: live-capture banner.
+phase9_04_ips_used: 192.168.1.1 (synthesized resolver), 192.168.1.42 (synthesized lookup target)
+phase9_04_theory_row_status: |
+  After Plan 09-04 lands this file, OpenWrtOutputParserTests.ParseNslookupOutput_AcrossAllSupportedVersions_*
+  AND ReverseDnsProbeTests.PollAsync_AcrossAllSupportedVersions_* flip from SKIP to PASS for this version slot.
