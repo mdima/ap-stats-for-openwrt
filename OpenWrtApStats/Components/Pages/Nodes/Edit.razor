@@ -52,7 +52,10 @@ else
         {
             Hostname = _existing.Hostname,
             Username = _existing.Username,
-            Password = ""    // intentional — never pre-filled
+            Password = "",   // intentional — never pre-filled
+            // Phase 10 SET-03 / SET-04 — pre-fill from the existing row (D-09).
+            SubnetScanEnabled = _existing.SubnetScanEnabled,
+            SubnetScanRanges = _existing.SubnetScanRanges,
         };
     }
 
@@ -75,6 +78,13 @@ else
             await Nodes.UpdatePasswordAsync(Id, encrypted);
         }
         // else: empty password = no Password change (D-08 / T-3-04-02 mitigation).
+
+        // Phase 10 SET-03 / SET-04 — single-statement ExecuteUpdateAsync; never touches
+        // Password, HostKeyFingerprint, or LastEnrichmentRefreshAt (CR-02-safe per CLAUDE.md).
+        await Nodes.UpdateScanSettingsAsync(
+            Id,
+            form.SubnetScanEnabled,
+            string.IsNullOrWhiteSpace(form.SubnetScanRanges) ? null : form.SubnetScanRanges.Trim());
 
         Nav.NavigateTo("/Nodes?saved=1", forceLoad: false);
     }

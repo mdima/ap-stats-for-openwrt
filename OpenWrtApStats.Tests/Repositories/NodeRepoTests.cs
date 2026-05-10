@@ -290,6 +290,115 @@ public sealed class NodeRepoTests(SqliteInMemoryFixture fixture) : IClassFixture
         Assert.Equal("fingerprint-COMMITTED", node2.HostKeyFingerprint);
     }
 
+    // ── Phase 10 SET-03 / SET-04: UpdateScanSettingsAsync (CR-02-safe) ──────
+    [Fact]
+    public async Task UpdateScanSettingsAsync_PersistsBothFields_WithoutTouchingOtherColumns()
+    {
+        // CR-02 invariant: single-statement ExecuteUpdateAsync writes ONLY SubnetScanEnabled
+        // + SubnetScanRanges; never touches Password, HostKeyFingerprint, LastEnrichmentRefreshAt,
+        // Hostname, or Username.
+        var ct = TestContext.Current.CancellationToken;
+        var repo = CreateRepo();
+
+        const string ciphertext = "ciphertext-blob-scan-settings";
+        var refreshedAt = new DateTimeOffset(2026, 5, 1, 10, 0, 0, TimeSpan.Zero);
+        int nodeId;
+        await using (var seed = _fixture.CreateContext())
+        {
+            var node = new WiFiNode
+            {
+                Hostname = $"scan-{Guid.NewGuid():N}",
+                Username = "root",
+                Password = ciphertext,
+                HostKeyFingerprint = "FP-original",
+                LastEnrichmentRefreshAt = refreshedAt,
+                SubnetScanEnabled = false,
+                SubnetScanRanges = null
+            };
+            seed.WiFiNodes.Add(node);
+            await seed.SaveChangesAsync(ct);
+            nodeId = node.Id;
+        }
+
+        await repo.UpdateScanSettingsAsync(nodeId, true, "192.168.1.0/24", ct);
+
+        await using var verify = _fixture.CreateContext();
+        var fetched = await verify.WiFiNodes.AsNoTracking().FirstAsync(n => n.Id == nodeId, ct);
+
+        Assert.True(fetched.SubnetScanEnabled);
+        Assert.Equal("192.168.1.0/24", fetched.SubnetScanRanges);
+        // CR-02 safety: untouched columns
+        Assert.Equal(ciphertext,    fetched.Password);
+        Assert.Equal("FP-original", fetched.HostKeyFingerprint);
+        Assert.Equal(refreshedAt,   fetched.LastEnrichmentRefreshAt);
+    }
+
+    [Fact]
+    public async Task UpdateScanSettingsAsync_NullRanges_PersistsAsNull()
+    {
+        // Plan 10-03 contract: blank/null SubnetScanRanges round-trips as null (auto-derive
+        // intent — Phase 9 D-04 auto-derives a /24 around the SSH-peer-serving interface).
+        var ct = TestContext.Current.CancellationToken;
+        var repo = CreateRepo();
+
+        int nodeId;
+        await using (var seed = _fixture.CreateContext())
+        {
+            var node = new WiFiNode
+            {
+                Hostname = $"scan-null-{Guid.NewGuid():N}",
+                Username = "root",
+                Password = "",
+                SubnetScanEnabled = true,
+                SubnetScanRanges = "10.0.0.0/24"   // pre-existing non-null value to be cleared
+            };
+            seed.WiFiNodes.Add(node);
+            await seed.SaveChangesAsync(ct);
+            nodeId = node.Id;
+        }
+
+        await repo.UpdateScanSettingsAsync(nodeId, true, null, ct);
+
+        await using var verify = _fixture.CreateContext();
+        var fetched = await verify.WiFiNodes.AsNoTracking().FirstAsync(n => n.Id == nodeId, ct);
+        Assert.True(fetched.SubnetScanEnabled);
+        Assert.Null(fetched.SubnetScanRanges);
+    }
+
+    [Fact]
+    public async Task UpdateScanSettingsAsync_DisabledTrue_FlipsToggle_PreservesRanges()
+    {
+        // D-09 verbatim: when SubnetScanEnabled is OFF, the SubnetScanRanges value is still
+        // persisted so the operator can re-enable later without losing the CIDR list.
+        var ct = TestContext.Current.CancellationToken;
+        var repo = CreateRepo();
+
+        int nodeId;
+        await using (var seed = _fixture.CreateContext())
+        {
+            var node = new WiFiNode
+            {
+                Hostname = $"scan-disable-{Guid.NewGuid():N}",
+                Username = "root",
+                Password = "",
+                SubnetScanEnabled = true,
+                SubnetScanRanges = null
+            };
+            seed.WiFiNodes.Add(node);
+            await seed.SaveChangesAsync(ct);
+            nodeId = node.Id;
+        }
+
+        // Toggle OFF while still passing a CIDR list — operator may have toggled off but
+        // pre-filled the ranges field; both must round-trip.
+        await repo.UpdateScanSettingsAsync(nodeId, false, "10.0.0.0/24", ct);
+
+        await using var verify = _fixture.CreateContext();
+        var fetched = await verify.WiFiNodes.AsNoTracking().FirstAsync(n => n.Id == nodeId, ct);
+        Assert.False(fetched.SubnetScanEnabled);
+        Assert.Equal("10.0.0.0/24", fetched.SubnetScanRanges);
+    }
+
     [Fact]
     public async Task SetHostKeyFingerprintAsync_DoesNotClobberPassword_CR02Safe()
     {

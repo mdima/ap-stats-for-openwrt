@@ -55,6 +55,38 @@
         <ValidationMessage For="@(() => Model.Password)" class="invalid-feedback d-block" />
     </div>
 
+    @* Phase 10 D-09 — per-node enrichment scan settings (SET-04 toggle + SET-03 CIDR input). *@
+    <div class="mb-3">
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch"
+                   id="subnet-scan-enabled"
+                   checked="@Model.SubnetScanEnabled"
+                   @onchange="@((Microsoft.AspNetCore.Components.ChangeEventArgs e) => Model.SubnetScanEnabled = e.Value is bool b && b)" />
+            <label class="form-check-label fw-semibold" for="subnet-scan-enabled">
+                <i class="bi bi-broadcast me-2" aria-hidden="true"></i>
+                Enable subnet scan for IP enrichment
+            </label>
+            <small class="form-text d-block text-body-secondary">
+                When off, this node skips the active arping/ping sweep entirely. The dashboard will still show IPs from the kernel neighbor cache when available.
+            </small>
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label fw-semibold" for="subnet-scan-ranges">Subnet scan ranges</label>
+        <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-diagram-3"></i></span>
+            <InputText id="subnet-scan-ranges" class="form-control"
+                       placeholder="192.168.1.0/24, 10.0.0.0/24"
+                       @bind-Value="Model.SubnetScanRanges"
+                       disabled="@(!Model.SubnetScanEnabled)" />
+        </div>
+        <small class="form-text text-body-secondary">
+            Comma-separated CIDR list. Leave blank to auto-derive a /24 around the AP's interface IP.
+        </small>
+        <ValidationMessage For="@(() => Model.SubnetScanRanges)" class="invalid-feedback d-block" />
+    </div>
+
     <div class="d-flex justify-content-between mt-4">
         <button type="button" class="btn btn-primary" @onclick="HandleTestAsync" disabled="@_testing">
             @if (_testing)
