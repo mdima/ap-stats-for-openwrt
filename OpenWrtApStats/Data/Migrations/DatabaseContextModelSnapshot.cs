@@ -41,6 +41,16 @@ namespace OpenWrtApStats.Data.Migrations
                         {
                             Key = "PollingIntervalSeconds",
                             IntValue = 30
+                        },
+                        new
+                        {
+                            Key = "RefreshIntervalSeconds",
+                            IntValue = 3600
+                        },
+                        new
+                        {
+                            Key = "LocalDomainSuffixes",
+                            StringValue = "[]"
                         });
                 });
 
@@ -57,6 +67,9 @@ namespace OpenWrtApStats.Data.Migrations
                     b.Property<string>("IPAddress")
                         .HasMaxLength(45)
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsRandomMac")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("LastPollDate")
                         .HasColumnType("TEXT");
@@ -149,6 +162,9 @@ namespace OpenWrtApStats.Data.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTimeOffset?>("LastEnrichmentRefreshAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("LastPollDate")
                         .HasColumnType("TEXT");
 
@@ -159,6 +175,14 @@ namespace OpenWrtApStats.Data.Migrations
 
                     b.Property<int>("Status")
                         .HasColumnType("INTEGER");
+
+                    b.Property<bool>("SubnetScanEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("SubnetScanRanges")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Username")
                         .IsRequired()
