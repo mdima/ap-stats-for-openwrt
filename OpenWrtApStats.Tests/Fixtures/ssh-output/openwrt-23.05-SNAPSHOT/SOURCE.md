@@ -90,3 +90,31 @@ reproducibility: |
   `bash support/redact-fixtures/redact-23.05-SNAPSHOT.sh` to re-apply the redaction pass.
   The mapping table in the script is deterministic, so re-running the script against
   re-captured content produces an identical diff.
+
+---
+
+## Phase 9 capture wave (Plan 09-03)
+
+phase9_provenance: synthesized-placeholder (live-capture pending operator hand-off)
+phase9_captured: 2026-05-10
+phase9_captured_by: Plan 09-03 executor (autonomous)
+phase9_files_added:
+  - arping.txt              (synthesized — operator should overwrite via tools/FixtureCapture against the live AP)
+  - ping.txt                (synthesized — same)
+  - command-v-arping.txt    (synthesized — `/usr/sbin/arping`)
+  - command-v-arping.txt.exit  (`0`)
+phase9_operator_handoff: |
+  Plan 09-03 ships PLACEHOLDER content for the 23.05-SNAPSHOT slot to keep the SubnetSweepProbeTests
+  theory rows green-via-PASS during the autonomous wave window. The Phase-2-style operator-driven
+  live-capture (per D-10/D-11) is the next manual step:
+    1. Extend tools/FixtureCapture's command list to include:
+         arping -c1 -w1 -I <iface> <one IP from local subnet>
+         ping -c1 -W1 <one IP from local subnet>
+         command -v arping
+    2. Run against the operator's real OpenWrt 23.05-SNAPSHOT AP via the existing .live-credentials.local.env flow.
+    3. Re-run the existing redaction script (support/redact-fixtures/redact-23.05-SNAPSHOT.sh) which is deterministic.
+    4. Commit the overwritten files in this folder under the same provenance: live-capture banner.
+phase9_theory_row_status: |
+  After Plan 09-03 lands these files, OpenWrtOutputParserTests.ParseArpingPingOutput_AcrossAllSupportedVersions_*
+  flips from SKIP to PASS for this version slot. Replacing the placeholder with live-captured content does
+  not change the row count — content is parser-tolerant by construction.

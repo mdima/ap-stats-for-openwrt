@@ -1,0 +1,6 @@
+PING 192.168.1.42 (192.168.1.42): 56 data bytes
+64 bytes from 192.168.1.42: seq=0 ttl=64 time=1.234 ms
+PING 192.168.1.43 (192.168.1.43): 56 data bytes
+64 bytes from 192.168.1.43: seq=0 ttl=64 time=0.987 ms
+--- 192.168.1.42 ping statistics ---
+1 packets transmitted, 1 packets received, 0% packet loss

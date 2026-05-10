@@ -125,7 +125,10 @@ public sealed class SubnetSweepProbeTests
         var fixtureDir = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT");
         var session = new FakeSshSession(fixtureDir);
         session.CommandOverrides["ip route get"] = "garbage-route";
-        File.WriteAllText(Path.Combine(fixtureDir, "garbage-route.txt"), "garbage with no dev token");
+        // Note: the test content must NOT contain the substring "dev " followed by a word, since
+        // SubnetDeriver.IpRouteDevRegex would otherwise match (capturing the next token as the
+        // iface name). Use a payload that has no "dev <word>" pattern at all.
+        File.WriteAllText(Path.Combine(fixtureDir, "garbage-route.txt"), "garbage output without route metadata");
 
         var probe = new SubnetSweepProbe(session, NullLogger<SubnetSweepProbe>.Instance);
         var node = MakeNode(ranges: null);

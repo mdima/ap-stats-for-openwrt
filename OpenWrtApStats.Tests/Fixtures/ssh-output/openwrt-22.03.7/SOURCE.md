@@ -63,3 +63,22 @@ theory_row_status: |
   after the parser's D-07 uppercasing).
   Per-station iw dev rows remain Skip (no per-station files in this folder; the parser tests
   only require iwinfo + ip neigh content per the [Theory] member-data setup).
+
+---
+
+## Phase 9 capture wave (Plan 09-03)
+
+phase9_provenance: public-sample (synthesized)
+phase9_captured: 2026-05-10
+phase9_captured_by: Plan 09-03 executor (autonomous)
+phase9_files_added:
+  - arping.txt              (synthesized BusyBox arping shape — 2 unicast replies + 1 unanswered host)
+  - ping.txt                (synthesized BusyBox ping shape — 2 RFC-1918 replies)
+  - command-v-arping.txt    (synthesized — `/usr/sbin/arping`)
+  - command-v-arping.txt.exit  (`0` — capability detect resolves true, arping branch chosen)
+phase9_synthesis_rationale: |
+  Same as 21.02.7 sibling: synthesized to unblock the 09-03 SKIP-row flip; operator-driven live
+  capture is deferred to Phase 9's hand-off step.
+phase9_theory_row_status: |
+  After Plan 09-03 lands these files, OpenWrtOutputParserTests.ParseArpingPingOutput_AcrossAllSupportedVersions_*
+  flips from SKIP to PASS for this version slot.

@@ -1,0 +1,7 @@
+ARPING 192.168.1.42 from 192.168.1.1 br-lan
+Unicast reply from 192.168.1.42 [aa:bb:cc:dd:ee:01] 1.234ms
+ARPING 192.168.1.43 from 192.168.1.1 br-lan
+Unicast reply from 192.168.1.43 [bb:cc:dd:ee:ff:02] 0.987ms
+ARPING 192.168.1.44 from 192.168.1.1 br-lan
+Sent 1 probes (1 broadcast(s))
+Received 0 response(s)
