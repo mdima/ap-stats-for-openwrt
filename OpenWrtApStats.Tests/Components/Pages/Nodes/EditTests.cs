@@ -34,11 +34,20 @@ public sealed class EditTests
             Hostname = "old-host",
             Username = "old-user",
             Password = "OLD-CIPHERTEXT",
-            HostKeyFingerprint = "FP"
+            HostKeyFingerprint = "FP",
+            // Phase 10 SET-03 / SET-04 — pre-existing scan settings on the seeded node so the
+            // Edit page can pre-fill from a non-default state and the save handler can be
+            // verified against the form's edited values.
+            SubnetScanEnabled = false,
+            SubnetScanRanges = "10.0.0.0/24"
         };
         public string? CapturedNewHostname;
         public string? CapturedNewUsername;
         public string? CapturedNewPasswordEncrypted;
+        // Phase 10 SET-03 / SET-04 — capture UpdateScanSettingsAsync invocations.
+        public int    UpdateScanSettingsCallCount;
+        public bool?  CapturedScanEnabled;
+        public string? CapturedScanRanges;
 
         public Task<WiFiNode?> GetByIdAsync(int id, CancellationToken ct = default) =>
             Task.FromResult<WiFiNode?>(id == Existing.Id ? Existing : null);
@@ -66,7 +75,13 @@ public sealed class EditTests
         public Task UpdateOnlineAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetHostKeyFingerprintAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpdateLastEnrichmentRefreshAtAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default) => Task.CompletedTask;
-        public Task UpdateScanSettingsAsync(int id, bool subnetScanEnabled, string? subnetScanRanges, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpdateScanSettingsAsync(int id, bool subnetScanEnabled, string? subnetScanRanges, CancellationToken ct = default)
+        {
+            UpdateScanSettingsCallCount++;
+            CapturedScanEnabled = subnetScanEnabled;
+            CapturedScanRanges = subnetScanRanges;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class TestConnectionStub : ITestConnectionService
@@ -152,6 +167,75 @@ public sealed class EditTests
             Assert.NotNull(repo.CapturedNewPasswordEncrypted);
             Assert.NotEqual("new-plain", repo.CapturedNewPasswordEncrypted);
             Assert.StartsWith("CfDJ", repo.CapturedNewPasswordEncrypted!);
+        }
+    }
+
+    // ── Phase 10 SET-03 / SET-04 — D-09 Edit-flow pre-fill + save semantics ─────
+    [Fact]
+    public void Render_PrefillsSubnetScanFields_FromExistingNode()
+    {
+        // Existing node has SubnetScanEnabled=false and SubnetScanRanges="10.0.0.0/24"
+        // (see TrackingNodeRepo.Existing seed). The form must pre-fill both: toggle
+        // unchecked, InputText shows the CIDR list.
+        var (ctx, _) = Build();
+        using (ctx)
+        {
+            var cut = ctx.Render<EditPage>(p => p.Add(c => c.Id, 5));
+
+            var toggle = cut.Find("input#subnet-scan-enabled");
+            var ranges = cut.Find("input#subnet-scan-ranges");
+
+            // Toggle reflects SubnetScanEnabled = false on the seeded node.
+            Assert.False(toggle.HasAttribute("checked"));
+            Assert.Equal("10.0.0.0/24", ranges.GetAttribute("value"));
+        }
+    }
+
+    [Fact]
+    public void Save_InvokesUpdateScanSettingsAsync_WithFormValues()
+    {
+        // Operator edits CIDR list and toggles the switch ON; submit must call
+        // UpdateScanSettingsAsync(id, true, "192.168.5.0/24") exactly once.
+        var (ctx, repo) = Build();
+        using (ctx)
+        {
+            var cut = ctx.Render<EditPage>(p => p.Add(c => c.Id, 5));
+            // Toggle from false (seed) to true.
+            cut.Find("input#subnet-scan-enabled").Change(true);
+            cut.Find("input#subnet-scan-ranges").Change("192.168.5.0/24");
+
+            cut.Find("button[type='submit']").Click();
+
+            Assert.Equal(1,                repo.UpdateScanSettingsCallCount);
+            Assert.True(repo.CapturedScanEnabled);
+            Assert.Equal("192.168.5.0/24", repo.CapturedScanRanges);
+        }
+    }
+
+    [Fact]
+    public void Save_InvokesUpdateScanSettingsAsync_ExactlyOnce_AlongsideUpdateMetadataAsync()
+    {
+        // The form's save path must NOT touch HostKeyFingerprint, LastEnrichmentRefreshAt,
+        // IPAddress, or Hostname through UpdateScanSettingsAsync; UpdateMetadataAsync still
+        // owns the Hostname/Username write (existing v0.9 behavior, unchanged), and the
+        // new UpdateScanSettingsAsync must fire exactly once per save (not zero, not twice).
+        var (ctx, repo) = Build();
+        using (ctx)
+        {
+            var cut = ctx.Render<EditPage>(p => p.Add(c => c.Id, 5));
+            cut.Find("input[placeholder='192.168.1.1']").Change("renamed-host");
+            cut.Find("input[placeholder='root']").Change("renamed-user");
+            // Don't touch the toggle / CIDR — pre-filled values flow through unchanged.
+
+            cut.Find("button[type='submit']").Click();
+
+            // UpdateMetadataAsync still wrote Hostname/Username (unchanged behavior).
+            Assert.Equal("renamed-host", repo.CapturedNewHostname);
+            Assert.Equal("renamed-user", repo.CapturedNewUsername);
+            // UpdateScanSettingsAsync fired exactly once with the form's pre-filled values.
+            Assert.Equal(1, repo.UpdateScanSettingsCallCount);
+            Assert.False(repo.CapturedScanEnabled);            // pre-filled from seed
+            Assert.Equal("10.0.0.0/24", repo.CapturedScanRanges); // pre-filled from seed
         }
     }
 }
