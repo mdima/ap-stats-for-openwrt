@@ -62,7 +62,7 @@ public sealed class KpiTileTests
             .Add(t => t.IconClass, "bi-wifi-off"));
 
         // Regression guard: not "—", not "Empty" — literal "0" lives inside the kpi-count span.
-        var span = cut.Find("span.kpi-count");
+        var span = cut.Find("h3.kpi-count");
         Assert.Equal("0", span.TextContent.Trim());
         Assert.DoesNotContain("Empty", cut.Markup);
         Assert.DoesNotContain("—", cut.Markup);
@@ -81,7 +81,7 @@ public sealed class KpiTileTests
         Assert.Contains("kpi-count", cut.Markup);
         // tabular-nums width consistency is locked in the scoped .razor.css, not assertable
         // via bUnit Markup — checker validates separately. We assert the class hook is present.
-        var span = cut.Find("span.kpi-count");
+        var span = cut.Find("h3.kpi-count");
         Assert.Equal("9999", span.TextContent.Trim());
     }
 
@@ -113,9 +113,9 @@ public sealed class KpiTileTests
             .Add(t => t.Count, 5)
             .Add(t => t.IconClass, "bi-wifi"));
 
-        // Structural anchor: the kpi-tile button shell + card-body wrapper exist in any theme.
-        Assert.Contains("kpi-tile", cut.Markup);
-        Assert.Contains("card-body", cut.Markup);
+        // Structural anchor: the kpi-count button shell + small-box  wrapper exist in any theme.
+        Assert.Contains("kpi-count", cut.Markup);
+        Assert.Contains("small-box", cut.Markup);
         // Native <button type="button"> for keyboard/ARIA correctness (REQ-UI-01).
         var button = cut.Find("button");
         Assert.Equal("button", button.GetAttribute("type"));

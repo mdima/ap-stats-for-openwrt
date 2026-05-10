@@ -52,7 +52,7 @@ public sealed class KpiTileBarTests
 
         // Each KpiTile renders the count inside <span class="kpi-count">.
         // Tiles render in order: All / Online / Stale / Offline.
-        var counts = cut.FindAll("span.kpi-count");
+        var counts = cut.FindAll("h3.kpi-count");
         Assert.Equal(4, counts.Count);
         Assert.Equal("4", counts[0].TextContent.Trim()); // total
         Assert.Equal("1", counts[1].TextContent.Trim()); // online
@@ -120,7 +120,7 @@ public sealed class KpiTileBarTests
         var rows = new List<DashboardKpiRow> { new(Status.Online, false) }; // total=1, online=1
         var cut = ctx.Render<KpiTileBar>(p => p.Add(b => b.Rows, rows));
 
-        var initialCounts = cut.FindAll("span.kpi-count");
+        var initialCounts = cut.FindAll("h3.kpi-count");
         Assert.Equal("1", initialCounts[0].TextContent.Trim()); // total = 1
         Assert.Equal("1", initialCounts[1].TextContent.Trim()); // online = 1
 
@@ -130,7 +130,7 @@ public sealed class KpiTileBarTests
         rows.Add(new(Status.Offline, IsStale: false));
         await notifier.RaiseAsync(DummySnapshot());
 
-        var afterCounts = cut.FindAll("span.kpi-count");
+        var afterCounts = cut.FindAll("h3.kpi-count");
         Assert.Equal("4", afterCounts[0].TextContent.Trim()); // total = 4
         Assert.Equal("1", afterCounts[1].TextContent.Trim()); // online = 1
         Assert.Equal("2", afterCounts[2].TextContent.Trim()); // stale = 2
@@ -152,7 +152,7 @@ public sealed class KpiTileBarTests
         await notifier.RaiseAsync(DummySnapshot());
         Assert.True(cut.RenderCount > rendersBefore,
             $"Live KpiTileBar should re-render on Cycled (rendersBefore={rendersBefore}, after={cut.RenderCount})");
-        Assert.Equal("2", cut.FindAll("span.kpi-count")[0].TextContent.Trim());
+        Assert.Equal("2", cut.FindAll("h3.kpi-count")[0].TextContent.Trim());
 
         // Attach a probe handler so the post-dispose RaiseAsync still has at least one
         // subscriber — proves the notifier itself is alive AND the only delegate it routes to
@@ -194,6 +194,6 @@ public sealed class KpiTileBarTests
         Assert.Contains("aria-label=\"Status filter — KPI tiles\"", cut.Markup);
 
         // 4 KpiTile <button>s (All / Online / Stale / Offline).
-        Assert.Equal(4, cut.FindAll("button.kpi-tile").Count);
+        Assert.Equal(4, cut.FindAll("button.small-box").Count);
     }
 }

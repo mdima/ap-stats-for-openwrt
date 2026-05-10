@@ -60,11 +60,11 @@ FROM base AS final
 COPY --from=build --chown=app:app /app/publish .
 
 # Health-check directive — D-03 verbatim. Drives Docker's reported liveness via the
-# Phase 6 /health endpoint (D-07/D-08). start-period=30s covers EF migrations +
+# Phase 6 /health endpoint (D-07/D-08). start-period=15s covers EF migrations +
 # DataProtection keyring init on first boot before /health answers. timeout=5s aligns
 # with CLAUDE.md SSH-timeout convention. retries=3 absorbs one transient SQLite
 # write-contention without flapping unhealthy (T-07-08 mitigation).
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -fsS http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["dotnet", "OpenWrtApStats.dll"]
