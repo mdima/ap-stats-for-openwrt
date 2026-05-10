@@ -30,6 +30,17 @@ public interface IStationRepo
     Task<IReadOnlyList<string>> GetAllMacsAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Phase 10 ORCH-01 — read-only enumeration of MAC addresses currently persisted on a given
+    /// node's WLANs. Used by PollOrchestrator to detect "newMacDetectedThisCycle" when joining
+    /// against the Phase 2 NodePoller's freshly-observed station MACs.
+    /// <para>
+    /// Read-only: <c>AsNoTracking().Where(...).Select(s => s.MacAddress).Distinct().ToListAsync</c>.
+    /// NEVER calls SaveChangesAsync. Orchestrator-only-writes invariant preserved.
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<string>> GetMacsByNodeAsync(int nodeId, CancellationToken ct = default);
+
+    /// <summary>
     /// D-14 (Phase 5) operator-initiated delete (DASH-16). Single-statement
     /// <c>ExecuteDeleteAsync</c> (CR-02-safe — never <c>db.WLANStations.Remove(entity)</c>
     /// after a Find which would re-track the row, RESEARCH §Pitfall 5). Repo-owned only;

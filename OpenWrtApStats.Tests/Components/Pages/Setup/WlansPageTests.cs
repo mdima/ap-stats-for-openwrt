@@ -72,6 +72,9 @@ public sealed class WlansPageTests
 
         public Task SetHostKeyFingerprintAsync(DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default)
             => Task.CompletedTask;
+
+        public Task UpdateLastEnrichmentRefreshAtAsync(DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default)
+            => Task.CompletedTask;
     }
 
     private sealed class StubNetworkRepo : INetworkRepo

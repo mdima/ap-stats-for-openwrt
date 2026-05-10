@@ -130,4 +130,11 @@ public sealed class NodeRepo(IDbContextFactory<DatabaseContext> factory) : INode
         db.WiFiNodes
             .Where(n => n.Id == nodeId)
             .ExecuteUpdateAsync(s => s.SetProperty(n => n.HostKeyFingerprint, fingerprint), ct);
+
+    // Phase 10 ORCH-07 — caller-owned single-property update for LastEnrichmentRefreshAt.
+    // CR-02-safe: ExecuteUpdateAsync touches only the timestamp column; never db.WiFiNodes.Update(entity).
+    public Task UpdateLastEnrichmentRefreshAtAsync(DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default) =>
+        db.WiFiNodes
+            .Where(n => n.Id == nodeId)
+            .ExecuteUpdateAsync(s => s.SetProperty(n => n.LastEnrichmentRefreshAt, (DateTimeOffset?)ts), ct);
 }

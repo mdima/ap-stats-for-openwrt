@@ -101,7 +101,9 @@ public sealed class PollOrchestratorPhase9IsolationTests(SqliteInMemoryFixture f
             probeFactory,
             notifier,
             NullLogger<PollOrchestrator>.Instance,
-            settings);
+            settings,
+            (_, _, _, _) => Task.FromResult<EnrichmentDelta?>(null),     // Phase 10 default: no enrichment this cycle (preserves the existing v0.9 command-set assertions)
+            TimeProvider.System);
 
         // Run one cycle. Failures are acceptable: the assertion is on the COMMAND SET,
         // not on the cycle's success outcome.

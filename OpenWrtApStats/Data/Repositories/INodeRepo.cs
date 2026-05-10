@@ -78,4 +78,12 @@ public interface INodeRepo
     /// (which would clobber the encrypted <c>Password</c>).
     /// </summary>
     Task SetHostKeyFingerprintAsync(DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default);
+
+    /// <summary>
+    /// Phase 10 ORCH-07 caller-owned. Updates ONLY <see cref="WiFiNode.LastEnrichmentRefreshAt"/>;
+    /// composed by <c>PollOrchestrator.RunCycleAsync</c> at the end of a successful enrichment tick,
+    /// inside the same outer coordinator transaction as the station upsert. CR-02-safe single-property
+    /// <c>ExecuteUpdateAsync</c> — never <c>db.WiFiNodes.Update(entity)</c>.
+    /// </summary>
+    Task UpdateLastEnrichmentRefreshAtAsync(DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default);
 }
