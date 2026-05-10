@@ -25,6 +25,9 @@ public sealed class DetailTests
         public int    DeleteCallCount { get; private set; }
         public string? DeletedMac { get; private set; }
         public string? RequestedMac { get; private set; }
+        public int    SetIsRandomMacCallCount { get; private set; }
+        public bool?  LastSetIsRandomMacValue { get; private set; }
+        public string? LastSetIsRandomMacForMac { get; private set; }
 
         public Task<IReadOnlyList<WLANStation>> GetAllAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<WLANStation>>(Existing is null ? Array.Empty<WLANStation>() : new[] { Existing });
@@ -40,6 +43,14 @@ public sealed class DetailTests
             SetNameCallCount++;
             LastSetNameValue = name;
             if (Existing is not null && Existing.MacAddress == macAddress) Existing.Name = name;
+            return Task.CompletedTask;
+        }
+        public Task SetIsRandomMacAsync(string macAddress, bool isRandomMac, CancellationToken ct = default)
+        {
+            SetIsRandomMacCallCount++;
+            LastSetIsRandomMacValue = isRandomMac;
+            LastSetIsRandomMacForMac = macAddress;
+            if (Existing is not null && Existing.MacAddress == macAddress) Existing.IsRandomMac = isRandomMac;
             return Task.CompletedTask;
         }
         public Task DeleteByMacAsync(string macAddress, CancellationToken ct = default)
@@ -341,6 +352,82 @@ public sealed class DetailTests
             var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
 
             Assert.Contains("Signal unknown", cut.Markup);
+        }
+    }
+
+    // ── Phase 10 Plan 10-04 Task 3 — random-MAC toggle (DASH-22 / DASH-23) ──
+
+    [Fact]
+    public void RandomMacToggle_Prefills_FromIsRandomMac_True()
+    {
+        var (ctx, stations, _, _, _) = Build();
+        var s = MakeStation();
+        s.IsRandomMac = true;
+        stations.Existing = s;
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            var toggle = cut.Find("input#random-mac-toggle");
+            Assert.NotNull(toggle.GetAttribute("checked"));
+        }
+    }
+
+    [Fact]
+    public void RandomMacToggle_Prefills_FromIsRandomMac_False()
+    {
+        var (ctx, stations, _, _, _) = Build();
+        var s = MakeStation();
+        s.IsRandomMac = false;
+        stations.Existing = s;
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            var toggle = cut.Find("input#random-mac-toggle");
+            Assert.Null(toggle.GetAttribute("checked"));
+        }
+    }
+
+    [Fact]
+    public void RandomMacToggle_Change_InvokesSetIsRandomMacAsync_WithNewValue()
+    {
+        var (ctx, stations, _, _, _) = Build();
+        var s = MakeStation();
+        s.IsRandomMac = false;
+        stations.Existing = s;
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            var toggle = cut.Find("input#random-mac-toggle");
+            toggle.Change(true);
+
+            Assert.Equal(1, stations.SetIsRandomMacCallCount);
+            Assert.Equal(true, stations.LastSetIsRandomMacValue);
+            Assert.Equal("AA:BB:CC:00:00:01", stations.LastSetIsRandomMacForMac);
+        }
+    }
+
+    [Fact]
+    public void RandomMacToggle_Change_ShowsSavedFlash()
+    {
+        var (ctx, stations, _, _, _) = Build();
+        var s = MakeStation();
+        s.IsRandomMac = false;
+        stations.Existing = s;
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            // Sanity: no "Saved" inside the random-MAC toggle div before change.
+            // Trigger the change.
+            var toggle = cut.Find("input#random-mac-toggle");
+            toggle.Change(true);
+            // After the synchronous portion of OnRandomMacToggleChangedAsync, _randomMacFlash=true
+            // and StateHasChanged has run via the framework's automatic re-render.
+            var toggleDiv = cut.Find("input#random-mac-toggle").ParentElement!;
+            Assert.Contains("Saved", toggleDiv.InnerHtml);
         }
     }
 

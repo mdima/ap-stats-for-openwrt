@@ -261,6 +261,45 @@ public sealed class PollOrchestratorEnrichmentTests(SqliteInMemoryFixture fixtur
         Assert.True((node.LastEnrichmentRefreshAt!.Value - fixedNow).Duration() < TimeSpan.FromSeconds(1));
     }
 
+    [Fact]
+    public async Task Toggle_RandomMac_PersistsAcrossPollCycle()
+    {
+        // DASH-23 (Phase 10 Plan 10-04 Task 3) — operator override of IsRandomMac via
+        // IStationRepo.SetIsRandomMacAsync survives a subsequent PollOrchestrator cycle.
+        // Proves end-to-end that Plan 10-01's UPDATE-branch user-controlled-fields exclusion
+        // (ORCH-02 + ORCH-03) does NOT recompute or clobber the operator's choice.
+        var ct = TestContext.Current.CancellationToken;
+        var (nodeId, _, bssid) = await SeedNodeWithOneNetworkAsync(ct, lastEnrichmentRefreshAt: DateTimeOffset.UtcNow);
+        // MAC byte 0 = 0x02 → U/L bit set → IsRandomMac=true on INSERT.
+        var mac = $"02:11:22:33:44:{Random.Shared.Next(0, 255):X2}";
+
+        var orch1 = BuildOrchestrator(ProbeForNode(nodeId, bssid,
+            new WLANStation { MacAddress = mac, Bssid = bssid, RSS = -50, LastPollDate = DateTime.UtcNow }));
+        await orch1.RunCycleAsync(ct);
+
+        // Baseline — INSERT branch flagged it true.
+        await using (var verify1 = _fixture.CreateContext())
+        {
+            var row = await verify1.WLANStations.AsNoTracking().FirstAsync(s => s.MacAddress == mac, ct);
+            Assert.True(row.IsRandomMac);
+        }
+
+        // Operator toggles via the Stations/Detail.razor surface — IStationRepo.SetIsRandomMacAsync.
+        var dpFactory = new TestDbContextFactory(_fixture.Options);
+        var stationRepo = new StationRepo(dpFactory);
+        await stationRepo.SetIsRandomMacAsync(mac, false, ct);
+
+        // Cycle 2 — orchestrator re-upserts the same MAC. UPDATE branch must preserve the override.
+        var orch2 = BuildOrchestrator(ProbeForNode(nodeId, bssid,
+            new WLANStation { MacAddress = mac, Bssid = bssid, RSS = -45, LastPollDate = DateTime.UtcNow }));
+        await orch2.RunCycleAsync(ct);
+
+        await using var verify2 = _fixture.CreateContext();
+        var after = await verify2.WLANStations.AsNoTracking().FirstAsync(s => s.MacAddress == mac, ct);
+        Assert.False(after.IsRandomMac);    // operator's choice preserved across the cycle
+        Assert.Equal(-45, after.RSS);       // telemetry was updated normally
+    }
+
     private sealed class FakeTimeProvider(DateTimeOffset fixedUtcNow) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => fixedUtcNow;

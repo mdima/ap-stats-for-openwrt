@@ -58,6 +58,17 @@ public sealed class StationRepo(IDbContextFactory<DatabaseContext> factory) : IS
             .ExecuteUpdateAsync(u => u.SetProperty(s => s.Name, name), ct);
     }
 
+    // Phase 10 DASH-22 / DASH-23 — operator-toggled override of the U/L-bit-derived random-MAC flag.
+    // Single-property ExecuteUpdateAsync (CR-02-safe). Idempotent — calling on a non-existent MAC is a
+    // no-op (no exception).
+    public async Task SetIsRandomMacAsync(string macAddress, bool isRandomMac, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.WLANStations
+            .Where(s => s.MacAddress == macAddress)
+            .ExecuteUpdateAsync(u => u.SetProperty(s => s.IsRandomMac, isRandomMac), ct);
+    }
+
     public async Task DeleteByMacAsync(string macAddress, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);

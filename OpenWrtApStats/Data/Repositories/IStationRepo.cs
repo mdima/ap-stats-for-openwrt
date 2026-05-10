@@ -16,6 +16,15 @@ public interface IStationRepo
     Task SetNameAsync(string macAddress, string? name, CancellationToken ct = default);
 
     /// <summary>
+    /// Phase 10 DASH-22 / DASH-23 — operator override of the U/L-bit-derived random-MAC flag.
+    /// Single-property <c>ExecuteUpdateAsync</c> (CR-02-safe). Repo-owned; runs outside any
+    /// coordinator transaction (Stations/Detail.razor toggle). Idempotent on missing MAC.
+    /// User-controlled-fields convention (Plan 10-01 ORCH-02): IsRandomMac is in the UPDATE-branch
+    /// exclusion list of <c>UpsertCycleAsync</c> — only this method may write the column post-INSERT.
+    /// </summary>
+    Task SetIsRandomMacAsync(string macAddress, bool isRandomMac, CancellationToken ct = default);
+
+    /// <summary>
     /// Phase 8 Plan 08-07 D-06 — read-only enumeration of every distinct <see cref="WLANStation.MacAddress"/>
     /// currently in the database. Used by <c>EventDetectionService</c> exactly once on its first
     /// <c>PollNotifier.Cycled</c> event to seed the in-memory <c>HashSet&lt;string&gt;</c> of "known" MACs
