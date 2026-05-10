@@ -13,6 +13,23 @@ internal sealed class FakeSshSession(string fixtureDir) : ISshSession
 {
     public string FixtureDir { get; } = fixtureDir;
 
+    /// <summary>Plan 09-03 extension: every command passed to RunCommandAsync /
+    /// RunCommandWithExitCodeAsync is appended here. Used by SubnetSweepProbeTests +
+    /// the SC4 isolation test (Plan 09-05) to assert the issued command set.
+    /// Backward compatible — pre-09-03 consumers simply do not read this list.</summary>
+    public List<string> CommandsIssued { get; } = new();
+
+    /// <summary>Plan 09-03 extension: substring-keyed override map. When a command sent to
+    /// RunCommandAsync / RunCommandWithExitCodeAsync CONTAINS one of these keys, the value
+    /// is treated as the fixture-base name (the command is rewritten to that base before
+    /// the existing slug rule produces the .txt filename). This is the "Per-IP arping/ping
+    /// problem" workaround documented in 09-PATTERNS.md §"Per-IP arping/ping problem"
+    /// (lines 459-461) — the AP-side shell loop produces ONE long command string whose
+    /// slugified filename would not be predictable, so tests map e.g. "arping -c1 -w1" →
+    /// "arping" and the loop's output reads from arping.txt regardless of IP list.
+    /// Order of insertion matters when multiple keys could match — first match wins.</summary>
+    public Dictionary<string, string> CommandOverrides { get; } = new(StringComparer.Ordinal);
+
     /// <summary>Set this to a factory returning ANY Exception to throw on Connect — simulates D-03 (HostKeyMismatchException) AND auth-failed paths (SshAuthenticationException, etc.). Broadened in Plan 02-02 per W4.</summary>
     public Func<Exception>? ThrowOnConnect { get; set; }
 
@@ -39,16 +56,35 @@ internal sealed class FakeSshSession(string fixtureDir) : ISshSession
         if (expectedFingerprint is null) onHostKeyAccepted?.Invoke(CapturedFingerprintToReport);
     }
 
-    public Task<string> RunCommandAsync(string command, CancellationToken ct) =>
-        Task.FromResult(LoadFixture(command));
+    public Task<string> RunCommandAsync(string command, CancellationToken ct)
+    {
+        CommandsIssued.Add(command);
+        var lookup = ResolveLookup(command);
+        return Task.FromResult(LoadFixture(lookup));
+    }
 
     public Task<(int ExitCode, string StdOut, string StdErr)> RunCommandWithExitCodeAsync(string command, CancellationToken ct)
     {
-        var name = ToFilename(command);
-        var stdout = LoadFixture(command);
+        CommandsIssued.Add(command);
+        var lookup = ResolveLookup(command);
+        var name = ToFilename(lookup);
+        var stdout = LoadFixture(lookup);
         var exitFile = Path.Combine(FixtureDir, name + ".exit");
         var exit = File.Exists(exitFile) ? int.Parse(File.ReadAllText(exitFile).Trim()) : 0;
         return Task.FromResult((exit, stdout, ""));
+    }
+
+    /// <summary>If <paramref name="command"/> contains any registered override key, return that
+    /// override value (used as the fixture-base lookup name); otherwise return the command verbatim
+    /// (preserving the pre-09-03 fixture-lookup-by-slugified-command behavior).</summary>
+    private string ResolveLookup(string command)
+    {
+        foreach (var kv in CommandOverrides)
+        {
+            if (command.Contains(kv.Key, StringComparison.Ordinal))
+                return kv.Value;
+        }
+        return command;
     }
 
     public async ValueTask DisposeAsync()
