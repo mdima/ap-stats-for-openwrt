@@ -11,6 +11,8 @@ using OpenWrtApStats.Services.Polling.Ssh;
 using OpenWrtApStats.Services.Settings;
 using Serilog;
 using Serilog.Formatting.Compact;
+using System.Net;
+using System.Net.Sockets;
 
 // 1. Bootstrap logger — captures startup exceptions before host is built (RESEARCH Pattern 4).
 Log.Logger = new LoggerConfiguration()
@@ -197,7 +199,37 @@ try
                 var dnsLocal = new OpenWrtApStats.Services.Polling.ReverseDnsProbe(session,
                     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<OpenWrtApStats.Services.Polling.ReverseDnsProbe>>());
 
-                var sweepRes = await sweepLocal.PollAsync(node, peerIp, ct);
+                // QUICK 260510-kjt: SubnetSweepProbe's T-09-03-05 defense-in-depth gate
+                // (IPAddress.TryParse) refuses to sweep when peerIp is a DNS name. The orchestrator
+                // hands us node.Hostname per its line-215 contract ("factory is responsible for
+                // resolving"); honor that contract HERE, after ConnectAsync proves reachability.
+                //
+                //   - peerIp is already a literal IPv4 -> pass through (no extra DNS round-trip).
+                //   - peerIp is a DNS name resolving to >=1 A record -> use the first IPv4.
+                //   - DNS lookup throws (NXDOMAIN, refused, etc.) -> pass the raw hostname through;
+                //     the probe's existing warning will fire and the failure stays explicit.
+                string resolvedPeerIp = peerIp;
+                if (!IPAddress.TryParse(peerIp, out _))
+                {
+                    try
+                    {
+                        var addrs = await Dns.GetHostAddressesAsync(peerIp, AddressFamily.InterNetwork, ct);
+                        if (addrs.Length > 0)
+                        {
+                            resolvedPeerIp = addrs[0].ToString();    // canonical dotted-quad — always passes IPAddress.TryParse
+                        }
+                    }
+                    catch (SocketException ex)
+                    {
+                        log.LogWarning(ex,
+                            "Node {Hostname} (Id={NodeId}): DNS resolution of peerIp '{PeerIp}' failed; sweep will refuse and emit invalid-peer-ip.",
+                            node.Hostname, node.Id, peerIp);
+                        // resolvedPeerIp stays = peerIp (the raw hostname) — preserves the explicit
+                        // SubnetSweepProbe Failed("invalid-peer-ip") signal rather than masking it.
+                    }
+                }
+
+                var sweepRes = await sweepLocal.PollAsync(node, resolvedPeerIp, ct);
                 var sweepMap = sweepRes is OpenWrtApStats.Services.Polling.SubnetSweepProbeResult.Success ss
                     ? ss.MacToIp
                     : (IReadOnlyDictionary<string, string>)new Dictionary<string, string>(StringComparer.Ordinal);
