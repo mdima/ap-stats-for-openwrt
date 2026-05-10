@@ -126,6 +126,12 @@ try
     builder.Services.AddSingleton<OpenWrtApStats.Services.EventDetectionService>();
     builder.Services.AddSingleton<PollOrchestrator>();
     builder.Services.AddTransient<ISshSession, RealSshSession>();
+    // Phase 9 — Subnet sweep + reverse DNS probes (purely additive surface; orchestrator does NOT
+    // invoke them in Phase 9 per SC4 isolation guarantee. Phase 10 wires the orchestrator call site).
+    // SC4 validation: PollOrchestratorPhase9IsolationTests asserts RunCycleAsync issues only the
+    // v0.9 command set on the existing poll path — no Phase-9-new commands leak in.
+    builder.Services.AddTransient<SubnetSweepProbe>();
+    builder.Services.AddTransient<ReverseDnsProbe>();
     // NodePoller is INTENTIONALLY NOT in the DI container. Its primary-ctor takes
     // a runtime WiFiNode positional arg that is not a DI service; registering it
     // would cause WebApplicationBuilder's eager service-provider validation
