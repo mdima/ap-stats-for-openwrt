@@ -33,4 +33,24 @@ public class WiFiNode
     /// </summary>
     [MaxLength(256)]
     public string? HostKeyFingerprint { get; set; }
+
+    /// <summary>
+    /// Optional CIDR list governing the active subnet sweep (Phase 9 ENRICH-06 / SCHEMA-01).
+    /// Null means "auto-derive a /24 around the LAN interface that owns the SSH-peer route" per
+    /// Phase 9 D-04. Format: comma-separated CIDRs (e.g., "192.168.1.0/24,10.0.0.0/24") per the
+    /// PATTERNS.md Claude's-discretion lock. Phase 10 SET-03 surfaces editing.
+    /// </summary>
+    public string? SubnetScanRanges { get; set; }
+
+    /// <summary>
+    /// Phase 9 SCHEMA-02. Default true — when false the node skips the active sweep entirely
+    /// (Phase 10 SET-04 surfaces the toggle).
+    /// </summary>
+    public bool SubnetScanEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Phase 9 SCHEMA-03. Auto-updated by the orchestrator (Phase 10 ORCH-07); null until the
+    /// first refresh tick fires successfully on this node.
+    /// </summary>
+    public DateTimeOffset? LastEnrichmentRefreshAt { get; set; }
 }
