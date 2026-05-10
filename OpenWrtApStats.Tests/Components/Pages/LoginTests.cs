@@ -22,9 +22,12 @@ public sealed class LoginTests
         public int PollingIntervalSeconds => 30;
         public bool WizardDismissed => false;
         public int RefreshIntervalSeconds => 3600;
+        public IReadOnlyList<string> LocalDomainSuffixes { get; } = Array.Empty<string>();
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default) { UIPasswordHash = hash; return Task.CompletedTask; }
         public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetRefreshIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default) => Task.CompletedTask;
         public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }

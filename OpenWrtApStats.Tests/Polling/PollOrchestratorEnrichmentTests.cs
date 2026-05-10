@@ -272,11 +272,14 @@ public sealed class PollOrchestratorEnrichmentTests(SqliteInMemoryFixture fixtur
         public string? UIPasswordHash         => null;
         public bool    WizardDismissed        => false;
         public int     RefreshIntervalSeconds => 3600;
+        public IReadOnlyList<string> LocalDomainSuffixes => Array.Empty<string>();
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
 
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetRefreshIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default) => Task.CompletedTask;
         public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 }
