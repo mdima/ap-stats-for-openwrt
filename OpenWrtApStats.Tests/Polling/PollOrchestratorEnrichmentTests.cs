@@ -300,6 +300,52 @@ public sealed class PollOrchestratorEnrichmentTests(SqliteInMemoryFixture fixtur
         Assert.Equal(-45, after.RSS);       // telemetry was updated normally
     }
 
+    [Fact]
+    public async Task EnrichmentFactory_Receives_NodeHostname_AsPeerIp_VerbatimFromOrchestrator()
+    {
+        // QUICK 260510-kjt regression: locks the upstream half of the
+        // SubnetSweepProbe-receives-DNS-hostname bug. The composition root
+        // (Program.cs enrichmentFactory) is responsible for hostname->IPv4
+        // resolution AFTER ConnectAsync, which depends on this contract:
+        // the orchestrator hands node.Hostname unchanged into the factory's
+        // third positional arg (peerIp). If this contract ever drifts, the
+        // composition-root resolution step has nothing to bind against.
+        var ct = TestContext.Current.CancellationToken;
+        var (nodeId, _, bssid) = await SeedNodeWithOneNetworkAsync(ct, lastEnrichmentRefreshAt: null);
+
+        // Override the seeded GUID hostname with an explicit DNS-style name
+        // (matches the operator-reported defect: "wifi-ap1", "wifi-ap2").
+        const string dnsHostname = "wifi-ap-test-quick260510kjt";
+        await using (var dbWrite = _fixture.CreateContext())
+        {
+            await dbWrite.WiFiNodes.Where(n => n.Id == nodeId)
+                .ExecuteUpdateAsync(u => u.SetProperty(n => n.Hostname, dnsHostname), ct);
+        }
+
+        string? capturedPeerIp = null;
+        Func<WiFiNode, IReadOnlyList<string>, string, CancellationToken, Task<EnrichmentDelta?>> capturingFactory =
+            (n, ips, peerIp, c) =>
+            {
+                capturedPeerIp = peerIp;
+                return Task.FromResult<EnrichmentDelta?>(new EnrichmentDelta(
+                    n.Id,
+                    new Dictionary<string, string>(StringComparer.Ordinal),
+                    new Dictionary<string, string?>(StringComparer.Ordinal)));
+            };
+
+        var mac = $"CA:01:02:03:04:{Random.Shared.Next(0, 255):X2}";
+        var orch = BuildOrchestrator(
+            ProbeForNode(nodeId, bssid,
+                new WLANStation { MacAddress = mac, Bssid = bssid, LastPollDate = DateTime.UtcNow }),
+            enrichmentFactory: capturingFactory);
+        await orch.RunCycleAsync(ct);
+
+        // Contract: orchestrator hands node.Hostname into the factory verbatim.
+        // The composition-root factory in Program.cs then performs DNS resolution
+        // (post-ConnectAsync) before invoking SubnetSweepProbe.PollAsync.
+        Assert.Equal(dnsHostname, capturedPeerIp);
+    }
+
     private sealed class FakeTimeProvider(DateTimeOffset fixedUtcNow) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => fixedUtcNow;
