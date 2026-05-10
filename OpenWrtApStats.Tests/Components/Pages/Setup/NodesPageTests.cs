@@ -78,6 +78,9 @@ public sealed class NodesPageTests
 
         public Task UpdateLastEnrichmentRefreshAtAsync(DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default)
             => Task.CompletedTask;
+
+        public Task UpdateScanSettingsAsync(int id, bool subnetScanEnabled, string? subnetScanRanges, CancellationToken ct = default)
+            => Task.CompletedTask;
     }
 
     private sealed class StubSettings : IAppSettingsService

@@ -54,6 +54,19 @@ public sealed class NodeRepo(IDbContextFactory<DatabaseContext> factory) : INode
                 .SetProperty(n => n.Username, username), ct);
     }
 
+    // Phase 10 SET-03 / SET-04 — per-node enrichment scan settings (D-09). Single-statement
+    // ExecuteUpdateAsync writing ONLY SubnetScanEnabled + SubnetScanRanges; never touches
+    // Password, HostKeyFingerprint, LastEnrichmentRefreshAt, Hostname, or Username (CR-02-safe).
+    public async Task UpdateScanSettingsAsync(int id, bool subnetScanEnabled, string? subnetScanRanges, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.WiFiNodes
+            .Where(n => n.Id == id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(n => n.SubnetScanEnabled, subnetScanEnabled)
+                .SetProperty(n => n.SubnetScanRanges, subnetScanRanges), ct);
+    }
+
     public async Task UpdatePasswordAsync(int id, string encryptedPassword, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);

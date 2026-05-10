@@ -72,5 +72,6 @@ public sealed class DbHealthCheckTests(SqliteInMemoryFixture sql) : IClassFixtur
         public Task UpdateOnlineAsync(DatabaseContext db, int nodeId, DateTime lastPoll, CancellationToken ct = default) => throw new NotImplementedException();
         public Task SetHostKeyFingerprintAsync(DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateLastEnrichmentRefreshAtAsync(DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateScanSettingsAsync(int id, bool subnetScanEnabled, string? subnetScanRanges, CancellationToken ct = default) => throw new NotImplementedException();
     }
 }
