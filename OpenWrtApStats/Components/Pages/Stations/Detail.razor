@@ -74,6 +74,20 @@ else
                         <dt class="col-sm-4">Signal</dt>
                         <dd class="col-sm-8"><RssiCell Rss="_station.RSS" /></dd>
 
+                        <dt class="col-sm-4">First seen</dt>
+                        <dd class="col-sm-8">
+                            @RelativeTime(_station.FirstSeen)
+                            @* v0.9.2 — mirrors the "Last seen" markup verbatim. /js/local-time.js
+                               rewrites the <time> textContent into the browser's local timezone via
+                               toLocaleString(). UTC ISO 8601 in the datetime attribute is the source
+                               of truth; the inner text is only the no-JS fallback so view-source
+                               still shows a reasonable value. *@
+                            <small class="text-body-secondary">
+                                (<time datetime="@(DateTime.SpecifyKind(_station.FirstSeen, DateTimeKind.Utc).ToString("o"))"
+                                       data-local-time>@DateTime.SpecifyKind(_station.FirstSeen, DateTimeKind.Utc).ToString("u")</time>)
+                            </small>
+                        </dd>
+
                         <dt class="col-sm-4">Last seen</dt>
                         <dd class="col-sm-8">
                             @RelativeTime(_station.LastPollDate)
