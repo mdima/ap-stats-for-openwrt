@@ -139,6 +139,72 @@ public sealed class SubnetSweepProbeTests
     }
 
     [Fact]
+    public async Task PollAsync_AutoDerivation_IssuesSshClientShapedRouteCommand_AndDerivesLanSubnetNotLoopback()
+    {
+        // Regression for debug session p10-trigger-and-nslookup fourth-order fix.
+        //
+        // Pre-fix code issued `ip route get {peerIp}` where peerIp is the SSH destination
+        // (the AP's own LAN IP after the factory's Dns.GetHostAddressesAsync resolution).
+        // On Linux/BusyBox, `ip route get <self-IP>` returns the loopback route
+        // (`local <ip> dev lo`), causing iface='lo' → `ip -4 addr show dev lo` →
+        // `127.0.0.1/8` → MaskToSlash24 → `127.0.0.0/24`, and arping swept loopback finding
+        // zero mappings every cycle.
+        //
+        // Post-fix: the issued command is `ip route get "${SSH_CLIENT%% *}"`. BusyBox
+        // parameter expansion resolves to the orchestrator's source IP (the SSH client),
+        // whose route necessarily traverses the LAN-facing interface — the correct subnet
+        // for the arping sweep.
+        //
+        // Genuine RED→GREEN flip: pre-fix, no issued command contains the literal substring
+        // `${SSH_CLIENT%% *}`. Post-fix, the route-get command does. Additionally, the
+        // derived /24 must be the LAN subnet (192.168.22.0/24) not loopback (127.0.0.0/24).
+        var ct = TestContext.Current.CancellationToken;
+        var fixtureDir = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT");
+        var session = new FakeSshSession(fixtureDir);
+        session.CommandOverrides["ip route get"] = "ip-route-get-ssh-client";
+        session.CommandOverrides["ip -4 addr show"] = "ip-4-addr-show-ssh-client";
+        session.CommandOverrides["arping -c1 -w1"] = "arping-ssh-client";
+
+        // Route lookup for the SSH client IP (the orchestrator host on 192.168.22.50)
+        // traverses br-lan. This matches what a real BusyBox kernel would return when
+        // queried with the LAN-side client IP — distinct from the loopback shape that
+        // would be returned for the AP's own self-IP.
+        File.WriteAllText(Path.Combine(fixtureDir, "ip-route-get-ssh-client.txt"),
+            "192.168.22.50 via 192.168.22.50 dev br-lan src 192.168.22.2 uid 0 \n    cache");
+        File.WriteAllText(Path.Combine(fixtureDir, "ip-4-addr-show-ssh-client.txt"),
+            "3: br-lan: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 \n" +
+            "    inet 192.168.22.2/24 brd 192.168.22.255 scope global br-lan");
+        File.WriteAllText(Path.Combine(fixtureDir, "arping-ssh-client.txt"),
+            "ARPING 192.168.22.39 from 192.168.22.2 br-lan\n" +
+            "Unicast reply from 192.168.22.39 [AA:BB:CC:DD:EE:39] 1.234ms\n");
+
+        var probe = new SubnetSweepProbe(session, NullLogger<SubnetSweepProbe>.Instance);
+        // peerIp here mirrors the production wiring: the orchestrator passes the AP's
+        // resolved IP (the SSH destination). The T-09-03-05 defense-in-depth check at
+        // PollAsync entry still validates that peerIp is a parseable IPv4, but the value
+        // is no longer interpolated into the shell command construction.
+        var node = MakeNode(ranges: null);
+        var result = await probe.PollAsync(node, peerIp: "192.168.22.2", ct);
+
+        Assert.IsType<SubnetSweepProbeResult.Success>(result);
+
+        // Decisive RED→GREEN assertion 1: the issued route-get command must reference
+        // SSH_CLIENT via BusyBox parameter expansion, NOT the literal peerIp.
+        Assert.Contains(session.CommandsIssued,
+            c => c.Contains("${SSH_CLIENT%% *}", StringComparison.Ordinal));
+        Assert.DoesNotContain(session.CommandsIssued,
+            c => c == "ip route get 192.168.22.2");
+
+        // Decisive RED→GREEN assertion 2: the derived /24 (visible via the arping loop's
+        // IP list, since the auto-derivation feeds SubnetDeriver.ExpandCidr) must be the
+        // LAN subnet, NOT loopback.
+        Assert.Contains(session.CommandsIssued,
+            c => c.Contains("arping -c1 -w1") && c.Contains("192.168.22."));
+        Assert.DoesNotContain(session.CommandsIssued,
+            c => c.Contains("arping -c1 -w1") && c.Contains("127.0.0."));
+    }
+
+    [Fact]
     public async Task PollAsync_ArpingAbsent_FallsBackToPing_DoesNotIssueArpingLoop()
     {
         var ct = TestContext.Current.CancellationToken;
