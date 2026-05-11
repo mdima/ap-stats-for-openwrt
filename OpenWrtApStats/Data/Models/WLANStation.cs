@@ -71,4 +71,15 @@ public class WLANStation
     /// the SQL level. User-toggleable from station detail page (Phase 10 DASH-22).
     /// </summary>
     public bool IsRandomMac { get; set; }
+
+    /// <summary>
+    /// v0.9.2 — UTC timestamp of the first cycle in which this MAC was observed by the
+    /// dashboard. INSERT-only: <see cref="OpenWrtApStats.Data.Repositories.StationRepo.UpsertCycleAsync(OpenWrtApStats.Data.DatabaseContext, System.Collections.Generic.IEnumerable{WLANStation}, System.Threading.CancellationToken)"/>
+    /// sets <c>probe.FirstSeen = probe.LastPollDate</c> on the INSERT branch and leaves
+    /// <c>existingRow.FirstSeen</c> untouched on the UPDATE branch. Joins the existing
+    /// preserved-on-update list alongside <see cref="Name"/> and <see cref="IsRandomMac"/>
+    /// (ORCH-02 convention). Migration backfills pre-existing rows from
+    /// <see cref="LastPollDate"/> (best lower bound) so no <c>0001-01-01</c> rows remain.
+    /// </summary>
+    public DateTime FirstSeen { get; set; }
 }
