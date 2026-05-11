@@ -215,7 +215,35 @@ public sealed class Phase10AcceptanceSignalTests(SqliteInMemoryFixture fixture, 
 
         public Task<string> RunCommandAsync(string command, CancellationToken ct)
         {
-            // nslookup branch: `nslookup <ip>` — single-IP per call (ReverseDnsProbe iterates).
+            // Quick task 260511-lct (2026-05-11): ReverseDnsProbe now issues ONE batched shell
+            // command of the shape `(echo "==<ip>=="; nslookup -timeout=1 -retry=1 <ip> 2>&1) & ...`
+            // per probe invocation. Detect by the literal `nslookup -timeout=1 -retry=1` token
+            // (present once per IP in the batched body), extract IPs from the `==<ip>==`
+            // sentinels in the command body, and synthesize the sentinel-delimited stdout that
+            // ParseBatchedNslookupOutput expects.
+            if (command.Contains("nslookup -timeout=1 -retry=1", StringComparison.Ordinal))
+            {
+                var sb = new System.Text.StringBuilder();
+                var matches = System.Text.RegularExpressions.Regex.Matches(
+                    command, @"==(?<ip>[\d.]+)==");
+                foreach (System.Text.RegularExpressions.Match m in matches)
+                {
+                    var ip = m.Groups["ip"].Value;
+                    sb.Append("==").Append(ip).Append("==\n");
+                    if (hostsByIp.TryGetValue(ip, out var hostname) && hostname is not null)
+                    {
+                        sb.Append($"Server: 127.0.0.1\nAddress: 127.0.0.1#53\n\nName:\t{hostname}\nAddress: {ip}\n");
+                    }
+                    else
+                    {
+                        sb.Append($"** server can't find {ip}: NXDOMAIN\n");
+                    }
+                }
+                return Task.FromResult(sb.ToString());
+            }
+
+            // Legacy nslookup branch (kept for symmetry; the production probe no longer issues
+            // single-IP `nslookup <ip>` commands as of 260511-lct, but other tests may stub).
             if (command.StartsWith("nslookup ", StringComparison.Ordinal))
             {
                 var ip = command["nslookup ".Length..].Trim();
@@ -223,7 +251,6 @@ public sealed class Phase10AcceptanceSignalTests(SqliteInMemoryFixture fixture, 
                 {
                     return Task.FromResult($"Server: 127.0.0.1\nAddress: 127.0.0.1#53\n\nName:\t{hostname}\nAddress: {ip}\n");
                 }
-                // NXDOMAIN — ParseNslookupOutput collapses this to null.
                 return Task.FromResult($"** server can't find {ip}: NXDOMAIN\n");
             }
 
