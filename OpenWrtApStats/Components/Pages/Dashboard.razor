@@ -347,9 +347,22 @@ else
         var rows = new List<DashboardRow>(stations.Count);
         foreach (var s in stations)
         {
-            if (s.WiFiNetworkId is not int netId) continue;
-            if (!networkLookup.TryGetValue(netId, out var net)) continue;
-            if (!net.Enabled) continue;
+            // Quick task 260511-osd: orphan stations (FK-nulled by WiFiNetwork cascade-SetNull
+            // after BSSID rotation / AP outage) used to be silently filtered out here. They now
+            // render with "—" placeholders so operators see cameras / IoT devices that connected
+            // briefly then powered off. Disabled-WLAN exclusion is preserved verbatim.
+            string ssid = "—";
+            string apHostname = "—";
+            int apNodeId = 0;
+
+            if (s.WiFiNetworkId is int netId
+                && networkLookup.TryGetValue(netId, out var net))
+            {
+                if (!net.Enabled) continue;
+                ssid = net.Ssid;
+                apHostname = net.ApHostname;
+                apNodeId = net.ApNodeId;
+            }
 
             rows.Add(new DashboardRow(
                 Name: s.Name,
@@ -357,9 +370,9 @@ else
                 Mac: s.MacAddress,
                 Vendor: Oui.GetVendor(s.MacAddress),
                 Ip: s.IPAddress,
-                Ssid: net.Ssid,
-                ApHostname: net.ApHostname,
-                ApNodeId: net.ApNodeId,
+                Ssid: ssid,
+                ApHostname: apHostname,
+                ApNodeId: apNodeId,
                 Rss: s.RSS,
                 LastSeen: s.LastPollDate,
                 StationStatus: s.Status,
