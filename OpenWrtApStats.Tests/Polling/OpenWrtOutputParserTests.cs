@@ -474,4 +474,35 @@ public sealed class OpenWrtOutputParserTests
         var fqdn = OpenWrtOutputParser.ParseNslookupOutput(raw, NullLogger.Instance);
         Assert.Null(fqdn);
     }
+
+    // Phase 10 HUMAN-UAT regression lock (debug session p10-trigger-and-nslookup):
+    // operator-captured BusyBox reverse-PTR output from a real OpenWrt 23.05-SNAPSHOT AP
+    // resolving against a dnsmasq upstream. Two fixture shapes pinned here:
+    //   - nslookup-reverse-ptr-success.txt  — BIND-style answer line, NO trailing dot on FQDN,
+    //                                          6 ASCII spaces between `arpa` and `name`.
+    //   - nslookup-reverse-ptr-nxdomain.txt — `** server can't find …: NXDOMAIN`.
+    // These tests GREEN-LOCK current parser behavior on the operator's exact bytes; they are
+    // NOT a RED→GREEN bug-flip. A previous spawn prompt hypothesized the parser required a
+    // trailing dot on the FQDN — empirical replay of the operator's captured bytes through
+    // ParseNslookupOutput FALSIFIED that hypothesis (Normalize strips the dot only when present,
+    // so absence is a no-op pass-through). These fixtures cover the BIND PTR branch at
+    // OpenWrtOutputParser.cs:430-436 with real-world bytes instead of the previously-untested
+    // synthesized-placeholder shape.
+    [Fact]
+    public void ParseNslookupOutput_OperatorCapturedReversePtr_Success_ReturnsFqdn()
+    {
+        var path = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT", "nslookup-reverse-ptr-success.txt");
+        var raw = File.ReadAllText(path);
+        var fqdn = OpenWrtOutputParser.ParseNslookupOutput(raw, NullLogger.Instance);
+        Assert.Equal("esp_50df65.michelecasa", fqdn);
+    }
+
+    [Fact]
+    public void ParseNslookupOutput_OperatorCapturedReversePtr_Nxdomain_ReturnsNull()
+    {
+        var path = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT", "nslookup-reverse-ptr-nxdomain.txt");
+        var raw = File.ReadAllText(path);
+        var fqdn = OpenWrtOutputParser.ParseNslookupOutput(raw, NullLogger.Instance);
+        Assert.Null(fqdn);
+    }
 }

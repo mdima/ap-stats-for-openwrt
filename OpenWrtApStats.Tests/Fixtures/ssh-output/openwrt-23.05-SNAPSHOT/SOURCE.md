@@ -140,3 +140,46 @@ phase9_04_ips_used: 192.168.1.1 (synthesized resolver), 192.168.1.42 (synthesize
 phase9_04_theory_row_status: |
   After Plan 09-04 lands this file, OpenWrtOutputParserTests.ParseNslookupOutput_AcrossAllSupportedVersions_*
   AND ReverseDnsProbeTests.PollAsync_AcrossAllSupportedVersions_* flip from SKIP to PASS for this version slot.
+
+---
+
+## Phase 10 HUMAN-UAT capture (debug session p10-trigger-and-nslookup)
+
+phase10_uat_provenance: live-capture (operator-pasted from real AP shell)
+phase10_uat_captured: 2026-05-11
+phase10_uat_captured_by: operator (hostname `WIFI-AP1`, real OpenWrt 23.05-SNAPSHOT deployment)
+phase10_uat_capture_source: C:\Temp\probe-captures\nslookup-reverse-from-wifi-ap1.txt
+phase10_uat_files_added:
+  - nslookup-reverse-ptr-success.txt    (BusyBox reverse-PTR shape — `nslookup 192.168.22.39` against a static-DHCP-lease ESP device that has a PTR record published by dnsmasq; FQDN `esp_50df65.michelecasa` with NO trailing dot, 6 ASCII spaces between `in-addr.arpa` and `name = `)
+  - nslookup-reverse-ptr-nxdomain.txt   (BusyBox reverse-PTR NXDOMAIN — `nslookup 192.168.22.69` against a dynamic-DHCP client with no PTR record; literal `** server can't find …: NXDOMAIN`)
+phase10_uat_redactions: |
+  - Shell prompt lines (`root@WIFI-AP1:~# nslookup 192.168.22.{39,69}`) stripped to match the
+    no-prompt convention of the other fixtures in this folder (nslookup.txt et al.).
+  - All other bytes preserved verbatim from the operator paste, including:
+      - exact whitespace counts (`Server:` + 9 spaces + `192.168.22.2`; `Address:` + 8 spaces + `192.168.22.2:53`)
+      - 6 ASCII spaces between `arpa` and `name` on the BIND answer line
+      - no trailing dot on the FQDN (operator's dnsmasq emits dotless PTR responses)
+      - LF line terminators throughout, single trailing LF
+  - No MAC redaction needed (no MACs in nslookup output).
+  - No IP redaction needed — all addresses are RFC-1918 192.168.22.0/24 per existing policy.
+  - Hostname `esp_50df65.michelecasa` is the operator's own home-LAN ESP device naming
+    convention (a public, broadcast-class identifier within their local network); kept verbatim.
+phase10_uat_what_it_exercises: |
+  These fixtures close the coverage gap on OpenWrtOutputParser.ParseNslookupOutput's BIND PTR
+  branch (OpenWrtOutputParser.cs:430-436). Pre-Phase-10, that branch was covered only by the
+  synthesized `nslookup-mixed-nxdomain.txt` fixture (which used the IndexOf("name = ") path
+  with synthetic data). Real-world BusyBox PTR output from a dnsmasq upstream differs in:
+    (a) optional trailing dot — operator's dnsmasq omits it; parser's Normalize() handles
+        both cases via `if (fqdn.EndsWith('.')) fqdn = fqdn[..^1]`.
+    (b) whitespace variance between `arpa` and `name = ` (6 spaces here vs synthesized 1 space) —
+        parser uses IndexOf() so this is whitespace-tolerant by construction.
+  Tests `ParseNslookupOutput_OperatorCapturedReversePtr_{Success,Nxdomain}_*` in
+  OpenWrtOutputParserTests.cs GREEN-LOCK these shapes. They are regression-protection tests:
+  any future parser change that drops support for either shape will fail CI.
+phase10_uat_followup: |
+  Bug 2 ("0/41 hostnames in production despite working sweep") root cause remains under
+  investigation as of fixture commit. See `.planning/debug/p10-trigger-and-nslookup.md` and
+  the new LogInformation observability line in ReverseDnsProbe.cs (Phase 10 same-commit pair).
+  Next operator step: restart `OpenWrtApStats.exe`, capture one poll cycle's logs, share for
+  analysis. The new log line will discriminate among three residual hypotheses (see debug
+  session file).

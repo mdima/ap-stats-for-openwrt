@@ -1,0 +1,5 @@
+Server:         192.168.22.2
+Address:        192.168.22.2:53
+
+Non-authoritative answer:
+39.22.168.192.in-addr.arpa      name = esp_50df65.michelecasa
