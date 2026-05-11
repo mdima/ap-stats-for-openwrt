@@ -127,77 +127,47 @@ public sealed class PollOrchestrator(
             var enrichmentNow = timeProvider.GetUtcNow();
             var refreshIntervalSeconds = settings.RefreshIntervalSeconds;
 
-            // Fast-path: skip the entire enrichment fetch when NO node's interval has expired AND
-            // none have a null LastEnrichmentRefreshAt. The newMacDetectedThisCycle path still
-            // requires the MAC fetch, so we only skip when the interval-based path is also clear
-            // for every success-result node — in that case the only remaining trigger is new-MAC
-            // detection, which we then check with a cheap MAC-only query.
+            // Always full-fetch MACs + IP/Hostname projection for every success node.
+            //
+            // Debug session p10-trigger-and-nslookup (Bug 2): an earlier "fast-path" branch
+            // skipped this query when no node's time-based interval was eligible, falling back
+            // to a cheap MAC-only projection with an EMPTY existingStationsByNode per node. When
+            // the new-MAC arm later fired the trigger inside that same cycle (a perfectly valid
+            // path — newMacDetected does NOT require the time-based arm to also be eligible),
+            // the ipsForDns "existing-stations" branch below (line ~248-254) iterated an empty
+            // list. Combined with iwinfo never reporting IPAddress on r.Stations, ipsForDns
+            // ended up empty, ReverseDnsProbe early-returned with an empty result map, and
+            // every post-cold-start cycle silently lost hostname enrichment. The cost saved
+            // (~4 columns × <100 rows per cycle = a few hundred bytes per cycle) was a bad
+            // trade against silent enrichment loss.
             var successNodes = results.OfType<NodeProbeResult.Success>().ToList();
-            var anyTimeBasedTriggerEligible = successNodes.Any(r =>
+            var successNodeIds = successNodes.Select(r => r.NodeId).ToHashSet();
+            var allExistingForCycle = successNodeIds.Count == 0
+                ? new List<(int WiFiNodeId, string MacAddress, string? IPAddress, string? Hostname)>()
+                : (await db.WLANStations.AsNoTracking()
+                    .Where(s => s.Network != null && successNodeIds.Contains(s.Network.WiFiNodeId))
+                    .Select(s => new
+                    {
+                        WiFiNodeId = s.Network!.WiFiNodeId,
+                        s.MacAddress,
+                        s.IPAddress,
+                        s.Hostname
+                    })
+                    .ToListAsync(ct))
+                    .Select(x => (x.WiFiNodeId, x.MacAddress, x.IPAddress, x.Hostname))
+                    .ToList();
+
+            var existingMacsByNode = allExistingForCycle
+                .GroupBy(x => x.WiFiNodeId)
+                .ToDictionary(g => g.Key, g => new HashSet<string>(g.Select(x => x.MacAddress), StringComparer.Ordinal));
+            var existingStationsByNode = allExistingForCycle
+                .GroupBy(x => x.WiFiNodeId)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            foreach (var nid in successNodeIds)
             {
-                var node = nodes.First(n => n.Id == r.NodeId);
-                if (!node.SubnetScanEnabled) return false;
-                if (node.LastEnrichmentRefreshAt is null) return true;
-                return (enrichmentNow - node.LastEnrichmentRefreshAt.Value).TotalSeconds > refreshIntervalSeconds;
-            });
-
-            Dictionary<int, HashSet<string>> existingMacsByNode;
-            Dictionary<int, List<(int WiFiNodeId, string MacAddress, string? IPAddress, string? Hostname)>> existingStationsByNode;
-
-            if (!anyTimeBasedTriggerEligible)
-            {
-                // Cheap MAC-only query — skips the wider stations projection. We still need MACs
-                // to evaluate newMacDetectedThisCycle.
-                var successNodeIdsLite = successNodes.Select(r => r.NodeId).ToHashSet();
-                var macsOnly = successNodeIdsLite.Count == 0
-                    ? new List<(int WiFiNodeId, string MacAddress)>()
-                    : (await db.WLANStations.AsNoTracking()
-                        .Where(s => s.Network != null && successNodeIdsLite.Contains(s.Network.WiFiNodeId))
-                        .Select(s => new { WiFiNodeId = s.Network!.WiFiNodeId, s.MacAddress })
-                        .ToListAsync(ct))
-                        .Select(x => (x.WiFiNodeId, x.MacAddress))
-                        .ToList();
-                existingMacsByNode = macsOnly
-                    .GroupBy(x => x.WiFiNodeId)
-                    .ToDictionary(g => g.Key, g => new HashSet<string>(g.Select(x => x.MacAddress), StringComparer.Ordinal));
-                existingStationsByNode = new Dictionary<int, List<(int, string, string?, string?)>>();
-                foreach (var nid in successNodeIdsLite)
-                {
-                    if (!existingMacsByNode.ContainsKey(nid)) existingMacsByNode[nid] = new HashSet<string>(StringComparer.Ordinal);
-                    existingStationsByNode[nid] = new List<(int, string, string?, string?)>();
-                }
-            }
-            else
-            {
-                // Full fetch: MACs + IP/Hostname projection for every success node.
-                var successNodeIds = successNodes.Select(r => r.NodeId).ToHashSet();
-                var allExistingForCycle = successNodeIds.Count == 0
-                    ? new List<(int WiFiNodeId, string MacAddress, string? IPAddress, string? Hostname)>()
-                    : (await db.WLANStations.AsNoTracking()
-                        .Where(s => s.Network != null && successNodeIds.Contains(s.Network.WiFiNodeId))
-                        .Select(s => new
-                        {
-                            WiFiNodeId = s.Network!.WiFiNodeId,
-                            s.MacAddress,
-                            s.IPAddress,
-                            s.Hostname
-                        })
-                        .ToListAsync(ct))
-                        .Select(x => (x.WiFiNodeId, x.MacAddress, x.IPAddress, x.Hostname))
-                        .ToList();
-
-                existingMacsByNode = allExistingForCycle
-                    .GroupBy(x => x.WiFiNodeId)
-                    .ToDictionary(g => g.Key, g => new HashSet<string>(g.Select(x => x.MacAddress), StringComparer.Ordinal));
-                existingStationsByNode = allExistingForCycle
-                    .GroupBy(x => x.WiFiNodeId)
-                    .ToDictionary(g => g.Key, g => g.ToList());
-
-                foreach (var nid in successNodeIds)
-                {
-                    if (!existingMacsByNode.ContainsKey(nid)) existingMacsByNode[nid] = new HashSet<string>(StringComparer.Ordinal);
-                    if (!existingStationsByNode.ContainsKey(nid)) existingStationsByNode[nid] = new List<(int, string, string?, string?)>();
-                }
+                if (!existingMacsByNode.ContainsKey(nid)) existingMacsByNode[nid] = new HashSet<string>(StringComparer.Ordinal);
+                if (!existingStationsByNode.ContainsKey(nid)) existingStationsByNode[nid] = new List<(int, string, string?, string?)>();
             }
 
             foreach (var r in results.OfType<NodeProbeResult.Success>())
