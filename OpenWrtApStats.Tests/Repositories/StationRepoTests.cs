@@ -294,6 +294,58 @@ public sealed class StationRepoTests(SqliteInMemoryFixture fixture) : IClassFixt
         Assert.True((await repo.GetByMacAsync(mac, ct))!.IsRandomMac);
     }
 
+    // ── v0.9.2 — FirstSeen INSERT-only / preserved-on-update ──
+
+    [Fact]
+    public async Task UpsertCycleAsync_InsertsNewStation_SetsFirstSeenEqualToLastPollDate()
+    {
+        // v0.9.2 — INSERT branch must stamp FirstSeen = LastPollDate atomically.
+        var ct = TestContext.Current.CancellationToken;
+        var (_, net1Id, _) = await SeedNodeWithTwoNetworksAsync(ct);
+        var repo = CreateRepo();
+        var mac = $"AA:BB:CC:DD:EE:{Random.Shared.Next(0, 256):X2}";
+        var cycleTs = new DateTime(2026, 5, 11, 9, 0, 0, DateTimeKind.Utc);
+        var probe = MakeStation(mac, net1Id);
+        probe.LastPollDate = cycleTs;
+        probe.FirstSeen = default;   // simulate orchestrator handoff (FirstSeen not pre-populated)
+
+        await repo.UpsertCycleAsync(new[] { probe }, ct);
+
+        await using var db = _fixture.CreateContext();
+        var saved = await db.WLANStations.AsNoTracking().SingleAsync(s => s.MacAddress == mac, ct);
+        Assert.Equal(cycleTs, DateTime.SpecifyKind(saved.FirstSeen, DateTimeKind.Utc));
+        Assert.Equal(
+            DateTime.SpecifyKind(saved.LastPollDate, DateTimeKind.Utc),
+            DateTime.SpecifyKind(saved.FirstSeen, DateTimeKind.Utc));
+    }
+
+    [Fact]
+    public async Task UpsertCycleAsync_UpsertsExistingStation_PreservesFirstSeenAndAdvancesLastPollDate()
+    {
+        // v0.9.2 — UPDATE branch must leave FirstSeen untouched while LastPollDate advances.
+        var ct = TestContext.Current.CancellationToken;
+        var (_, net1Id, net2Id) = await SeedNodeWithTwoNetworksAsync(ct);
+        var repo = CreateRepo();
+        var mac = $"AA:BB:CC:DD:EE:{Random.Shared.Next(0, 256):X2}";
+        var firstCycle = new DateTime(2026, 5, 11, 9, 0, 0, DateTimeKind.Utc);
+        var laterCycle = firstCycle.AddMinutes(30);
+
+        var firstProbe = MakeStation(mac, net1Id);
+        firstProbe.LastPollDate = firstCycle;
+        firstProbe.FirstSeen = default;
+        await repo.UpsertCycleAsync(new[] { firstProbe }, ct);
+
+        var laterProbe = MakeStation(mac, net2Id);
+        laterProbe.LastPollDate = laterCycle;
+        laterProbe.FirstSeen = default;   // orchestrator does not pre-populate on the UPDATE path
+        await repo.UpsertCycleAsync(new[] { laterProbe }, ct);
+
+        await using var db = _fixture.CreateContext();
+        var saved = await db.WLANStations.AsNoTracking().SingleAsync(s => s.MacAddress == mac, ct);
+        Assert.Equal(firstCycle, DateTime.SpecifyKind(saved.FirstSeen, DateTimeKind.Utc));
+        Assert.Equal(laterCycle, DateTime.SpecifyKind(saved.LastPollDate, DateTimeKind.Utc));
+    }
+
     [Fact]
     public async Task UpsertCycleAsync_CR01_DifferentMacCases_TreatedAsDistinctRows()
     {

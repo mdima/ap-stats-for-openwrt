@@ -496,6 +496,45 @@ public sealed class DetailTests
         }
     }
 
+    // ── v0.9.2 — "First seen" row appears above "Last seen" with correct UTC datetime attrs ──
+
+    [Fact]
+    public void Render_Surfaces_FirstSeen_Above_LastSeen()
+    {
+        var (ctx, stations, _, _, _, _) = Build();
+        var firstSeen = new DateTime(2026, 1, 15, 12, 0, 0, DateTimeKind.Utc);
+        var lastSeen  = new DateTime(2026, 5, 11,  9, 0, 0, DateTimeKind.Utc);
+        var stn = MakeStation();
+        stn.FirstSeen = firstSeen;
+        stn.LastPollDate = lastSeen;
+        stations.Existing = stn;
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+
+            // Two <time data-local-time> elements rendered — one per row.
+            var times = cut.FindAll("time[data-local-time]");
+            Assert.Equal(2, times.Count);
+
+            // DOM order: First seen first, Last seen second.
+            Assert.Equal(
+                DateTime.SpecifyKind(firstSeen, DateTimeKind.Utc).ToString("o"),
+                times[0].GetAttribute("datetime"));
+            Assert.Equal(
+                DateTime.SpecifyKind(lastSeen, DateTimeKind.Utc).ToString("o"),
+                times[1].GetAttribute("datetime"));
+
+            // Label sanity check — "First seen" <dt> precedes "Last seen" <dt>.
+            var dts = cut.FindAll("dt").Select(e => e.TextContent.Trim()).ToList();
+            var firstIdx = dts.IndexOf("First seen");
+            var lastIdx = dts.IndexOf("Last seen");
+            Assert.True(
+                firstIdx >= 0 && lastIdx > firstIdx,
+                $"Expected 'First seen' dt to precede 'Last seen' dt; got order: {string.Join(", ", dts)}");
+        }
+    }
+
     [Fact]
     public void DeleteModal_Title_ContainsStationName()
     {
