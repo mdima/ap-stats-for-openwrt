@@ -234,12 +234,18 @@ try
                     ? ss.MacToIp
                     : (IReadOnlyDictionary<string, string>)new Dictionary<string, string>(StringComparer.Ordinal);
 
-                var dnsRes = await dnsLocal.PollAsync(node, ipsForReverseDns, ct);
-                var dnsMap = dnsRes is OpenWrtApStats.Services.Polling.ReverseDnsProbeResult.Success ds
-                    ? ds.IpToHostname
-                    : (IReadOnlyDictionary<string, string?>)new Dictionary<string, string?>(StringComparer.Ordinal);
+                // QUICK 260511-ma0: delete-then-rebid one-cycle hostname convergence. The
+                // sweep-then-DNS sequencing + dnsMap1 ∪ dnsMap2 merge is extracted to
+                // EnrichmentFactoryClosure.BuildMergedDnsMapAsync so the merge logic stays
+                // directly unit-testable without rebuilding the production DI graph. The
+                // helper runs ONE batched-nslookup SSH dispatch on steady-state cycles (no
+                // sweep-only IPs) and TWO on rebid cycles where sweep discovered an IP the
+                // orchestrator did not pre-supply in ipsForReverseDns. dnsMap2 wins on
+                // collisions; partial-failure preserves dnsMap1 verbatim (DB-as-cache).
+                var mergedDns = await OpenWrtApStats.Services.Polling.EnrichmentFactoryClosure
+                    .BuildMergedDnsMapAsync(dnsLocal, node, ipsForReverseDns, sweepMap, ct);
 
-                return new OpenWrtApStats.Services.Polling.EnrichmentDelta(node.Id, sweepMap, dnsMap);
+                return new OpenWrtApStats.Services.Polling.EnrichmentDelta(node.Id, sweepMap, mergedDns);
             }
             catch (Exception ex)
             {
