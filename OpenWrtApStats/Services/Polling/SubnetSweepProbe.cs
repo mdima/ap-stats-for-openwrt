@@ -44,6 +44,11 @@ public sealed class SubnetSweepProbe(ISshSession session, ILogger<SubnetSweepPro
 
         if (!node.SubnetScanEnabled)
         {
+            // Debug session p10-trigger-and-nslookup: distinguish "SubnetScanEnabled=false on this
+            // node" from "ran arping but no devices responded". Single line per probe invocation.
+            log.LogInformation(
+                "Subnet-sweep pass on node {Hostname} (Id={NodeId}): skipped (SubnetScanEnabled=false).",
+                node.Hostname, node.Id);
             return new SubnetSweepProbeResult.Success(node.Id,
                 new Dictionary<string, string>(StringComparer.Ordinal));
         }
@@ -57,6 +62,7 @@ public sealed class SubnetSweepProbe(ISshSession session, ILogger<SubnetSweepPro
             // Step 1: determine scan IPs (CIDR-list branch OR auto-derivation branch).
             IReadOnlyList<string> scanIps;
             string? iface = null;
+            string subnetDescription;
 
             if (!string.IsNullOrWhiteSpace(node.SubnetScanRanges))
             {
@@ -76,6 +82,7 @@ public sealed class SubnetSweepProbe(ISshSession session, ILogger<SubnetSweepPro
                     catch (ArgumentException ex) { log.LogWarning(ex, "Failed to expand CIDR '{Cidr}'.", cidr); }
                 }
                 scanIps = hosts;
+                subnetDescription = string.Join(",", cidrs);
                 // iface stays null — let the AP route picker decide on -I omission.
             }
             else
@@ -111,10 +118,16 @@ public sealed class SubnetSweepProbe(ISshSession session, ILogger<SubnetSweepPro
                 }
                 var derived = SubnetDeriver.MaskToSlash24(ipv4);
                 scanIps = SubnetDeriver.ExpandCidr(derived, log);
+                subnetDescription = derived;
             }
 
             if (scanIps.Count == 0)
             {
+                // Debug session p10-trigger-and-nslookup: distinguish "expanded to empty" from
+                // "ran arping but no devices responded" (the latter is the line-133 main path).
+                log.LogInformation(
+                    "Subnet-sweep pass on node {Hostname} (Id={NodeId}): returned 0 MAC→IP mappings — subnet {Subnet} expanded to 0 hosts; investigate.",
+                    node.Hostname, node.Id, subnetDescription);
                 return new SubnetSweepProbeResult.Success(node.Id,
                     new Dictionary<string, string>(StringComparer.Ordinal));
             }
@@ -130,6 +143,16 @@ public sealed class SubnetSweepProbe(ISshSession session, ILogger<SubnetSweepPro
             // Step 4: run the loop, parse the interleaved stdout, return.
             var raw = await session.RunCommandAsync(loopCmd, sct);
             var macToIp = OpenWrtOutputParser.ParseArpingPingOutput(raw, log);
+
+            // Debug session p10-trigger-and-nslookup: per-cycle resolution summary at probe
+            // boundary. Mirrors the ReverseDnsProbe.cs:86-89 pattern. One structured log line per
+            // probe invocation, NOT per IP probed. Discriminates among (a) ran arping with 0 hits
+            // (LAN devices silent / arping disabled / wrong iface), (b) ran arping with N hits
+            // (expected steady-state), and (c) Failed/skip paths above (each have their own line).
+            log.LogInformation(
+                "Subnet-sweep pass on node {Hostname} (Id={NodeId}): found {Count} MAC→IP mappings via {Probe} on subnet {Subnet}.",
+                node.Hostname, node.Id, macToIp.Count, useArping ? "arping" : "ping", subnetDescription);
+
             return new SubnetSweepProbeResult.Success(node.Id, macToIp);
         }
         catch (SshConnectionException ex) when (ContainsAlgoNegotiationKeyword(ex.Message))
