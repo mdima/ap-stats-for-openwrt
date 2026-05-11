@@ -236,4 +236,68 @@ public sealed class SubnetSweepProbeTests
         // Ping loop must have been issued.
         Assert.Contains(session.CommandsIssued, c => c.Contains("ping -c1 -W1"));
     }
+
+    /// <summary>
+    /// Quick task 260511-lct (2026-05-11): with the ChunkSize bump from 16 → 64, a sweep over
+    /// ~200 hosts must produce exactly 4 chunks (ceil(252/64) = 4 for two /25s = 252 hosts),
+    /// where each chunk contains at most 64 IPs and the chunk boundaries are `; ` between
+    /// `for ip in ... done; wait` segments. Pre-bump this fact would FAIL (16 chunks would
+    /// be produced instead of 4 — RED→GREEN signal). Indirect via PollAsync to avoid
+    /// touching private-member visibility (internal-via-InternalsVisibleTo would also work
+    /// but is unnecessary; the SSH-issued-command capture already gives us the assertable
+    /// shape).
+    /// </summary>
+    [Fact]
+    public async Task BuildSweepCommand_For200Ips_Produces4ChunksOfAtMost64Ips()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var fixtureDir = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT");
+        var session = new FakeSshSession(fixtureDir);
+        // Route the batched arping loop to the existing arping.txt fixture regardless of
+        // the long, IP-list-dependent command body.
+        session.CommandOverrides["arping -c1 -w1"] = "arping";
+
+        var probe = new SubnetSweepProbe(session, NullLogger<SubnetSweepProbe>.Instance);
+        // Two /25 CIDRs expand to 126 + 126 = 252 host IPs → ceil(252/64) = 4 chunks.
+        var node = MakeNode(ranges: "192.168.0.0/25,192.168.1.0/25");
+        var result = await probe.PollAsync(node, peerIp: "192.168.0.1", ct);
+
+        Assert.IsType<SubnetSweepProbeResult.Success>(result);
+
+        // Find the single arping batched-loop command.
+        var arpingLoop = session.CommandsIssued.SingleOrDefault(c => c.Contains("arping -c1 -w1"));
+        Assert.NotNull(arpingLoop);
+
+        // 4 chunks → 4 occurrences each of `for ip in ` and ` wait` (counting via Split-1).
+        var forIpCount = arpingLoop!.Split("for ip in ").Length - 1;
+        Assert.Equal(4, forIpCount);
+        var waitCount = arpingLoop.Split("wait").Length - 1;
+        Assert.Equal(4, waitCount);
+
+        // The command starts with `for ip in ` and ends with `wait` (no trailing whitespace).
+        Assert.StartsWith("for ip in ", arpingLoop);
+        Assert.EndsWith("wait", arpingLoop);
+
+        // Per-chunk IP-count invariant: every chunk holds at most 64 IPs. The chunk body shape
+        // is `for ip in <ip1> ... <ipN>; do arping ... & done; wait`, so we slice between each
+        // `for ip in ` marker and the next `; do ` marker that follows it.
+        var chunkStarts = new List<int>();
+        var idx = 0;
+        while ((idx = arpingLoop.IndexOf("for ip in ", idx, StringComparison.Ordinal)) >= 0)
+        {
+            chunkStarts.Add(idx);
+            idx += "for ip in ".Length;
+        }
+        Assert.Equal(4, chunkStarts.Count);
+
+        foreach (var start in chunkStarts)
+        {
+            var ipsStart = start + "for ip in ".Length;
+            var doIdx = arpingLoop.IndexOf("; do ", ipsStart, StringComparison.Ordinal);
+            Assert.True(doIdx > ipsStart, $"Could not find chunk terminator '; do ' after start={start}.");
+            var ipsSlice = arpingLoop.Substring(ipsStart, doIdx - ipsStart);
+            var ipCount = ipsSlice.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+            Assert.True(ipCount <= 64, $"Chunk exceeded 64 IPs: count={ipCount}.");
+        }
+    }
 }

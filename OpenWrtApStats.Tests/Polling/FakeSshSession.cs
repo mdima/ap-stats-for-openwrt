@@ -47,6 +47,16 @@ internal sealed class FakeSshSession(string fixtureDir) : ISshSession
     /// </summary>
     public Func<Task>? DisposeDelay { get; set; }
 
+    /// <summary>
+    /// Quick task 260511-lct: when true, the NEXT <see cref="RunCommandAsync"/> call throws
+    /// <see cref="OperationCanceledException"/> WITHOUT the host CancellationToken being cancelled
+    /// — simulates the linked-CTS budget firing inside SSH I/O (the ReverseDnsProbe "timeout"
+    /// disposition test). The flag self-clears after firing so a follow-up command can succeed
+    /// normally (currently unused, but documented for symmetry). Does not affect
+    /// <see cref="RunCommandWithExitCodeAsync"/>.
+    /// </summary>
+    public bool ThrowOcEOnNextCommand { get; set; }
+
     public async Task ConnectAsync(WiFiNode node, string plaintextPassword, string? expectedFingerprint,
         Action<string>? onHostKeyAccepted, CancellationToken ct)
     {
@@ -59,6 +69,12 @@ internal sealed class FakeSshSession(string fixtureDir) : ISshSession
     public Task<string> RunCommandAsync(string command, CancellationToken ct)
     {
         CommandsIssued.Add(command);
+        if (ThrowOcEOnNextCommand)
+        {
+            ThrowOcEOnNextCommand = false;
+            // Linked-CTS budget exhaustion shape — host ct stays uncancelled by design.
+            throw new OperationCanceledException("Simulated linked-CTS timeout (FakeSshSession.ThrowOcEOnNextCommand).");
+        }
         var lookup = ResolveLookup(command);
         return Task.FromResult(LoadFixture(lookup));
     }

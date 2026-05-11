@@ -20,7 +20,7 @@ namespace OpenWrtApStats.Services.Polling;
 /// </summary>
 public sealed class SubnetSweepProbe(ISshSession session, ILogger<SubnetSweepProbe> log)
 {
-    private const int ChunkSize = 16;             // D-01: groups of 16 backgrounded probes per batch.
+    private const int ChunkSize = 64;             // D-01 (revised 2026-05-11, quick task 260511-lct): groups of 64 backgrounded probes per batch. BusyBox arping is cheap (small applet, no kernel netfilter state); 64-fanout cuts a /24 sweep from 16 chunks to 4 with no observed instability on tested hardware (Operator validation 2026-05-11).
     private const int LoopBudgetSeconds = 60;     // arping/ping wait budget for one full sweep.
 
     // T-09-03-05 defense-in-depth: re-validate the iface name at the shell-command construction
@@ -158,8 +158,9 @@ public sealed class SubnetSweepProbe(ISshSession session, ILogger<SubnetSweepPro
             var capProbe = await session.RunCommandWithExitCodeAsync("command -v arping", sct);
             var useArping = capProbe.ExitCode == 0 && !string.IsNullOrWhiteSpace(capProbe.StdOut);
 
-            // Step 3: build the AP-side batched-loop command. D-01: groups of 16, hand-rolled
-            // shell loop, one SSH command total per node per refresh tick.
+            // Step 3: build the AP-side batched-loop command. D-01 (revised 2026-05-11): groups
+            // of 64 (quick task 260511-lct), hand-rolled shell loop, one SSH command total per
+            // node per refresh tick.
             var loopCmd = BuildSweepCommand(scanIps, iface, useArping);
 
             // Step 4: run the loop, parse the interleaved stdout, return.
@@ -212,12 +213,13 @@ public sealed class SubnetSweepProbe(ISshSession session, ILogger<SubnetSweepPro
     }
 
     /// <summary>
-    /// D-01: build the AP-side batched-loop shell command. Chunks scan IPs into groups of 16,
-    /// fires backgrounded <c>arping -c1 -w1 [-I &lt;iface&gt;] $ip</c> (or <c>ping -c1 -W1 $ip</c>
-    /// fallback) per chunk, awaits each chunk with <c>wait</c>, concatenates chunks with <c>;</c>.
-    /// One SSH command total. The <paramref name="iface"/> argument is null in the CIDR-list branch
-    /// (no auto-derivation); when null the <c>-I</c> flag is omitted and the AP's routing picks
-    /// the iface for arping.
+    /// D-01 (revised 2026-05-11, quick task 260511-lct): build the AP-side batched-loop shell
+    /// command. Chunks scan IPs into groups of 64, fires backgrounded
+    /// <c>arping -c1 -w1 [-I &lt;iface&gt;] $ip</c> (or <c>ping -c1 -W1 $ip</c> fallback) per chunk,
+    /// awaits each chunk with <c>wait</c>, concatenates chunks with <c>;</c>. One SSH command
+    /// total. The <paramref name="iface"/> argument is null in the CIDR-list branch (no auto-
+    /// derivation); when null the <c>-I</c> flag is omitted and the AP's routing picks the iface
+    /// for arping.
     /// </summary>
     private static string BuildSweepCommand(IReadOnlyList<string> scanIps, string? iface, bool useArping)
     {
