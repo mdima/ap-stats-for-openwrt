@@ -250,6 +250,21 @@ public sealed class PollOrchestrator(
                     {
                         s.IPAddress = sweepIp;
                     }
+                    // Debug session p10-trigger-and-nslookup (third-order fix, after 87bf42f closed
+                    // the fast-path-zeroed-existingStationsByNode trap): if neither ip-neigh
+                    // (NodePoller.cs:128) nor the arping sweep gave us an IP for this MAC, fall
+                    // back to the persisted IP from existingByMacForNode. The ipsForDns set above
+                    // already includes this persisted IP via the line-218-224 existing-stations
+                    // branch, and the dns probe may have successfully resolved it — but without
+                    // this fallback the next `if` keys off s.IPAddress (still null), the dnsMap
+                    // lookup misses, and the resolved hostname is dropped on the floor. Runtime
+                    // evidence: operator deployment, 5 consecutive enrichment cycles resolving
+                    // 13-14 IPs each, DB hostname count stuck at 0/41 despite the line-86 Reverse-DNS
+                    // pass log line firing on every cycle.
+                    if (string.IsNullOrEmpty(s.IPAddress) && existingByMacForNode.TryGetValue(s.MacAddress, out var persistedRow))
+                    {
+                        s.IPAddress = persistedRow.IPAddress;
+                    }
                     if (!string.IsNullOrEmpty(s.IPAddress) && delta.ReverseDnsResolved.TryGetValue(s.IPAddress, out var fqdn))
                     {
                         s.Hostname = fqdn; // null = negative DNS; UpsertCycleAsync coalesces with existing.
