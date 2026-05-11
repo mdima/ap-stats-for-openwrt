@@ -72,6 +72,21 @@ public sealed class ReverseDnsProbe(ISshSession session, ILogger<ReverseDnsProbe
                 result[ip] = fqdn;     // null for NXDOMAIN/SERVFAIL/timeout per D-12.
             }
 
+            // Phase 10 debug session p10-trigger-and-nslookup: per-cycle resolution summary at
+            // probe boundary. Discriminates among (a) Total=0 orchestrator-merge bug, (b) Total>0
+            // ∧ Successful=0 runtime shape divergence, (c) Successful>0 ∧ Negative<Total transient
+            // (will self-heal on next refresh). One line per probe invocation, NOT per IP.
+            var totalCount = ipList.Count;
+            var successfulCount = 0;
+            foreach (var kv in result)
+            {
+                if (kv.Value is not null) successfulCount++;
+            }
+            var negativeCount = totalCount - successfulCount;
+            log.LogInformation(
+                "Reverse-DNS pass on node {Hostname} (Id={NodeId}): resolved {Successful}/{Total} IPs ({Negative} NXDOMAIN/timeout).",
+                node.Hostname, node.Id, successfulCount, totalCount, negativeCount);
+
             return new ReverseDnsProbeResult.Success(node.Id, result);
         }
         catch (SshConnectionException ex) when (ContainsAlgoNegotiationKeyword(ex.Message))
