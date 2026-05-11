@@ -346,6 +346,238 @@ public sealed class PollOrchestratorEnrichmentTests(SqliteInMemoryFixture fixtur
         Assert.Equal(dnsHostname, capturedPeerIp);
     }
 
+    // ─── QUICK 260511-ma0: delete-then-rebid one-cycle hostname convergence ───────────────────
+    // Three regression tests that pin the sweep-then-DNS sequencing introduced in the
+    // enrichmentFactory closure (Program.cs:162-253). Test 1 is the end-to-end "operator UI
+    // sees both fields in one cycle" outcome through the orchestrator. Tests 2 + 3 drive the
+    // closure-body logic directly via EnrichmentFactoryClosure.BuildMergedDnsMapAsync — the
+    // static helper extracted to keep the merge logic unit-testable without rebuilding a
+    // ServiceProvider or instantiating SSH session DI plumbing.
+
+    [Fact]
+    public async Task RunCycle_DeleteThenRebid_PersistsIpAndHostname_InOneCycle()
+    {
+        // QUICK 260511-ma0 — Test 1: end-to-end convergence assertion. The factory script
+        // returns a complete delta (sweep MAC→IP + dns IP→hostname both populated). The
+        // orchestrator's merge step must persist BOTH IPAddress AND Hostname for the rebid
+        // MAC after ONE RunCycleAsync invocation.
+        var ct = TestContext.Current.CancellationToken;
+        // LastEnrichmentRefreshAt = null → trigger fires unconditionally on first cycle
+        // (cold-start arm of EnrichmentRefreshTrigger).
+        var (nodeId, _, bssid) = await SeedNodeWithOneNetworkAsync(ct, lastEnrichmentRefreshAt: null);
+        var mac = "AA:BB:CC:DD:EE:F0";
+        var sweepIp = "192.168.42.10";
+        var resolvedHostname = "rebid-laptop.lan";
+
+        IReadOnlyList<string>? capturedIpsForReverseDns = null;
+        Func<WiFiNode, IReadOnlyList<string>, string, CancellationToken, Task<EnrichmentDelta?>> factory =
+            (n, ips, peerIp, c) =>
+            {
+                capturedIpsForReverseDns = ips;
+                // Factory simulates the post-fix closure behavior: sweep discovered the IP,
+                // and the factory's INTERNAL second DNS pass resolved its hostname. The
+                // returned delta therefore carries BOTH (sweep MAC→IP AND dns IP→hostname).
+                return Task.FromResult<EnrichmentDelta?>(new EnrichmentDelta(
+                    n.Id,
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        [mac] = sweepIp,
+                    },
+                    new Dictionary<string, string?>(StringComparer.Ordinal)
+                    {
+                        [sweepIp] = resolvedHostname,
+                    }));
+            };
+
+        // Probe shape: iwinfo reports the MAC but IPAddress=null (cache-cold post-delete).
+        var orch = BuildOrchestrator(
+            ProbeForNode(nodeId, bssid,
+                new WLANStation { MacAddress = mac, Bssid = bssid, IPAddress = null, LastPollDate = DateTime.UtcNow }),
+            enrichmentFactory: factory);
+        await orch.RunCycleAsync(ct);
+
+        // Sanity: orchestrator handed an EMPTY ipsForReverseDns list (the bug-trigger setup —
+        // post-delete no existing row, probe IP=null → orchestrator has nothing to pre-supply).
+        Assert.NotNull(capturedIpsForReverseDns);
+        Assert.Empty(capturedIpsForReverseDns!);
+
+        await using var verify = _fixture.CreateContext();
+        var row = await verify.WLANStations.AsNoTracking().FirstAsync(s => s.MacAddress == mac, ct);
+        Assert.Equal(sweepIp, row.IPAddress);             // ORCH-04 merge filled IP from sweepMap
+        Assert.Equal(resolvedHostname, row.Hostname);     // ORCH-05 merge filled Hostname from ReverseDnsResolved
+    }
+
+    [Fact]
+    public async Task EnrichmentFactoryClosure_BuildMergedDnsMap_SteadyState_NoSweepOnlyIps_IssuesOneDnsBatch()
+    {
+        // QUICK 260511-ma0 — Test 2 Sub-case A (steady-state): when sweepMap.Values is a
+        // subset of ipsForReverseDns, the helper MUST NOT issue a second DNS PollAsync. The
+        // counting FakeSshSession proves "exactly ONE RunCommandAsync issued" — i.e., one
+        // batched-nslookup SSH round-trip for the caller-supplied IPs. No second-pass RTT.
+        var ct = TestContext.Current.CancellationToken;
+        var fixtureDir = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT");
+
+        // Stub batched-nslookup output for the FIRST (and only expected) DNS dispatch.
+        Directory.CreateDirectory(fixtureDir);
+        File.WriteAllText(Path.Combine(fixtureDir, "nslookup-batched-steady.txt"),
+            "==10.0.0.5==\nName:      host5.lan\nAddress 1: 10.0.0.5 host5.lan\n" +
+            "==10.0.0.6==\nName:      host6.lan\nAddress 1: 10.0.0.6 host6.lan\n");
+
+        var session = new FakeSshSession(fixtureDir);
+        // The route-by-substring override matches the batched-loop signature. ALL nslookup
+        // RunCommandAsync calls (first AND any unexpected second pass) would route here.
+        session.CommandOverrides["nslookup -timeout=1 -retry=1"] = "nslookup-batched-steady";
+
+        var dnsProbe = new ReverseDnsProbe(session, NullLogger<ReverseDnsProbe>.Instance);
+        var node = new WiFiNode { Id = 1, Hostname = "test-ap", Username = "root", Password = "" };
+
+        // sweepMap is a subset of ipsForReverseDns → sweepOnlyIps is empty → no second pass.
+        var ipsForReverseDns = new[] { "10.0.0.5", "10.0.0.6" };
+        var sweepMap = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["AA:BB:CC:DD:EE:01"] = "10.0.0.5",     // already in ipsForReverseDns
+        };
+
+        var merged = await EnrichmentFactoryClosure.BuildMergedDnsMapAsync(
+            dnsProbe, node, ipsForReverseDns, sweepMap, ct);
+
+        // Steady-state invariant: exactly ONE batched-nslookup SSH command issued.
+        Assert.Single(session.CommandsIssued);
+        Assert.Contains("nslookup -timeout=1 -retry=1", session.CommandsIssued[0]);
+
+        // Merged map carries the first-pass resolution verbatim.
+        Assert.Equal("host5.lan", merged["10.0.0.5"]);
+        Assert.Equal("host6.lan", merged["10.0.0.6"]);
+    }
+
+    [Fact]
+    public async Task EnrichmentFactoryClosure_BuildMergedDnsMap_RebidScenario_IssuesSecondDnsPass_ForSweepOnlyIps()
+    {
+        // QUICK 260511-ma0 — Test 2 Sub-case B (rebid): when sweepMap.Values contains IPs
+        // NOT in ipsForReverseDns, the helper MUST issue a SECOND DNS PollAsync against the
+        // sweep-only IPs and merge dnsMap2 into dnsMap1. The returned merged map MUST contain
+        // the sweep-discovered IP's resolved hostname.
+        var ct = TestContext.Current.CancellationToken;
+        var fixtureDir = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT");
+        Directory.CreateDirectory(fixtureDir);
+
+        // First DNS pass receives an empty ipsForReverseDns (the rebid setup — orchestrator
+        // had nothing to pre-supply). ReverseDnsProbe.PollAsync early-returns on empty list
+        // WITHOUT issuing an SSH command — so we expect exactly ONE RunCommandAsync (the
+        // second pass, against the sweep-only IP).
+        File.WriteAllText(Path.Combine(fixtureDir, "nslookup-batched-rebid.txt"),
+            "==192.168.42.10==\nName:      rebid-laptop.lan\nAddress 1: 192.168.42.10 rebid-laptop.lan\n");
+
+        var session = new FakeSshSession(fixtureDir);
+        session.CommandOverrides["nslookup -timeout=1 -retry=1"] = "nslookup-batched-rebid";
+
+        var dnsProbe = new ReverseDnsProbe(session, NullLogger<ReverseDnsProbe>.Instance);
+        var node = new WiFiNode { Id = 1, Hostname = "test-ap", Username = "root", Password = "" };
+
+        var ipsForReverseDns = Array.Empty<string>();    // bug-trigger setup: empty pre-supplied list
+        var sweepMap = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["AA:BB:CC:DD:EE:F0"] = "192.168.42.10",     // sweep-discovered → drives second pass
+        };
+
+        var merged = await EnrichmentFactoryClosure.BuildMergedDnsMapAsync(
+            dnsProbe, node, ipsForReverseDns, sweepMap, ct);
+
+        // Rebid invariant: the sweep-discovered IP's hostname appears in the merged map.
+        Assert.True(merged.ContainsKey("192.168.42.10"), "sweep-only IP missing from merged map");
+        Assert.Equal("rebid-laptop.lan", merged["192.168.42.10"]);
+
+        // Empty first pass + non-empty second pass → exactly ONE batched-nslookup RunCommandAsync.
+        // (PollAsync against empty list early-returns without an SSH call — see ReverseDnsProbe.cs:36-40.)
+        Assert.Single(session.CommandsIssued);
+        Assert.Contains("==192.168.42.10==", session.CommandsIssued[0]);
+    }
+
+    [Fact]
+    public async Task EnrichmentFactoryClosure_BuildMergedDnsMap_SecondPassFails_PreservesFirstPassResultsAndDoesNotThrow()
+    {
+        // QUICK 260511-ma0 — Test 3: partial-failure preservation. When the FIRST DNS pass
+        // succeeds and the SECOND DNS pass fails (linked-CTS-budget exhaustion → Failed/timeout),
+        // the merged map MUST preserve dnsMap1 verbatim and the helper MUST NOT throw into
+        // the caller. This matches the existing "DB-as-cache" philosophy at
+        // PollOrchestrator.cs:237. The missing sweep-only-IP key is acceptable — ORCH-08
+        // will retry on the next refresh tick via the existing-stations branch.
+        var ct = TestContext.Current.CancellationToken;
+        var fixtureDir = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT");
+        Directory.CreateDirectory(fixtureDir);
+
+        // First DNS pass: parseable batched output for the known IP.
+        File.WriteAllText(Path.Combine(fixtureDir, "nslookup-batched-firstpass.txt"),
+            "==10.0.0.5==\nName:      known-host.lan\nAddress 1: 10.0.0.5 known-host.lan\n");
+
+        // Toggling session: the 2nd RunCommandAsync throws OperationCanceledException with
+        // the host ct NOT cancelled — mirrors the linked-CTS-budget exhaustion shape that
+        // ReverseDnsProbe surfaces as Failed(timeout) (ReverseDnsProbe.cs:62-69).
+        var session = new TogglingFakeSshSession(fixtureDir, throwOnNthCall: 2);
+        session.CommandOverrides["nslookup -timeout=1 -retry=1"] = "nslookup-batched-firstpass";
+
+        var dnsProbe = new ReverseDnsProbe(session, NullLogger<ReverseDnsProbe>.Instance);
+        var node = new WiFiNode { Id = 1, Hostname = "test-ap", Username = "root", Password = "" };
+
+        var ipsForReverseDns = new[] { "10.0.0.5" };
+        var sweepMap = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["AA:BB:CC:DD:EE:F0"] = "192.168.42.10",     // sweep-only → drives second pass which will fail
+        };
+
+        // MUST NOT throw — partial-failure preservation is the contract.
+        var merged = await EnrichmentFactoryClosure.BuildMergedDnsMapAsync(
+            dnsProbe, node, ipsForReverseDns, sweepMap, ct);
+
+        // dnsMap1 results preserved verbatim.
+        Assert.Equal("known-host.lan", merged["10.0.0.5"]);
+        // The sweep-only IP's entry is acceptable as null OR absent — both shapes leave
+        // Hostname null at the orchestrator merge step, which is the documented next-tick-retry
+        // path (ORCH-08 fires on the next refresh tick via the existing-stations branch).
+        if (merged.TryGetValue("192.168.42.10", out var sweepHost))
+        {
+            Assert.Null(sweepHost);
+        }
+        // Two RunCommandAsync calls issued: first succeeded, second threw.
+        Assert.Equal(2, session.CommandsIssued.Count);
+    }
+
+    /// <summary>
+    /// QUICK 260511-ma0 helper. Behaves like FakeSshSession except that the Nth
+    /// <see cref="ISshSession.RunCommandAsync"/> call throws <see cref="OperationCanceledException"/>
+    /// without the host CancellationToken being cancelled — mirrors the linked-CTS-budget
+    /// exhaustion shape ReverseDnsProbe surfaces as <c>Failed(timeout)</c>.
+    /// </summary>
+    private sealed class TogglingFakeSshSession(string fixtureDir, int throwOnNthCall) : OpenWrtApStats.Services.Polling.Ssh.ISshSession
+    {
+        private readonly FakeSshSession _inner = new(fixtureDir);
+        private int _callCount;
+        private readonly int _throwOnNthCall = throwOnNthCall;
+
+        public List<string> CommandsIssued => _inner.CommandsIssued;
+        public Dictionary<string, string> CommandOverrides => _inner.CommandOverrides;
+
+        public Task ConnectAsync(WiFiNode node, string plaintextPassword, string? expectedFingerprint,
+            Action<string>? onHostKeyAccepted, CancellationToken ct)
+            => _inner.ConnectAsync(node, plaintextPassword, expectedFingerprint, onHostKeyAccepted, ct);
+
+        public Task<string> RunCommandAsync(string command, CancellationToken ct)
+        {
+            _callCount++;
+            if (_callCount == _throwOnNthCall)
+            {
+                _inner.CommandsIssued.Add(command);
+                throw new OperationCanceledException("Simulated linked-CTS timeout on Nth call.");
+            }
+            return _inner.RunCommandAsync(command, ct);
+        }
+
+        public Task<(int ExitCode, string StdOut, string StdErr)> RunCommandWithExitCodeAsync(string command, CancellationToken ct)
+            => _inner.RunCommandWithExitCodeAsync(command, ct);
+
+        public ValueTask DisposeAsync() => _inner.DisposeAsync();
+    }
+
     private sealed class FakeTimeProvider(DateTimeOffset fixedUtcNow) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => fixedUtcNow;
