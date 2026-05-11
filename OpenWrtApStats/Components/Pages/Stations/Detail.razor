@@ -11,6 +11,7 @@
 @inject IOuiLookup Oui
 @inject IAppSettingsService Settings
 @inject NavigationManager Nav
+@inject OpenWrtApStats.Services.EventDetectionService Events
 
 @* Stations/Detail.razor — Phase 5 D-13 / DASH-15 / DASH-14 / DASH-16. UI-SPEC §Layout
    Contracts §/Stations/{mac} (lines 244-316), §Component Contracts §Detail Page (lines
@@ -119,6 +120,26 @@ else
                         </button>
                         @if (_savedFlash) { <small class="text-success ms-2">Saved</small> }
                     </EditForm>
+
+                    @* Phase 10 DASH-22 / DASH-23 — operator-toggleable random-MAC override.
+                       D-08 placement: inside the existing "Manage" card, between Display-name
+                       and the card-footer Delete button. Instant-write (no Save submit) +
+                       2-second flash mirroring the Display-name `_savedFlash` pattern. *@
+                    <hr class="my-3" />
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch"
+                               id="random-mac-toggle"
+                               checked="@_isRandomMac"
+                               @onchange="OnRandomMacToggleChangedAsync" />
+                        <label class="form-check-label fw-semibold" for="random-mac-toggle">
+                            <i class="bi bi-shuffle me-2" aria-hidden="true"></i>
+                            Random / privacy MAC
+                        </label>
+                        <small class="form-text d-block text-body-secondary">
+                            This address is currently flagged as locally administered (likely random). Toggle off if it's a stable virtualized MAC like Proxmox/QEMU.
+                        </small>
+                        @if (_randomMacFlash) { <small class="text-success">Saved</small> }
+                    </div>
                 </div>
                 <div class="card-footer bg-body">
                     <button type="button" class="btn btn-outline-danger" @onclick="@(() => _deleteOpen = true)">
@@ -158,6 +179,10 @@ else
     private bool _savedFlash;
     private bool _deleteOpen;
 
+    // Phase 10 DASH-22 / DASH-23 — random-MAC override toggle state.
+    private bool _isRandomMac;
+    private bool _randomMacFlash;
+
     private string DisplayName => _station?.Name ?? _station?.Hostname ?? _station?.MacAddress ?? "Station";
 
     protected override async Task OnParametersSetAsync()
@@ -177,6 +202,7 @@ else
         }
 
         _form.Name = _station.Name;
+        _isRandomMac = _station.IsRandomMac;
         _vendor = Oui.GetVendor(_station.MacAddress);
 
         if (_station.WiFiNetworkId is int netId)
@@ -221,9 +247,36 @@ else
         });
     }
 
+    /// <summary>
+    /// Phase 10 DASH-22 — instant-write handler for the random-MAC override toggle.
+    /// No EditForm submit (a binary doesn't need form-submit semantics, D-08); each
+    /// toggle change persists immediately via IStationRepo.SetIsRandomMacAsync and
+    /// shows a 2-second "Saved" flash mirroring the Display-name `_savedFlash` pattern.
+    /// </summary>
+    private async Task OnRandomMacToggleChangedAsync(ChangeEventArgs e)
+    {
+        if (_station is null) return;
+        var newValue = e.Value is bool b && b;
+        _isRandomMac = newValue;
+        await Stations.SetIsRandomMacAsync(_station.MacAddress, newValue);
+
+        // 2-second "Saved" flash — matches the Display-name HandleSaveNameAsync pattern.
+        _randomMacFlash = true;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(2000);
+            _randomMacFlash = false;
+            await InvokeAsync(StateHasChanged);
+        });
+    }
+
     private async Task HandleDeleteAsync()
     {
         if (_station is null) return;
+        // Quick task 260511-cmi — invalidate the in-memory MAC cache BEFORE the DB row
+        // goes, so a future re-association of the same device fires the new-station
+        // toast instead of being silently reclassified as already-seen.
+        Events.ForgetMac(_station.MacAddress);
         await Stations.DeleteByMacAsync(_station.MacAddress);
         Nav.NavigateTo("/");
     }

@@ -38,12 +38,35 @@ public sealed class StationRepo(IDbContextFactory<DatabaseContext> factory) : IS
             .ToListAsync(ct);
     }
 
+    // Phase 10 ORCH-01 — read-only per-node MAC enumeration for "newMacDetectedThisCycle".
+    public async Task<IReadOnlyList<string>> GetMacsByNodeAsync(int nodeId, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        return await db.WLANStations
+            .AsNoTracking()
+            .Where(s => s.Network != null && s.Network.WiFiNodeId == nodeId)
+            .Select(s => s.MacAddress)
+            .Distinct()
+            .ToListAsync(ct);
+    }
+
     public async Task SetNameAsync(string macAddress, string? name, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         await db.WLANStations
             .Where(s => s.MacAddress == macAddress)
             .ExecuteUpdateAsync(u => u.SetProperty(s => s.Name, name), ct);
+    }
+
+    // Phase 10 DASH-22 / DASH-23 — operator-toggled override of the U/L-bit-derived random-MAC flag.
+    // Single-property ExecuteUpdateAsync (CR-02-safe). Idempotent — calling on a non-existent MAC is a
+    // no-op (no exception).
+    public async Task SetIsRandomMacAsync(string macAddress, bool isRandomMac, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.WLANStations
+            .Where(s => s.MacAddress == macAddress)
+            .ExecuteUpdateAsync(u => u.SetProperty(s => s.IsRandomMac, isRandomMac), ct);
     }
 
     public async Task DeleteByMacAsync(string macAddress, CancellationToken ct = default)
@@ -89,9 +112,17 @@ public sealed class StationRepo(IDbContextFactory<DatabaseContext> factory) : IS
             {
                 // Station hopped WLANs? Update WiFiNetworkId. Update telemetry. Flip to Online.
                 existingRow.WiFiNetworkId = probe.WiFiNetworkId;
-                existingRow.IPAddress     = probe.IPAddress;
-                existingRow.Hostname      = probe.Hostname;
-                // existingRow.Name is operator-assigned (DASH-14) — preserve across cycles.
+                // ORCH-04 DB-as-cache cascade: probe.IPAddress is null when neither neigh nor the
+                // refresh-tick sweep observed an IP this cycle; reuse the persisted value
+                // (CHARTER §"DB-as-cache": neigh > DB > null).
+                existingRow.IPAddress     = probe.IPAddress ?? existingRow.IPAddress;
+                // ORCH-05 / ORCH-08: probe.Hostname is null when no nslookup ran this cycle OR
+                // when the lookup returned NXDOMAIN/SERVFAIL/timeout (Phase 9 D-12 collapses these
+                // to null). Reuse persisted Hostname; ORCH-08 retry-on-next-tick is implicit
+                // (next refresh tick will re-probe IPs whose Hostname IS NULL).
+                existingRow.Hostname      = probe.Hostname ?? existingRow.Hostname;
+                // existingRow.Name is operator-assigned (DASH-14) — preserve across cycles. (ORCH-02)
+                // existingRow.IsRandomMac is INSERT-only (ORCH-03) — preserve across cycles. (ORCH-02)
                 existingRow.TxBitrate     = probe.TxBitrate;
                 existingRow.RxBitrate     = probe.RxBitrate;
                 existingRow.RSS           = probe.RSS;
@@ -101,6 +132,14 @@ public sealed class StationRepo(IDbContextFactory<DatabaseContext> factory) : IS
             else
             {
                 probe.Status = Status.Online;
+                // ORCH-03: compute IsRandomMac from the U/L bit on MAC byte 0 — INSERT-only,
+                // never updated thereafter. MAC stored uppercase per Phase 2 D-07; byte 0 is
+                // the first two characters; U/L bit is the second-least-significant bit (0x02).
+                // Equivalent to the migration's D-08 SQL backfill.
+                if (probe.MacAddress.Length >= 2)
+                {
+                    probe.IsRandomMac = (Convert.ToByte(probe.MacAddress.Substring(0, 2), 16) & 0x02) != 0;
+                }
                 db.WLANStations.Add(probe);
             }
         }

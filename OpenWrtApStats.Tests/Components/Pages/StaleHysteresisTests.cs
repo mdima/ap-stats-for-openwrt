@@ -39,6 +39,8 @@ public sealed class StaleHysteresisTests
         public Task UpdateOnlineAsync(int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpdateOnlineAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetHostKeyFingerprintAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpdateLastEnrichmentRefreshAtAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpdateScanSettingsAsync(int id, bool subnetScanEnabled, string? subnetScanRanges, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class StubNetworkRepo : INetworkRepo
@@ -64,11 +66,13 @@ public sealed class StaleHysteresisTests
         public Task<WLANStation?> GetByMacAsync(string macAddress, CancellationToken ct = default) => Task.FromResult<WLANStation?>(Stations.FirstOrDefault(s => s.MacAddress == macAddress));
         public Task<IReadOnlyList<string>> GetAllMacsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<string>>(Stations.Select(s => s.MacAddress).Distinct().ToList());
         public Task SetNameAsync(string macAddress, string? name, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetIsRandomMacAsync(string macAddress, bool isRandomMac, CancellationToken ct = default) => Task.CompletedTask;
         public Task DeleteByMacAsync(string macAddress, CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkAllOfflineAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkAllOfflineAsync(OpenWrtApStats.Data.DatabaseContext db, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpsertCycleAsync(IEnumerable<WLANStation> live, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpsertCycleAsync(OpenWrtApStats.Data.DatabaseContext db, IEnumerable<WLANStation> live, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<string>> GetMacsByNodeAsync(int nodeId, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<string>>(Stations.Select(s => s.MacAddress).Distinct().ToList());
     }
 
     private sealed class StubOuiLookup : IOuiLookup { public string? GetVendor(string macAddress) => null; }
@@ -78,9 +82,13 @@ public sealed class StaleHysteresisTests
         public int     PollingIntervalSeconds { get; set; } = 10;
         public string? UIPasswordHash         { get; } = null;
         public bool    WizardDismissed        { get; } = true;
+        public int     RefreshIntervalSeconds { get; } = 3600;
+        public IReadOnlyList<string> LocalDomainSuffixes { get; } = Array.Empty<string>();
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetRefreshIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default) => Task.CompletedTask;
         public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }

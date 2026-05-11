@@ -35,7 +35,9 @@ public sealed class PollOrchestrator(
     Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync,
     PollNotifier notifier,
     ILogger<PollOrchestrator> log,
-    IAppSettingsService settings)
+    IAppSettingsService settings,
+    Func<WiFiNode, IReadOnlyList<string>, string, CancellationToken, Task<EnrichmentDelta?>> enrichmentFactory,
+    TimeProvider timeProvider)
 {
     // D-09 — lock-free LastSuccessfulCycleUtc exposure for /health (plan 06-03 reads this).
     // Volatile.Read<T> requires primitive/reference type; DateTime (struct) is NOT eligible —
@@ -118,6 +120,161 @@ public sealed class PollOrchestrator(
             // 5. Flush so SQLite assigns WiFiNetwork.Id values for new rows; then we can
             //    resolve station Bssid -> WiFiNetworkId before the dedup + station upsert.
             await db.SaveChangesAsync(ct);
+
+            // ─── Phase 10 ORCH-01..08 — composite refresh-trigger evaluation + enrichmentFactory ───
+            // Inside the coordinator transaction. ORCH-07 invariant: LastEnrichmentRefreshAt is updated
+            // here, in the same try{} so a failure rolls back together with the upsert.
+            var enrichmentNow = timeProvider.GetUtcNow();
+            var refreshIntervalSeconds = settings.RefreshIntervalSeconds;
+
+            // Always full-fetch MACs + IP/Hostname projection for every success node.
+            //
+            // Debug session p10-trigger-and-nslookup (Bug 2): an earlier "fast-path" branch
+            // skipped this query when no node's time-based interval was eligible, falling back
+            // to a cheap MAC-only projection with an EMPTY existingStationsByNode per node. When
+            // the new-MAC arm later fired the trigger inside that same cycle (a perfectly valid
+            // path — newMacDetected does NOT require the time-based arm to also be eligible),
+            // the ipsForDns "existing-stations" branch below (line ~248-254) iterated an empty
+            // list. Combined with iwinfo never reporting IPAddress on r.Stations, ipsForDns
+            // ended up empty, ReverseDnsProbe early-returned with an empty result map, and
+            // every post-cold-start cycle silently lost hostname enrichment. The cost saved
+            // (~4 columns × <100 rows per cycle = a few hundred bytes per cycle) was a bad
+            // trade against silent enrichment loss.
+            var successNodes = results.OfType<NodeProbeResult.Success>().ToList();
+            var successNodeIds = successNodes.Select(r => r.NodeId).ToHashSet();
+            var allExistingForCycle = successNodeIds.Count == 0
+                ? new List<(int WiFiNodeId, string MacAddress, string? IPAddress, string? Hostname)>()
+                : (await db.WLANStations.AsNoTracking()
+                    .Where(s => s.Network != null && successNodeIds.Contains(s.Network.WiFiNodeId))
+                    .Select(s => new
+                    {
+                        WiFiNodeId = s.Network!.WiFiNodeId,
+                        s.MacAddress,
+                        s.IPAddress,
+                        s.Hostname
+                    })
+                    .ToListAsync(ct))
+                    .Select(x => (x.WiFiNodeId, x.MacAddress, x.IPAddress, x.Hostname))
+                    .ToList();
+
+            var existingMacsByNode = allExistingForCycle
+                .GroupBy(x => x.WiFiNodeId)
+                .ToDictionary(g => g.Key, g => new HashSet<string>(g.Select(x => x.MacAddress), StringComparer.Ordinal));
+            var existingStationsByNode = allExistingForCycle
+                .GroupBy(x => x.WiFiNodeId)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            foreach (var nid in successNodeIds)
+            {
+                if (!existingMacsByNode.ContainsKey(nid)) existingMacsByNode[nid] = new HashSet<string>(StringComparer.Ordinal);
+                if (!existingStationsByNode.ContainsKey(nid)) existingStationsByNode[nid] = new List<(int, string, string?, string?)>();
+            }
+
+            foreach (var r in results.OfType<NodeProbeResult.Success>())
+            {
+                var node = nodes.First(n => n.Id == r.NodeId);
+                var observedMacs = r.Stations.Select(s => s.MacAddress).ToHashSet(StringComparer.Ordinal);
+                var existingMacs = existingMacsByNode[r.NodeId];
+                var newMacDetected = observedMacs.Any(m => !existingMacs.Contains(m));
+
+                if (!EnrichmentRefreshTrigger.ShouldRefresh(node, enrichmentNow, refreshIntervalSeconds, newMacDetected))
+                {
+                    continue;
+                }
+
+                // Pass node.Hostname through as the peer identifier; the enrichmentFactory is
+                // responsible for resolving (or directly using) it inside its SSH session context.
+                // Putting DNS resolution in the orchestrator would block the per-cycle wall-clock
+                // budget for nodes whose hostnames don't resolve quickly. The factory already opens
+                // an SSH connection to node.Hostname (NodePoller pattern), so resolution naturally
+                // happens there with the SSH layer's own timeout.
+                var peerIp = node.Hostname;
+
+                // Build the IP set that needs reverse DNS:
+                //   - Stations from the probe whose IP changed since persistence OR whose persisted
+                //     Hostname is null → ORCH-05.
+                //   - Stations already persisted on this node where Hostname IS NULL and an IP exists
+                //     (ORCH-08 retry-on-next-tick).
+                var existingStationsForNode = existingStationsByNode[r.NodeId];
+                var existingByMacForNode = existingStationsForNode
+                    .ToDictionary(x => x.MacAddress, x => (x.IPAddress, x.Hostname), StringComparer.Ordinal);
+
+                var ipsForDns = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var s in r.Stations)
+                {
+                    if (string.IsNullOrEmpty(s.IPAddress)) continue;
+                    if (existingByMacForNode.TryGetValue(s.MacAddress, out var persisted))
+                    {
+                        if (persisted.Hostname is null || persisted.IPAddress != s.IPAddress)
+                        {
+                            ipsForDns.Add(s.IPAddress);
+                        }
+                    }
+                    else
+                    {
+                        ipsForDns.Add(s.IPAddress);
+                    }
+                }
+                foreach (var ex in existingStationsForNode)
+                {
+                    if (ex.Hostname is null && !string.IsNullOrEmpty(ex.IPAddress))
+                    {
+                        ipsForDns.Add(ex.IPAddress);
+                    }
+                }
+
+                EnrichmentDelta? delta;
+                try
+                {
+                    delta = await enrichmentFactory(node, ipsForDns.ToList(), peerIp, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    log.LogWarning(ex, "Node {Hostname} (Id={NodeId}): enrichmentFactory threw; persisted IPs/Hostnames preserved (DB-as-cache).", node.Hostname, node.Id);
+                    continue;
+                }
+                if (delta is null) continue;
+
+                // Merge delta into r.Stations BEFORE the dedup pass below:
+                //   - Fill missing IP from delta.SweepMacToIp[mac] (ORCH-04 DB-as-cache cascade).
+                //   - For stations with an IPAddress, look up delta.ReverseDnsResolved[ip] and fill
+                //     Hostname (null delta value = NXDOMAIN/timeout — UpsertCycleAsync's `?? existingRow.Hostname`
+                //     coalesce preserves any existing Hostname).
+                foreach (var s in r.Stations)
+                {
+                    if (string.IsNullOrEmpty(s.IPAddress) && delta.SweepMacToIp.TryGetValue(s.MacAddress, out var sweepIp))
+                    {
+                        s.IPAddress = sweepIp;
+                    }
+                    // Debug session p10-trigger-and-nslookup (third-order fix, after 87bf42f closed
+                    // the fast-path-zeroed-existingStationsByNode trap): if neither ip-neigh
+                    // (NodePoller.cs:128) nor the arping sweep gave us an IP for this MAC, fall
+                    // back to the persisted IP from existingByMacForNode. The ipsForDns set above
+                    // already includes this persisted IP via the line-218-224 existing-stations
+                    // branch, and the dns probe may have successfully resolved it — but without
+                    // this fallback the next `if` keys off s.IPAddress (still null), the dnsMap
+                    // lookup misses, and the resolved hostname is dropped on the floor. Runtime
+                    // evidence: operator deployment, 5 consecutive enrichment cycles resolving
+                    // 13-14 IPs each, DB hostname count stuck at 0/41 despite the line-86 Reverse-DNS
+                    // pass log line firing on every cycle.
+                    if (string.IsNullOrEmpty(s.IPAddress) && existingByMacForNode.TryGetValue(s.MacAddress, out var persistedRow))
+                    {
+                        s.IPAddress = persistedRow.IPAddress;
+                    }
+                    if (!string.IsNullOrEmpty(s.IPAddress) && delta.ReverseDnsResolved.TryGetValue(s.IPAddress, out var fqdn))
+                    {
+                        s.Hostname = fqdn; // null = negative DNS; UpsertCycleAsync coalesces with existing.
+                    }
+                }
+
+                // ORCH-07 — persist the refresh timestamp INSIDE this transaction.
+                await nodeRepo.UpdateLastEnrichmentRefreshAtAsync(db, r.NodeId, enrichmentNow, ct);
+            }
+            // ─── End Phase 10 enrichment loop ──────────────────────────────────────────────────────
 
             // Build a station -> owning NodeId map (reference-keyed; avoids O(N²) Contains scans).
             var stationToNodeId = new Dictionary<WLANStation, int>(ReferenceEqualityComparer.Instance);

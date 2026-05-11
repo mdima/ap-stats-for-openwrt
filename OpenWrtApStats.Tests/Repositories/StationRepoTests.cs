@@ -226,6 +226,74 @@ public sealed class StationRepoTests(SqliteInMemoryFixture fixture) : IClassFixt
         Assert.Null(await repo.GetByMacAsync(macDeleted, ct));
     }
 
+    // ── Phase 10 Plan 10-04 Task 3 — SetIsRandomMacAsync (DASH-22 / DASH-23) ──
+
+    [Fact]
+    public async Task SetIsRandomMacAsync_PersistsValue_WithoutTouchingOtherColumns()
+    {
+        // T-10-04-01 mitigation: single-property ExecuteUpdateAsync must NOT clobber Name,
+        // IPAddress, Hostname, RSS, etc. when toggling IsRandomMac.
+        var ct = TestContext.Current.CancellationToken;
+        var repo = CreateRepo();
+        var (_, net1Id, _) = await SeedNodeWithTwoNetworksAsync(ct);
+        var mac = $"DD:11:22:33:44:{Random.Shared.Next(0, 255):X2}";
+
+        var seed = MakeStation(mac, net1Id);
+        seed.Hostname = "dev.michelecasa";
+        await repo.UpsertCycleAsync([seed], ct);
+        await repo.SetNameAsync(mac, "Pi", ct);
+
+        // Read baseline.
+        var before = await repo.GetByMacAsync(mac, ct);
+        Assert.NotNull(before);
+        Assert.False(before!.IsRandomMac);   // 0xDD → U/L bit set BUT we'll explicitly assert post-toggle
+        var beforeName = before.Name;
+        var beforeIp = before.IPAddress;
+        var beforeHostname = before.Hostname;
+        var beforeRss = before.RSS;
+
+        // Flip the flag.
+        await repo.SetIsRandomMacAsync(mac, true, ct);
+
+        var after = await repo.GetByMacAsync(mac, ct);
+        Assert.True(after!.IsRandomMac);
+        Assert.Equal(beforeName, after.Name);
+        Assert.Equal(beforeIp, after.IPAddress);
+        Assert.Equal(beforeHostname, after.Hostname);
+        Assert.Equal(beforeRss, after.RSS);
+    }
+
+    [Fact]
+    public async Task SetIsRandomMacAsync_OnMissingMac_NoOp_NoException()
+    {
+        // Idempotent — calling on a MAC that does not exist is a no-op (no exception).
+        var ct = TestContext.Current.CancellationToken;
+        var repo = CreateRepo();
+
+        await repo.SetIsRandomMacAsync("AA:BB:CC:DD:EE:FF", true, ct);   // must not throw
+        Assert.Null(await repo.GetByMacAsync("AA:BB:CC:DD:EE:FF", ct));
+    }
+
+    [Fact]
+    public async Task SetIsRandomMacAsync_FlipsBackAndForth_Idempotent()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var repo = CreateRepo();
+        var (_, net1Id, _) = await SeedNodeWithTwoNetworksAsync(ct);
+        var mac = $"DD:22:33:44:55:{Random.Shared.Next(0, 255):X2}";
+
+        await repo.UpsertCycleAsync([MakeStation(mac, net1Id)], ct);
+
+        await repo.SetIsRandomMacAsync(mac, true, ct);
+        Assert.True((await repo.GetByMacAsync(mac, ct))!.IsRandomMac);
+
+        await repo.SetIsRandomMacAsync(mac, false, ct);
+        Assert.False((await repo.GetByMacAsync(mac, ct))!.IsRandomMac);
+
+        await repo.SetIsRandomMacAsync(mac, true, ct);
+        Assert.True((await repo.GetByMacAsync(mac, ct))!.IsRandomMac);
+    }
+
     [Fact]
     public async Task UpsertCycleAsync_CR01_DifferentMacCases_TreatedAsDistinctRows()
     {

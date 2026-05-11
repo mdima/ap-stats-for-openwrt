@@ -52,11 +52,13 @@ public sealed class EventDetectionServiceTests
             => Task.FromResult<WLANStation?>(null);
 
         public Task SetNameAsync(string macAddress, string? name, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetIsRandomMacAsync(string macAddress, bool isRandomMac, CancellationToken ct = default) => Task.CompletedTask;
         public Task DeleteByMacAsync(string macAddress, CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkAllOfflineAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkAllOfflineAsync(OpenWrtApStats.Data.DatabaseContext db, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpsertCycleAsync(IEnumerable<WLANStation> live, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpsertCycleAsync(OpenWrtApStats.Data.DatabaseContext db, IEnumerable<WLANStation> live, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<string>> GetMacsByNodeAsync(int nodeId, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<string>>(SeedMacs.Where(_ => true).ToList());
     }
 
     /// <summary>In-memory <see cref="INodeRepo"/> under test control.</summary>
@@ -81,6 +83,8 @@ public sealed class EventDetectionServiceTests
         public Task UpdateOnlineAsync(int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpdateOnlineAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetHostKeyFingerprintAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpdateLastEnrichmentRefreshAtAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpdateScanSettingsAsync(int id, bool subnetScanEnabled, string? subnetScanRanges, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class Harness : IDisposable
@@ -375,5 +379,57 @@ public sealed class EventDetectionServiceTests
             // System literal name to avoid runtime EFCore reference in this test.
             return gen.FullName?.StartsWith("Microsoft.EntityFrameworkCore.IDbContextFactory", StringComparison.Ordinal) == true;
         }
+    }
+
+    // ── Quick task 260511-cmi — ForgetMac invalidates the in-memory MAC cache ──────────────
+    //
+    // Bug: operator deletes a station via /Stations/{mac} → Delete. The DB row is gone
+    // (ExecuteDeleteAsync), but EventDetectionService._knownMacs still contains the MAC.
+    // When the device re-associates, the orchestrator INSERTs a fresh row and the next
+    // cycle's diff hits `_knownMacs.Add(mac)` which returns FALSE (shadow-known), so the
+    // "New station" info toast (D-06 first-time semantics) does NOT fire.
+    //
+    // Fix: a public ForgetMac(string) method removes the MAC from the in-memory set,
+    // called from Stations/Detail.razor's HandleDeleteAsync before DeleteByMacAsync.
+    [Fact]
+    public async Task ForgetMac_AllowsSameMacToToastAsNew_OnNextCycle()
+    {
+        using var h = new Harness();
+        // Seed: MAC is already known (bootstrap will load it from SeedMacs on first cycle).
+        const string mac = "DE:AD:BE:EF:00:01";
+        h.StationRepo.SeedMacs = new() { mac };
+        h.StationRepo.AllStations = new() { Station(mac, name: "Phone-1") };
+        using var svc = h.Build();
+
+        // Cycle 1 — bootstrap loads `mac` into _knownMacs; existing-station: no toast.
+        await h.RaiseAsync();
+        Assert.DoesNotContain(h.Captured, t => t.Title == "New station");
+        h.Captured.Clear();
+
+        // The cache-invalidation moment: operator deletes the station via UI.
+        // EventDetectionService.ForgetMac runs BEFORE StationRepo.DeleteByMacAsync per
+        // Detail.razor:HandleDeleteAsync (quick task 260511-cmi).
+        svc.ForgetMac(mac);
+
+        // Cycle 2 — same station re-observed (in this scenario the device re-associated
+        // and the orchestrator re-INSERTed the row). With Forget, _knownMacs.Add(mac)
+        // returns true → new-station info toast fires.
+        await h.RaiseAsync();
+        var toast = Assert.Single(h.Captured, t => t.Title == "New station");
+        Assert.Equal("info", toast.Severity);
+        Assert.Contains(mac, toast.Message);
+    }
+
+    [Fact]
+    public void ForgetMac_OnUnknownMac_IsNoOp()
+    {
+        using var h = new Harness();
+        using var svc = h.Build();
+
+        // No exception, no state change. Defends the bootstrap-first ordering and
+        // the empty-set / never-seen-MAC case.
+        svc.ForgetMac("ZZ:ZZ:ZZ:ZZ:ZZ:ZZ");
+        svc.ForgetMac("");
+        svc.ForgetMac(null!);
     }
 }

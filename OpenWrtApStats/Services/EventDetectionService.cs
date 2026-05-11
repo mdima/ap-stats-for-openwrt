@@ -243,6 +243,30 @@ public sealed class EventDetectionService : IDisposable
             : $"{(int)elapsed.TotalMinutes}m ago";
     }
 
+    /// <summary>
+    /// Quick task 260511-cmi — drop a MAC from the in-memory "ever seen" set so a future
+    /// re-association of the same device fires the new-station info toast (D-06 first-time
+    /// semantics). Called by <c>Stations/Detail.razor</c>'s <c>HandleDeleteAsync</c> before
+    /// <see cref="IStationRepo.DeleteByMacAsync"/>; without this, an operator-deleted MAC
+    /// stays shadow-known in <c>_knownMacs</c> until app restart and the rebid is silently
+    /// reclassified as already-seen. No-op when the MAC was never bootstrapped or already
+    /// forgotten (<see cref="HashSet{T}.Remove"/> returns false but does not throw).
+    /// Lock-acquired to serialize against an in-flight <see cref="OnCycledAsync"/> diff.
+    /// </summary>
+    public void ForgetMac(string mac)
+    {
+        if (string.IsNullOrEmpty(mac)) return;
+        _lock.Wait();
+        try
+        {
+            _knownMacs.Remove(mac);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     public void Dispose()
     {
         try { _notifier.Cycled -= OnCycledAsync; } catch { /* best-effort detach */ }

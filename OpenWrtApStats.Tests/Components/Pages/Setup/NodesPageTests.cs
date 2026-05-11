@@ -75,6 +75,12 @@ public sealed class NodesPageTests
 
         public Task SetHostKeyFingerprintAsync(DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default)
             => Task.CompletedTask;
+
+        public Task UpdateLastEnrichmentRefreshAtAsync(DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public Task UpdateScanSettingsAsync(int id, bool subnetScanEnabled, string? subnetScanRanges, CancellationToken ct = default)
+            => Task.CompletedTask;
     }
 
     private sealed class StubSettings : IAppSettingsService
@@ -82,9 +88,13 @@ public sealed class NodesPageTests
         public int PollingIntervalSeconds => 30;
         public string? UIPasswordHash => null;
         public bool WizardDismissed { get; set; }
+        public int RefreshIntervalSeconds => 3600;
+        public IReadOnlyList<string> LocalDomainSuffixes { get; } = Array.Empty<string>();
         public Task SetPollingIntervalSecondsAsync(int s, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetUIPasswordHashAsync(string? h, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetWizardDismissedAsync(bool d, CancellationToken ct = default) { WizardDismissed = d; return Task.CompletedTask; }
+        public Task SetRefreshIntervalSecondsAsync(int s, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default) => Task.CompletedTask;
         public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }

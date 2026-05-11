@@ -19,11 +19,21 @@ public sealed class DatabaseContext(DbContextOptions<DatabaseContext> options) :
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // D-09 / D-10: seed exactly one row, captured in __EFMigrationsHistory.
-        modelBuilder.Entity<AppSetting>().HasData(new AppSetting
-        {
-            Key      = "PollingIntervalSeconds",
-            IntValue = 30
-        });
+        // Phase 9 D-09 adds two more AppSetting seed rows: RefreshIntervalSeconds=3600,
+        // LocalDomainSuffixes="[]" (JSON empty array string). All three are HasData so the
+        // model-snapshot stays canonical and migration-tooling auto-emits InsertData.
+        modelBuilder.Entity<AppSetting>().HasData(
+            new AppSetting { Key = "PollingIntervalSeconds", IntValue = 30 },
+            new AppSetting { Key = "RefreshIntervalSeconds", IntValue = 3600 },
+            new AppSetting { Key = "LocalDomainSuffixes", StringValue = "[]" });
+
+        // Phase 9 SCHEMA-02 / D-07: SubnetScanEnabled defaults to true at the SQL level.
+        // The C# property initializer (= true) covers EF-tracked inserts; this Fluent API
+        // call records the SQL default in the model snapshot so AddColumn emits
+        // defaultValue: true (existing rows back-fill to true on migrate).
+        modelBuilder.Entity<WiFiNode>()
+            .Property(n => n.SubnetScanEnabled)
+            .HasDefaultValue(true);
 
         // NODE-04 (Phase 3) — explicit FK delete behavior:
         //   • WiFiNode → WiFiNetwork: DeleteBehavior.Cascade (required navigation; matches

@@ -18,11 +18,11 @@
 
 <PageHeader Title="Settings" />
 
-@* ==== Card 1: Polling interval (SET-01 / SET-04 propagation) ==== *@
+@* ==== Card 1: Live polling interval (SET-01 / SET-04 propagation; D-05 rename) ==== *@
 <div class="card mb-4">
-    <div class="card-header"><h5 class="card-title mb-0">Polling interval</h5></div>
+    <div class="card-header"><h5 class="card-title mb-0">Live polling interval</h5></div>
     <div class="card-body">
-        <small class="text-body-secondary d-block mb-3">How often the application SSHes into each access point.</small>
+        <small class="text-body-secondary d-block mb-3">How often each AP is polled for connected stations.</small>
 
         @if (!string.IsNullOrEmpty(_intervalBanner))
         {
@@ -43,6 +43,61 @@
             <div class="mt-3">
                 <button type="submit" class="btn btn-primary">Save changes</button>
             </div>
+        </EditForm>
+    </div>
+</div>
+
+@* ==== NEW: Active enrichment interval (Phase 10 SET-01 / D-03 / D-05) ==== *@
+<div class="card mb-4">
+    <div class="card-header"><h5 class="card-title mb-0">Active enrichment interval</h5></div>
+    <div class="card-body">
+        <small class="text-body-secondary d-block mb-3">How often IP addresses and hostnames are refreshed via active probing. Only runs when the live polling cycle detects a new client or when this interval expires.</small>
+
+        @if (!string.IsNullOrEmpty(_refreshBanner))
+        {
+            <div class="alert alert-success" role="alert">@_refreshBanner</div>
+        }
+
+        <EditForm Model="_refreshForm" OnValidSubmit="HandleSaveRefreshAsync" FormName="refresh-form">
+            <DataAnnotationsValidator />
+            <InputRadioGroup @bind-Value="_refreshForm.Seconds" Name="refresh-seconds">
+                @foreach (var (seconds, label) in RefreshPresets)
+                {
+                    <div class="form-check">
+                        <InputRadio class="form-check-input" id="@($"refresh-{seconds}")" Value="@seconds" />
+                        <label class="form-check-label" for="@($"refresh-{seconds}")">@label</label>
+                    </div>
+                }
+            </InputRadioGroup>
+            <div class="mt-3">
+                <button type="submit" class="btn btn-primary">Save changes</button>
+            </div>
+        </EditForm>
+    </div>
+</div>
+
+@* ==== NEW: Local domain suffixes (Phase 10 SET-02 / D-04) ==== *@
+<div class="card mb-4">
+    <div class="card-header"><h5 class="card-title mb-0">Local domain suffixes</h5></div>
+    <div class="card-body">
+        <small class="text-body-secondary d-block mb-3">Comma-separated list of local domain suffixes (e.g., <code>michelecasa, lab.local</code>). Stripped from station hostnames at display time. Leave blank to show full FQDNs.</small>
+
+        @if (!string.IsNullOrEmpty(_suffixesBanner))
+        {
+            <div class="alert alert-success" role="alert">@_suffixesBanner</div>
+        }
+        @if (!string.IsNullOrEmpty(_suffixesError))
+        {
+            <div class="alert alert-danger" role="alert">@_suffixesError</div>
+        }
+
+        <EditForm Model="_suffixesForm" OnValidSubmit="HandleSaveSuffixesAsync" FormName="suffixes-form">
+            <DataAnnotationsValidator />
+            <div class="mb-3">
+                <label class="form-label" for="suffixes-input">Suffixes</label>
+                <InputText id="suffixes-input" class="form-control" @bind-Value="_suffixesForm.CommaSeparated" placeholder="michelecasa, lab.local" />
+            </div>
+            <button type="submit" class="btn btn-primary">Save changes</button>
         </EditForm>
     </div>
 </div>
@@ -173,14 +228,36 @@
 
 @code {
     private IntervalForm _intervalForm = new();
+    private RefreshForm _refreshForm = new();
+    private SuffixesForm _suffixesForm = new();
     private PasswordForm _passwordForm = new();
     private bool _clearPwdModal;
     private bool _clearHostsModal;
 
     private string? _intervalBanner;
+    private string? _refreshBanner;
+    private string? _suffixesBanner;
+    private string? _suffixesError;
     private string? _passwordBanner;
     private string? _passwordError;
     private string? _hostsBanner;
+
+    // D-03 verbatim — five preset values for the Active enrichment interval radio group.
+    // Stored as int seconds to match AppSetting.RefreshIntervalSeconds.IntValue persistence.
+    private static readonly IReadOnlyList<(int Seconds, string Label)> RefreshPresets = new[]
+    {
+        (900,   "15 minutes"),
+        (1800,  "30 minutes"),
+        (3600,  "1 hour"),
+        (21600, "6 hours"),
+        (86400, "24 hours"),
+    };
+
+    // D-04 — single inline rule per token: ASCII letters/digits/dots/hyphens only.
+    // Per-token validator runs BEFORE persistence; invalid input is rejected with a banner
+    // and no AppSetting write is attempted (T-10-02-01 trust-boundary mitigation).
+    private static readonly System.Text.RegularExpressions.Regex SuffixTokenRegex =
+        new(@"^[A-Za-z0-9.\-]+$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     protected override async Task OnInitializedAsync()
     {
@@ -188,6 +265,8 @@
         // re-warm idempotently to handle edge cases like a fresh in-memory test DB.
         await Settings.WarmAsync();
         _intervalForm.Seconds = Settings.PollingIntervalSeconds;
+        _refreshForm.Seconds = Settings.RefreshIntervalSeconds;
+        _suffixesForm.CommaSeparated = string.Join(", ", Settings.LocalDomainSuffixes);
     }
 
     // ── Card 4 (Phase 8 Plan 08-07 REQ-UI-44) — UI preferences state ────────
@@ -219,6 +298,46 @@
         await Settings.SetPollingIntervalSecondsAsync(_intervalForm.Seconds);
         _intervalBanner = "Polling interval saved. The next cycle will use the new interval.";
         _ = AutoDismissAsync(() => _intervalBanner = null);
+    }
+
+    // ── Active enrichment interval handler (Phase 10 SET-01 / D-03) ─────────
+    private async Task HandleSaveRefreshAsync()
+    {
+        await Settings.SetRefreshIntervalSecondsAsync(_refreshForm.Seconds);
+        _refreshBanner = "Active enrichment interval saved. The next refresh tick will use the new interval.";
+        _ = AutoDismissAsync(() => _refreshBanner = null);
+    }
+
+    // ── Local domain suffixes handler (Phase 10 SET-02 / D-04) ──────────────
+    private async Task HandleSaveSuffixesAsync()
+    {
+        _suffixesBanner = null;
+        _suffixesError = null;
+
+        var raw = _suffixesForm.CommaSeparated ?? string.Empty;
+        var tokens = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        // Per-token validation runs BEFORE the write — D-04 verbatim ("Invalid token →
+        // banner + save rejected (no partial persist)"). T-10-02-01 trust-boundary defense.
+        foreach (var t in tokens)
+        {
+            if (t.StartsWith('.'))
+            {
+                _suffixesError = $"Invalid suffix \"{t}\" — suffixes must not start with a dot.";
+                return;
+            }
+            if (!SuffixTokenRegex.IsMatch(t))
+            {
+                _suffixesError = $"Invalid suffix \"{t}\" — suffixes must contain only ASCII letters, digits, dots, and hyphens (no spaces, no leading dot).";
+                return;
+            }
+        }
+
+        await Settings.SetLocalDomainSuffixesAsync(tokens);
+        // Reflect cleaned form back to the operator (collapse extra spaces/empties).
+        _suffixesForm.CommaSeparated = string.Join(", ", tokens);
+        _suffixesBanner = "Local domain suffixes saved. The dashboard will use the new list on the next render.";
+        _ = AutoDismissAsync(() => _suffixesBanner = null);
     }
 
     // ── Card 2 handlers ─────────────────────────────────────────────────────
@@ -274,6 +393,17 @@
     public sealed class IntervalForm
     {
         public int Seconds { get; set; } = 30;   // matches AppSettingsService default
+    }
+
+    public sealed class RefreshForm
+    {
+        // D-03 default — 1h (3600s). Also matches Phase 9 SCHEMA-06 seed for RefreshIntervalSeconds.
+        public int Seconds { get; set; } = 3600;
+    }
+
+    public sealed class SuffixesForm
+    {
+        public string? CommaSeparated { get; set; }
     }
 
     public sealed class PasswordForm

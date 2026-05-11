@@ -368,4 +368,141 @@ public sealed class OpenWrtOutputParserTests
         Assert.Equal(1300.0, stations[0].TxBitrate);
         Assert.Equal(100.0,  stations[0].RxBitrate);
     }
+
+    // Phase 9 ENRICH-04 — fixture-replay theory facts.
+    [Theory]
+    [MemberData(nameof(AllVersionFolders))]
+    public void ParseArpingPingOutput_AcrossAllSupportedVersions_ProducesUppercaseKeyDictionary(string fixtureDir)
+    {
+        var path = Path.Combine(fixtureDir, "arping.txt");
+        Assert.SkipUnless(File.Exists(path),
+            $"Fixture not yet captured (Plan 09-03 will populate {fixtureDir}/arping.txt)");
+        var raw = File.ReadAllText(path);
+        var map = OpenWrtOutputParser.ParseArpingPingOutput(raw, NullLogger.Instance);
+        Assert.All(map.Keys, mac => Assert.Equal(mac.ToUpperInvariant(), mac));
+        // Every value must be a dotted-quad IPv4 — no empty strings, no MAC-shaped values.
+        Assert.All(map.Values, ip => Assert.Matches(@"^\d{1,3}(\.\d{1,3}){3}$", ip));
+    }
+
+    // Phase 9 ENRICH-05 — fixture-replay theory facts.
+    [Theory]
+    [MemberData(nameof(AllVersionFolders))]
+    public void ParseNslookupOutput_AcrossAllSupportedVersions_ProducesNormalizedFqdnOrNull(string fixtureDir)
+    {
+        var path = Path.Combine(fixtureDir, "nslookup.txt");
+        Assert.SkipUnless(File.Exists(path),
+            $"Fixture not yet captured (Plan 09-03 will populate {fixtureDir}/nslookup.txt)");
+        var raw = File.ReadAllText(path);
+        var fqdn = OpenWrtOutputParser.ParseNslookupOutput(raw, NullLogger.Instance);
+        if (fqdn is null) return;          // null is a valid normalized result for NXDOMAIN.
+        Assert.Equal(fqdn.ToLowerInvariant(), fqdn);
+        Assert.False(fqdn.EndsWith('.'), $"Trailing dot was not stripped: '{fqdn}'");
+    }
+
+    // Phase 9 ENRICH-04 — synthetic tolerance regression (D-02 / Phase 2 D-05 carry-over).
+    [Fact]
+    public void ParseArpingPingOutput_TolerantOfDeliberatelyCorruptLine_LogsWarningAndContinues()
+    {
+        const string raw = """
+            Reply from 192.168.1.42 [aa:bb:cc:dd:ee:01]
+            GARBAGE LINE WITH NO RECOGNIZABLE FIELDS
+            """;
+        var map = OpenWrtOutputParser.ParseArpingPingOutput(raw, NullLogger.Instance);
+        Assert.Single(map);
+        Assert.Equal("192.168.1.42", map["AA:BB:CC:DD:EE:01"]);
+    }
+
+    // Phase 9 ENRICH-04 — BusyBox arping shape coverage.
+    [Fact]
+    public void ParseArpingPingOutput_BusyBoxUnicastReplyShape_ParsesEntry()
+    {
+        const string raw = "Unicast reply from 192.168.1.43 [bb:cc:dd:ee:ff:02] 1.234ms";
+        var map = OpenWrtOutputParser.ParseArpingPingOutput(raw, NullLogger.Instance);
+        Assert.Single(map);
+        Assert.Equal("192.168.1.43", map["BB:CC:DD:EE:FF:02"]);
+    }
+
+    // Phase 9 W4 (revision 1) — closes the coverage gap on the silent-skip branch
+    // (`if (!macMatch.Success) continue;`). Real arping output for an unanswered host
+    // emits `Sent 1 probes (1 broadcast(s))` + `Received 0 response(s)` with NO MAC and
+    // NO IPv4 — the parser must silently skip these lines (no LogWarning) and produce
+    // an empty dict. Combine with one good entry to also prove the loop continues
+    // past skipped lines without poisoning the good entry.
+    [Fact]
+    public void ParseArpingPingOutput_NegativeResultLines_AreSilentlySkipped()
+    {
+        const string raw = """
+            ARPING 192.168.1.42 from 192.168.1.1 br-lan
+            Unicast reply from 192.168.1.42 [aa:bb:cc:dd:ee:01] 1.234ms
+            ARPING 192.168.1.99 from 192.168.1.1 br-lan
+            Sent 1 probes (1 broadcast(s))
+            Received 0 response(s)
+            """;
+        var map = OpenWrtOutputParser.ParseArpingPingOutput(raw, NullLogger.Instance);
+        // Exactly one entry — the unanswered-host lines are silently skipped (no MAC).
+        Assert.Single(map);
+        Assert.Equal("192.168.1.42", map["AA:BB:CC:DD:EE:01"]);
+        // Note: the "no LogWarning" assertion is implicit via NullLogger.Instance — a
+        // fail-on-warn logger would surface this; for stricter coverage in revision 2+
+        // swap to a CapturingLogger and assert Entries.All(e => e.Level != LogLevel.Warning).
+    }
+
+    // Phase 9 ENRICH-05 — BusyBox nslookup shape coverage + normalization.
+    [Fact]
+    public void ParseNslookupOutput_BusyBoxShape_ReturnsLoweredDotStrippedFqdn()
+    {
+        const string raw = """
+            Server:    192.168.1.1
+            Address 1: 192.168.1.1
+
+            Name:      MY-HOST.LAN.
+            Address 1: 192.168.1.42 my-host.lan
+            """;
+        var fqdn = OpenWrtOutputParser.ParseNslookupOutput(raw, NullLogger.Instance);
+        Assert.Equal("my-host.lan", fqdn);
+    }
+
+    // Phase 9 ENRICH-05 — D-12 negative-result mapping.
+    [Theory]
+    [InlineData("nslookup: can't find 192.168.99.99: No answer")]
+    [InlineData("** server can't find 1.2.3.4: SERVFAIL")]
+    [InlineData(";; reply from unexpected source: 192.168.1.1#53\nconnection timed out")]
+    [InlineData("Server:    192.168.1.1\n\n** server can't find 192.168.99.99: NXDOMAIN")]
+    [InlineData("")]
+    public void ParseNslookupOutput_NegativeResults_ReturnNull(string raw)
+    {
+        var fqdn = OpenWrtOutputParser.ParseNslookupOutput(raw, NullLogger.Instance);
+        Assert.Null(fqdn);
+    }
+
+    // Phase 10 HUMAN-UAT regression lock (debug session p10-trigger-and-nslookup):
+    // operator-captured BusyBox reverse-PTR output from a real OpenWrt 23.05-SNAPSHOT AP
+    // resolving against a dnsmasq upstream. Two fixture shapes pinned here:
+    //   - nslookup-reverse-ptr-success.txt  — BIND-style answer line, NO trailing dot on FQDN,
+    //                                          6 ASCII spaces between `arpa` and `name`.
+    //   - nslookup-reverse-ptr-nxdomain.txt — `** server can't find …: NXDOMAIN`.
+    // These tests GREEN-LOCK current parser behavior on the operator's exact bytes; they are
+    // NOT a RED→GREEN bug-flip. A previous spawn prompt hypothesized the parser required a
+    // trailing dot on the FQDN — empirical replay of the operator's captured bytes through
+    // ParseNslookupOutput FALSIFIED that hypothesis (Normalize strips the dot only when present,
+    // so absence is a no-op pass-through). These fixtures cover the BIND PTR branch at
+    // OpenWrtOutputParser.cs:430-436 with real-world bytes instead of the previously-untested
+    // synthesized-placeholder shape.
+    [Fact]
+    public void ParseNslookupOutput_OperatorCapturedReversePtr_Success_ReturnsFqdn()
+    {
+        var path = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT", "nslookup-reverse-ptr-success.txt");
+        var raw = File.ReadAllText(path);
+        var fqdn = OpenWrtOutputParser.ParseNslookupOutput(raw, NullLogger.Instance);
+        Assert.Equal("esp_50df65.michelecasa", fqdn);
+    }
+
+    [Fact]
+    public void ParseNslookupOutput_OperatorCapturedReversePtr_Nxdomain_ReturnsNull()
+    {
+        var path = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT", "nslookup-reverse-ptr-nxdomain.txt");
+        var raw = File.ReadAllText(path);
+        var fqdn = OpenWrtOutputParser.ParseNslookupOutput(raw, NullLogger.Instance);
+        Assert.Null(fqdn);
+    }
 }

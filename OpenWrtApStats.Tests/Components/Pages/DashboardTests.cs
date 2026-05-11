@@ -40,6 +40,8 @@ public sealed class DashboardTests
         public Task UpdateOnlineAsync(int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpdateOnlineAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetHostKeyFingerprintAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpdateLastEnrichmentRefreshAtAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpdateScanSettingsAsync(int id, bool subnetScanEnabled, string? subnetScanRanges, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class StubNetworkRepo : INetworkRepo
@@ -68,11 +70,13 @@ public sealed class DashboardTests
         public Task<IReadOnlyList<string>> GetAllMacsAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<string>>(_stations.Select(s => s.MacAddress).Distinct().ToList());
         public Task SetNameAsync(string macAddress, string? name, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetIsRandomMacAsync(string macAddress, bool isRandomMac, CancellationToken ct = default) => Task.CompletedTask;
         public Task DeleteByMacAsync(string macAddress, CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkAllOfflineAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkAllOfflineAsync(OpenWrtApStats.Data.DatabaseContext db, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpsertCycleAsync(IEnumerable<WLANStation> live, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpsertCycleAsync(OpenWrtApStats.Data.DatabaseContext db, IEnumerable<WLANStation> live, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<string>> GetMacsByNodeAsync(int nodeId, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<string>>(_stations.Select(s => s.MacAddress).Distinct().ToList());
     }
 
     private sealed class StubOuiLookup : IOuiLookup
@@ -83,19 +87,27 @@ public sealed class DashboardTests
 
     private sealed class StubSettings : IAppSettingsService
     {
-        public StubSettings(bool wizardDismissed = false) { WizardDismissed = wizardDismissed; }
+        public StubSettings(bool wizardDismissed = false, IReadOnlyList<string>? localDomainSuffixes = null)
+        {
+            WizardDismissed = wizardDismissed;
+            LocalDomainSuffixes = localDomainSuffixes ?? Array.Empty<string>();
+        }
         public int     PollingIntervalSeconds { get; } = 30;
         public string? UIPasswordHash         { get; } = null;
         public bool    WizardDismissed        { get; }
+        public int     RefreshIntervalSeconds { get; } = 3600;
+        public IReadOnlyList<string> LocalDomainSuffixes { get; }
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetRefreshIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default) => Task.CompletedTask;
         public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }
 
     private static (BunitContext ctx, StubNodeRepo nodes, StubNetworkRepo nets, StubStationRepo stations, StubOuiLookup oui)
-        Build(IEnumerable<WiFiNode> nodes, IEnumerable<WLANStation> stations, bool anyEnabled, Dictionary<int, List<WiFiNetwork>>? networkMap = null, bool wizardDismissed = false)
+        Build(IEnumerable<WiFiNode> nodes, IEnumerable<WLANStation> stations, bool anyEnabled, Dictionary<int, List<WiFiNetwork>>? networkMap = null, bool wizardDismissed = false, IReadOnlyList<string>? localDomainSuffixes = null)
     {
         var ctx = new BunitContext();
         // Phase 8: Dashboard.razor injects PreferencesService for view-state restore + persistence.
@@ -111,7 +123,7 @@ public sealed class DashboardTests
         }
         var sr = new StubStationRepo(stations);
         var oui = new StubOuiLookup();
-        var settings = new StubSettings(wizardDismissed);
+        var settings = new StubSettings(wizardDismissed, localDomainSuffixes);
         ctx.Services.AddSingleton<INodeRepo>(nr);
         ctx.Services.AddSingleton<INetworkRepo>(nws);
         ctx.Services.AddSingleton<IStationRepo>(sr);
@@ -491,6 +503,270 @@ public sealed class DashboardTests
         var source = ReadDashboardSource();
         // Phase 5 Plan 03 success criterion: all five TODO(phase-05) markers are closed.
         Assert.DoesNotContain("TODO(phase-05)", source);
+    }
+
+    // ── Phase 10 tests (Plan 10-04 Task 2) ─────────────────────────────────
+
+    private static (WiFiNode node, WiFiNetwork net) MakeApAndNet()
+    {
+        var node = new WiFiNode { Id = 1, Hostname = "ap-A", Username = "root", Password = "x", Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var net  = new WiFiNetwork { Id = 10, WiFiNodeId = 1, MacAddress = "00:11:22:33:44:55", SSID = "guest", Enabled = true };
+        return (node, net);
+    }
+
+    [Fact]
+    public void Dashboard_IpColumn_RendersIpForRow_AndEmDashForNullIp()
+    {
+        // DASH-17 — IP column populated from WLANStation.IPAddress; null shows "—".
+        var (node, net) = MakeApAndNet();
+        var s1 = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10, IPAddress = "10.0.0.5",  Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var s2 = new WLANStation { Id = 101, MacAddress = "AA:00:00:00:00:02", WiFiNetworkId = 10, IPAddress = null,        Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { s1, s2 }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } });
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            // Header
+            Assert.Contains(">IP<", cut.Markup);
+            // Populated row
+            Assert.Contains("10.0.0.5", cut.Markup);
+            // Null IP renders em-dash
+            Assert.Contains("—", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public void Dashboard_Cascade_StripsLocalSuffix_WhenSettingsHasMatchingSuffix()
+    {
+        // DASH-18 / DASH-19 — Hostname branch goes through HostnameDisplay.StripLocalSuffix.
+        var (node, net) = MakeApAndNet();
+        var s = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10, Name = null, Hostname = "dev.michelecasa", Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { s }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } },
+            localDomainSuffixes: new[] { "michelecasa" });
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            // Anchor text is the suffix-stripped short form (cascade only — full FQDN may still appear in the row tooltip).
+            var anchor = cut.FindAll("a").First(a => (a.GetAttribute("href") ?? "").Contains("AA%3A00%3A00%3A00%3A00%3A01"));
+            Assert.Equal("dev", anchor.TextContent.Trim());
+        }
+    }
+
+    [Fact]
+    public void Dashboard_Cascade_RendersFullFqdn_WhenNoSuffixMatches()
+    {
+        var (node, net) = MakeApAndNet();
+        var s = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10, Name = null, Hostname = "dev.michelecasa", Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { s }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } },
+            localDomainSuffixes: new[] { "other" });
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            var anchor = cut.FindAll("a").First(a => (a.GetAttribute("href") ?? "").Contains("AA%3A00%3A00%3A00%3A00%3A01"));
+            Assert.Equal("dev.michelecasa", anchor.TextContent.Trim());
+        }
+    }
+
+    [Fact]
+    public void Dashboard_Cascade_RendersMac_WhenNameAndHostnameAreNull()
+    {
+        var (node, net) = MakeApAndNet();
+        var s = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10, Name = null, Hostname = null, Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { s }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } });
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            var anchor = cut.FindAll("a").First(a => (a.GetAttribute("href") ?? "").Contains("AA%3A00%3A00%3A00%3A00%3A01"));
+            Assert.Equal("AA:00:00:00:00:01", anchor.TextContent.Trim());
+        }
+    }
+
+    [Fact]
+    public void Dashboard_Cascade_RendersName_WhenNameIsSet_NoSuffixStrippingOnNameBranch()
+    {
+        var (node, net) = MakeApAndNet();
+        var s = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10, Name = "Operator-Pi", Hostname = "dev.michelecasa", Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { s }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } },
+            localDomainSuffixes: new[] { "michelecasa" });
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            var anchor = cut.FindAll("a").First(a => (a.GetAttribute("href") ?? "").Contains("AA%3A00%3A00%3A00%3A00%3A01"));
+            Assert.Equal("Operator-Pi", anchor.TextContent.Trim());
+        }
+    }
+
+    [Fact]
+    public void Dashboard_RandomMacBadge_RendersWhenIsRandomMacTrue()
+    {
+        // DASH-21 — bi-shuffle pill rendered next to MAC value when IsRandomMac=true.
+        var (node, net) = MakeApAndNet();
+        var s = new WLANStation { Id = 100, MacAddress = "BA:00:00:00:00:01", WiFiNetworkId = 10, IsRandomMac = true, Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { s }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } });
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            Assert.Contains("bi bi-shuffle", cut.Markup);
+            Assert.Contains("Locally administered MAC", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public void Dashboard_RandomMacBadge_HiddenWhenIsRandomMacFalse()
+    {
+        var (node, net) = MakeApAndNet();
+        var s = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10, IsRandomMac = false, Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { s }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } });
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            Assert.DoesNotContain("bi-shuffle", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public void Dashboard_RowTooltip_ExposesFullIdentifierSet()
+    {
+        // DASH-20 — row title attribute contains Name | Hostname (short) | FQDN | MAC | Random MAC.
+        var (node, net) = MakeApAndNet();
+        var s = new WLANStation { Id = 100, MacAddress = "AA:BB:CC:DD:EE:FF", WiFiNetworkId = 10, Name = "Pi", Hostname = "dev.michelecasa", IsRandomMac = true, Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { s }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } },
+            localDomainSuffixes: new[] { "michelecasa" });
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            var bodyRow = cut.FindAll("tbody tr").First();
+            var title = bodyRow.GetAttribute("title") ?? string.Empty;
+            Assert.Contains("Name: Pi", title);
+            Assert.Contains("Hostname: dev", title);
+            Assert.Contains("FQDN: dev.michelecasa", title);
+            Assert.Contains("MAC: AA:BB:CC:DD:EE:FF", title);
+            Assert.Contains("Random MAC: Yes", title);
+        }
+    }
+
+    // ── Quick task 260511-osd — orphan WLANStations rendered with "—" placeholders ────────
+    //
+    // When a WiFiNetwork is hard-deleted (cascade SetNull on WLANStation.WiFiNetworkId
+    // after BSSID rotation / AP outage), the dependent station rows become "orphan"
+    // (FK = null) or point at a now-missing network id. Prior behavior: BuildRowsAsync
+    // silently filtered them out, hiding e.g. cameras that connected briefly then powered
+    // off. New behavior: include them with `Ssid = "—"`, `ApHostname = "—"`, `ApNodeId = 0`
+    // so operators see them. Disabled-WLAN exclusion is preserved unchanged.
+
+    [Fact]
+    public void BuildRows_IncludesOrphanStations_WithDashPlaceholders()
+    {
+        // Two orphan shapes: (a) WiFiNetworkId IS NULL (the cascade-SetNull outcome),
+        // (b) WiFiNetworkId points at a network id that no longer exists in networkLookup
+        // (the lookup-miss case — happens if the network is gone but the FK hasn't yet
+        // been nulled, or if the lookup is built from a different node set).
+        var (node, net) = MakeApAndNet();
+        var normal  = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10,   Hostname = "alice", Status = Status.Online,  LastPollDate = DateTime.UtcNow };
+        var orphanA = new WLANStation { Id = 101, MacAddress = "BB:00:00:00:00:02", WiFiNetworkId = null, Hostname = "bob",   Status = Status.Offline, LastPollDate = DateTime.UtcNow };
+        var orphanB = new WLANStation { Id = 102, MacAddress = "CC:00:00:00:00:03", WiFiNetworkId = 999,  Hostname = "carol", Status = Status.Offline, LastPollDate = DateTime.UtcNow };
+
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { normal, orphanA, orphanB }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } });
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+
+            // All three rows are present (MAC visible in column 2 monospace cell for each).
+            Assert.Contains("AA:00:00:00:00:01", cut.Markup);
+            Assert.Contains("BB:00:00:00:00:02", cut.Markup);
+            Assert.Contains("CC:00:00:00:00:03", cut.Markup);
+
+            // Per-row placeholder check: locate the <tr> by MAC and assert its SSID + AP cells
+            // (columns 5 and 6, 0-indexed 4 and 5) render the em-dash placeholder.
+            foreach (var orphanMac in new[] { "BB:00:00:00:00:02", "CC:00:00:00:00:03" })
+            {
+                var row = cut.FindAll("tbody tr")
+                             .First(tr => tr.TextContent.Contains(orphanMac));
+                var cells = row.QuerySelectorAll("td");
+                Assert.Equal("—", cells[4].TextContent.Trim());   // SSID
+                Assert.Equal("—", cells[5].TextContent.Trim());   // AP
+            }
+
+            // Sanity: the non-orphan row still renders its real SSID + AP.
+            var aliceRow = cut.FindAll("tbody tr")
+                              .First(tr => tr.TextContent.Contains("AA:00:00:00:00:01"));
+            var aliceCells = aliceRow.QuerySelectorAll("td");
+            Assert.Equal("guest", aliceCells[4].TextContent.Trim());
+            Assert.Equal("ap-A",  aliceCells[5].TextContent.Trim());
+        }
+    }
+
+    [Fact]
+    public void BuildRows_OrphanStation_RespectsStatusFilter()
+    {
+        // Orphan with Status=Offline must inherit the standard Status-filter semantics:
+        // selecting "Online" hides it (its persisted Status is not Online). The orphan
+        // remains visible when no Status filter is active (the initial render).
+        //
+        // Note: the Offline / Stale partition in production splits on the IsStale predicate,
+        // which depends on `_cycleEndUtc`. That field is only populated by a PollNotifier.Cycled
+        // event, which this bUnit harness does not raise — so an offline row's Offline-vs-Stale
+        // classification under bUnit defaults to Stale (elapsed is negative against MinValue
+        // and thus < threshold). The Online-excludes-Offline-orphan direction is sufficient
+        // to lock the orphan-respects-Status-filter regression; the Offline-vs-Stale partition
+        // is independently covered by the existing IsStale tests.
+        var (node, net) = MakeApAndNet();
+        var onlineNormal = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10,   Hostname = "alice",  Status = Status.Online,  LastPollDate = DateTime.UtcNow };
+        var offlineOrphan = new WLANStation { Id = 101, MacAddress = "BB:00:00:00:00:02", WiFiNetworkId = null, Hostname = "ghost", Status = Status.Offline, LastPollDate = DateTime.UtcNow };
+
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { onlineNormal, offlineOrphan }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } });
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+
+            // No filter: both rows visible.
+            Assert.Contains("AA:00:00:00:00:01", cut.Markup);
+            Assert.Contains("BB:00:00:00:00:02", cut.Markup);
+
+            // Click the "Online" Status chip — only the online normal row should remain.
+            // Status filter chips have no StatusBadgeFor decorator so their button TextContent
+            // is just the label.
+            cut.FindAll("button").First(b => b.TextContent.Trim() == "Online").Click();
+            Assert.Contains("AA:00:00:00:00:01", cut.Markup);
+            Assert.DoesNotContain("BB:00:00:00:00:02", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public void BuildRows_OrphanStation_HiddenByApFilter()
+    {
+        // AP filter selects by hostname label. Orphan rows have ApHostname="—" so they don't
+        // match any real AP label and stay hidden when an AP filter is active.
+        var (node, net) = MakeApAndNet();
+        var normal = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10,   Hostname = "alice", Status = Status.Online,  LastPollDate = DateTime.UtcNow };
+        var orphan = new WLANStation { Id = 101, MacAddress = "BB:00:00:00:00:02", WiFiNetworkId = null, Hostname = "ghost", Status = Status.Online,  LastPollDate = DateTime.UtcNow };
+
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { normal, orphan }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } });
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+
+            // No filter: both visible.
+            Assert.Contains("AA:00:00:00:00:01", cut.Markup);
+            Assert.Contains("BB:00:00:00:00:02", cut.Markup);
+
+            // Click the "ap-A" AP chip. AP chips compose Phase 8's StatusBadgeFor, so the
+            // <button>'s TextContent contains both the label and the nested badge text
+            // (e.g. "ap-A Online"). Match by prefix.
+            cut.FindAll("button").First(b => b.TextContent.Trim().StartsWith("ap-A")).Click();
+            Assert.Contains("AA:00:00:00:00:01", cut.Markup);
+            Assert.DoesNotContain("BB:00:00:00:00:02", cut.Markup);
+        }
     }
 
     /// <summary>

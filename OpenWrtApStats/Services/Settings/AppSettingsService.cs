@@ -1,3 +1,4 @@
+using System.Text.Json;
 using OpenWrtApStats.Data.Models;
 using OpenWrtApStats.Data.Repositories;
 
@@ -14,27 +15,56 @@ namespace OpenWrtApStats.Services.Settings;
 public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsService
 {
     // Well-known keys — never strings in callers (D-11)
-    private const string KeyPollingInterval = "PollingIntervalSeconds";
-    private const string KeyUIPasswordHash  = "UIPasswordHash";
-    private const string KeyWizardDismissed = "WizardDismissed";
+    private const string KeyPollingInterval        = "PollingIntervalSeconds";
+    private const string KeyUIPasswordHash         = "UIPasswordHash";
+    private const string KeyWizardDismissed        = "WizardDismissed";
+    private const string KeyRefreshIntervalSeconds = "RefreshIntervalSeconds";
+    private const string KeyLocalDomainSuffixes    = "LocalDomainSuffixes";
+
+    private static readonly IReadOnlyList<string> EmptySuffixList = Array.Empty<string>();
 
     // Immutable snapshot; replaced atomically via Interlocked.Exchange.
-    private sealed record Snapshot(int PollingIntervalSeconds, string? UIPasswordHash, bool WizardDismissed);
-    private Snapshot _current = new(30, null, false); // safe defaults until WarmAsync runs
+    private sealed record Snapshot(
+        int PollingIntervalSeconds,
+        string? UIPasswordHash,
+        bool WizardDismissed,
+        int RefreshIntervalSeconds,
+        IReadOnlyList<string> LocalDomainSuffixes);
+    private Snapshot _current = new(30, null, false, 3600, EmptySuffixList); // safe defaults until WarmAsync runs (3600 matches Phase 9 SCHEMA-06 seed)
 
     public int     PollingIntervalSeconds => Volatile.Read(ref _current).PollingIntervalSeconds;
     public string? UIPasswordHash         => Volatile.Read(ref _current).UIPasswordHash;
     public bool    WizardDismissed        => Volatile.Read(ref _current).WizardDismissed;
+    public int     RefreshIntervalSeconds => Volatile.Read(ref _current).RefreshIntervalSeconds;
+    public IReadOnlyList<string> LocalDomainSuffixes => Volatile.Read(ref _current).LocalDomainSuffixes;
 
     public event Action<IAppSettingsService>? Changed;
 
     public async Task WarmAsync(CancellationToken ct = default)
     {
         var rows = await repo.GetAllAsync(ct);
+
+        IReadOnlyList<string> suffixes = EmptySuffixList;
+        if (rows.TryGetValue(KeyLocalDomainSuffixes, out var ld) && !string.IsNullOrWhiteSpace(ld.StringValue))
+        {
+            try
+            {
+                var arr = JsonSerializer.Deserialize<string[]>(ld.StringValue);
+                if (arr is not null) suffixes = arr;
+            }
+            catch (JsonException)
+            {
+                // Defensive: malformed value persists as empty list. Operator can re-save via the Settings page.
+                suffixes = EmptySuffixList;
+            }
+        }
+
         var snap = new Snapshot(
-            PollingIntervalSeconds: rows.TryGetValue(KeyPollingInterval, out var pi) ? pi.IntValue ?? 30 : 30,
-            UIPasswordHash:         rows.TryGetValue(KeyUIPasswordHash,  out var uh) ? uh.StringValue : null,
-            WizardDismissed:        rows.TryGetValue(KeyWizardDismissed, out var wd) ? wd.BoolValue ?? false : false);
+            PollingIntervalSeconds:    rows.TryGetValue(KeyPollingInterval,        out var pi) ? pi.IntValue ?? 30   : 30,
+            UIPasswordHash:            rows.TryGetValue(KeyUIPasswordHash,         out var uh) ? uh.StringValue       : null,
+            WizardDismissed:           rows.TryGetValue(KeyWizardDismissed,        out var wd) ? wd.BoolValue ?? false: false,
+            RefreshIntervalSeconds:    rows.TryGetValue(KeyRefreshIntervalSeconds, out var ri) ? ri.IntValue ?? 3600 : 3600,
+            LocalDomainSuffixes:       suffixes);
         Interlocked.Exchange(ref _current, snap);
     }
 
@@ -46,6 +76,22 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
 
     public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default)
         => UpsertAndRefreshAsync(KeyWizardDismissed, boolValue: dismissed, ct: ct);
+
+    public Task SetRefreshIntervalSecondsAsync(int seconds, CancellationToken ct = default)
+        => UpsertAndRefreshAsync(KeyRefreshIntervalSeconds, intValue: seconds, ct: ct);
+
+    public Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(suffixes);
+        // Defensive cleanup: trim, discard empties. Caller (Settings/Index.razor) already does this,
+        // but mirror here so direct API consumers can't bypass.
+        var cleaned = suffixes
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s.Trim())
+            .ToArray();
+        var json = JsonSerializer.Serialize(cleaned);
+        return UpsertAndRefreshAsync(KeyLocalDomainSuffixes, stringValue: json, ct: ct);
+    }
 
     private async Task UpsertAndRefreshAsync(
         string key,

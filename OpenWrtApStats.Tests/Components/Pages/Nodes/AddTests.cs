@@ -40,6 +40,8 @@ public sealed class AddTests
         public Task UpdateOnlineAsync(int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpdateOnlineAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetHostKeyFingerprintAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpdateLastEnrichmentRefreshAtAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpdateScanSettingsAsync(int id, bool subnetScanEnabled, string? subnetScanRanges, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class StubTestConn : ITestConnectionService
@@ -150,5 +152,67 @@ public sealed class AddTests
         // T-3-04-01 mitigation: ciphertext, not plaintext.
         Assert.NotEqual("plain-text-pwd", repo.Captured.Password);
         Assert.StartsWith("CfDJ", repo.Captured.Password);
+    }
+
+    // ── Phase 10 SET-03 / SET-04 — D-09 form fields persist through Add flow ─────
+    [Fact]
+    public void Save_PersistsSubnetScanFields_FromForm()
+    {
+        // Default toggle state is ON (NodeFormModel.SubnetScanEnabled = true). Operator
+        // fills the CIDR field and submits.
+        using var ctx = Build(out var repo, out _);
+        var cut = ctx.Render<AddPage>();
+
+        cut.Find("input[placeholder='192.168.1.1']").Change("192.168.1.1");
+        cut.Find("input[placeholder='root']").Change("root");
+        cut.Find("input[type='password']").Change("plain-text-pwd");
+        cut.Find("input#subnet-scan-ranges").Change("192.168.1.0/24");
+
+        cut.Find("button[type='submit']").Click();
+
+        Assert.NotNull(repo.Captured);
+        Assert.True(repo.Captured!.SubnetScanEnabled);
+        Assert.Equal("192.168.1.0/24", repo.Captured.SubnetScanRanges);
+    }
+
+    [Fact]
+    public void Save_BlankSubnetScanRanges_PersistsAsNull()
+    {
+        // Blank/whitespace SubnetScanRanges round-trips as null (auto-derive intent — D-09).
+        using var ctx = Build(out var repo, out _);
+        var cut = ctx.Render<AddPage>();
+
+        cut.Find("input[placeholder='192.168.1.1']").Change("192.168.1.1");
+        cut.Find("input[placeholder='root']").Change("root");
+        cut.Find("input[type='password']").Change("plain-text-pwd");
+        // Leave SubnetScanRanges blank (default).
+
+        cut.Find("button[type='submit']").Click();
+
+        Assert.NotNull(repo.Captured);
+        Assert.True(repo.Captured!.SubnetScanEnabled);  // default ON
+        Assert.Null(repo.Captured.SubnetScanRanges);
+    }
+
+    [Fact]
+    public void Save_DisabledToggle_PersistsFalse()
+    {
+        // Operator unchecks the toggle. The CIDR list value is preserved (D-09 — value is
+        // still persisted so the operator can re-enable later without re-entering it).
+        using var ctx = Build(out var repo, out _);
+        var cut = ctx.Render<AddPage>();
+
+        cut.Find("input[placeholder='192.168.1.1']").Change("192.168.1.1");
+        cut.Find("input[placeholder='root']").Change("root");
+        cut.Find("input[type='password']").Change("plain-text-pwd");
+        cut.Find("input#subnet-scan-ranges").Change("10.0.0.0/24");
+        // Uncheck the toggle.
+        cut.Find("input#subnet-scan-enabled").Change(false);
+
+        cut.Find("button[type='submit']").Click();
+
+        Assert.NotNull(repo.Captured);
+        Assert.False(repo.Captured!.SubnetScanEnabled);
+        Assert.Equal("10.0.0.0/24", repo.Captured.SubnetScanRanges);
     }
 }

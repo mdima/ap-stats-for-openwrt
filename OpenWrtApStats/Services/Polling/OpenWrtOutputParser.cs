@@ -39,6 +39,10 @@ public static class OpenWrtOutputParser
     private static readonly System.Text.RegularExpressions.Regex MacRegex =
         new(@"\b([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}\b", System.Text.RegularExpressions.RegexOptions.Compiled);
 
+    // IPv4 dotted-quad. Used by ParseArpingPingOutput line extraction (Phase 9 ENRICH-04).
+    private static readonly System.Text.RegularExpressions.Regex IPv4Regex =
+        new(@"\b(?:\d{1,3}\.){3}\d{1,3}\b", System.Text.RegularExpressions.RegexOptions.Compiled);
+
     // HT Mode mnemonic → MHz width. Matches HT20/HT40/HT40+/HT40-/VHT20/VHT40/VHT80/VHT80+80/
     // VHT160/HE20/HE40/HE80/HE160/EHT20/EHT40/EHT80/EHT160/EHT320 etc. Captures the leading
     // digit run after the prefix (e.g. "VHT80+80" → 80; "HT40+" → 40). Falls back to 0 (default
@@ -356,6 +360,156 @@ public static class OpenWrtOutputParser
         }
         return result;
     }
+
+    /// <summary>
+    /// Phase 9 ENRICH-04: parse interleaved stdout from the AP-side `arping`/`ping` batched loop
+    /// (D-01) → Dictionary&lt;MAC, IPv4&gt;. MACs uppercased (D-07). Tolerant per-line (D-02 / D-05) —
+    /// lines without both a MAC and an IPv4 are SKIPPED silently (no warning); only structurally
+    /// surprising lines (parse exceptions) log Warning and continue. Last-wins on duplicate MACs
+    /// from the interleaved batch output. Uses StringComparer.Ordinal (keys are uppercased on insert).
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> ParseArpingPingOutput(string raw, ILogger log)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(raw)) return result;
+        foreach (var rawLine in raw.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0) continue;
+            try
+            {
+                var macMatch = MacRegex.Match(line);
+                if (!macMatch.Success) continue;     // ping fallback / non-matching lines.
+                var ipMatch = IPv4Regex.Match(line);
+                if (!ipMatch.Success) continue;
+                var mac = macMatch.Value.ToUpperInvariant();
+                result[mac] = ipMatch.Value;
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "Parse error in arping/ping output line: {RawLine}. Skipped.", line);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Phase 9 ENRICH-05: parse a single `nslookup &lt;ip&gt;` invocation's stdout → normalized
+    /// FQDN (trailing dot stripped, case lowered) or null on NXDOMAIN/SERVFAIL/timeout/empty (D-12).
+    /// Handles BusyBox shape (`Name: my-host.lan`) and BIND fallback shape (`name = my-host.lan.`).
+    /// Tolerant per-line — exceptions log Warning and continue scanning.
+    /// </summary>
+    public static string? ParseNslookupOutput(string raw, ILogger log)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+
+        // D-12 negative-result short-circuit. Operates on the whole input so we don't mistake a
+        // server-name line for the answer when the lookup actually failed.
+        if (raw.Contains("NXDOMAIN", StringComparison.OrdinalIgnoreCase)
+            || raw.Contains("SERVFAIL", StringComparison.OrdinalIgnoreCase)
+            || raw.Contains("can't find", StringComparison.OrdinalIgnoreCase)
+            || raw.Contains("connection timed out", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        foreach (var rawLine in raw.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0) continue;
+            try
+            {
+                // BusyBox shape: "Name:    my-host.lan"
+                if (line.StartsWith("Name:", StringComparison.OrdinalIgnoreCase))
+                {
+                    var fqdn = line.Substring("Name:".Length).Trim();
+                    if (fqdn.Length == 0) continue;
+                    return Normalize(fqdn);
+                }
+                // BIND shape: "42.1.168.192.in-addr.arpa name = my-host.lan."
+                var bindIdx = line.IndexOf("name = ", StringComparison.OrdinalIgnoreCase);
+                if (bindIdx >= 0)
+                {
+                    var fqdn = line.Substring(bindIdx + "name = ".Length).Trim();
+                    if (fqdn.Length == 0) continue;
+                    return Normalize(fqdn);
+                }
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "Parse error in nslookup output line: {RawLine}. Skipped.", line);
+            }
+        }
+        return null;
+
+        static string Normalize(string fqdn)
+        {
+            if (fqdn.EndsWith('.')) fqdn = fqdn[..^1];
+            return fqdn.ToLowerInvariant();
+        }
+    }
+
+    /// <summary>
+    /// Quick task 260511-lct (2026-05-11): parse the batched <c>nslookup</c> stdout produced by
+    /// <see cref="ReverseDnsProbe"/>'s single-SSH-command shell loop → Dictionary&lt;IP, FQDN?&gt;.
+    /// Each per-IP block in the stream is delimited by a sentinel line of the form
+    /// <c>==&lt;ipv4&gt;==</c> emitted by the AP-side subshell BEFORE its nslookup invocation
+    /// runs (the parenthesised subshell <c>(echo ==$ip==; nslookup ... 2>&amp;1) &amp;</c> shape
+    /// keeps the sentinel-echo and the nslookup output atomic against background-process
+    /// interleaving — see ReverseDnsProbe.BuildBatchedNslookupCommand).
+    ///
+    /// Composition: delegates each sentinel-delimited block body to the existing single-IP
+    /// <see cref="ParseNslookupOutput"/> — that preserves FQDN normalization (lowercase,
+    /// trailing-dot strip) plus the NXDOMAIN/SERVFAIL/can't find/connection-timed-out
+    /// short-circuit (D-12) verbatim. Returns the dictionary using StringComparer.Ordinal
+    /// (IPv4 dotted-quad keys are ASCII; matches the ParseIpNeigh / ParseArpingPingOutput
+    /// convention above).
+    ///
+    /// Tolerant per-block: an unparseable block body simply yields null for its IP (no
+    /// exception escapes). Last-wins on duplicate sentinels (defensive — the production
+    /// command builder does not emit duplicates).
+    /// </summary>
+    public static IReadOnlyDictionary<string, string?> ParseBatchedNslookupOutput(string raw, ILogger log)
+    {
+        var result = new Dictionary<string, string?>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(raw)) return result;
+
+        var matches = BatchedNslookupSentinelRegex.Matches(raw);
+        if (matches.Count == 0) return result;
+
+        for (var i = 0; i < matches.Count; i++)
+        {
+            var ip = matches[i].Groups["ip"].Value;
+            var blockStart = matches[i].Index + matches[i].Length;
+            var blockEnd = (i + 1 < matches.Count) ? matches[i + 1].Index : raw.Length;
+            var block = raw.Substring(blockStart, blockEnd - blockStart);
+            try
+            {
+                result[ip] = ParseNslookupOutput(block, log);
+            }
+            catch (Exception ex)
+            {
+                // Truncate the offending block body to keep log bloat bounded.
+                var truncated = block.Length <= 200 ? block : block.Substring(0, 200) + "…";
+                log.LogWarning(ex,
+                    "ParseBatchedNslookupOutput: failed to parse block for IP {Ip}; storing null. Raw block (truncated): {RawBlock}",
+                    ip, truncated);
+                result[ip] = null;
+            }
+        }
+
+        return result;
+    }
+
+    // Quick task 260511-lct: sentinel line matcher used by ParseBatchedNslookupOutput. The
+    // sentinel shape is `==<ipv4>==` on its own line; the parenthesised subshell in the AP-side
+    // command builder guarantees the echo+nslookup output pair is atomic against background
+    // interleaving, so the match-then-substring slicing here is sufficient for attribution.
+    private static readonly System.Text.RegularExpressions.Regex BatchedNslookupSentinelRegex =
+        new(@"^==(?<ip>[\d.]+)==\s*$",
+            System.Text.RegularExpressions.RegexOptions.Compiled
+            | System.Text.RegularExpressions.RegexOptions.Multiline
+            | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     // === helpers ===
     private static string ExtractAfter(string line, string key)

@@ -67,3 +67,49 @@ theory_row_status: |
   after the parser's D-07 uppercasing).
   Per-iface assoclist [Theory] (if any exists in test setup) remains Skip — file intentionally
   absent for this folder (older/smaller router profile).
+
+---
+
+## Phase 9 capture wave (Plan 09-03)
+
+phase9_provenance: public-sample (synthesized)
+phase9_captured: 2026-05-10
+phase9_captured_by: Plan 09-03 executor (autonomous)
+phase9_files_added:
+  - arping.txt              (synthesized BusyBox arping shape — 2 unicast replies + 1 unanswered host)
+  - ping.txt                (synthesized BusyBox ping shape — 2 RFC-1918 replies)
+  - command-v-arping.txt    (synthesized — `/usr/sbin/arping`, modern OpenWrt has iputils-arping in busybox by default)
+  - command-v-arping.txt.exit  (`0` — capability detect resolves true, arping branch chosen)
+phase9_synthesis_rationale: |
+  Plan 09-03 ships the SubnetSweepProbe surface; live capture of `arping`/`ping`/`command -v arping`
+  against an operator-deployed AP is the operator hand-off step (per Phase 2 D-10/D-11 split). The
+  synthesized content matches the shape OpenWrtOutputParser.ParseArpingPingOutput consumes:
+  Unicast-reply lines yield (MAC -> IPv4) entries; ARPING preamble + Sent/Received summary lines
+  are silently skipped by the parser. The 21.02.x branch uses the same iputils-arping shape as
+  22.03 / 23.05 — no version-specific format divergence is documented for this command.
+phase9_macs_used: aa:bb:cc:dd:ee:01, bb:cc:dd:ee:ff:02 (locally-administered, lab-style)
+phase9_ips_used: 192.168.1.42, 192.168.1.43, 192.168.1.44 (RFC-1918)
+phase9_theory_row_status: |
+  After Plan 09-03 lands these files, OpenWrtOutputParserTests.ParseArpingPingOutput_AcrossAllSupportedVersions_*
+  flips from SKIP to PASS for this version slot.
+
+---
+
+## Phase 9 capture wave (Plan 09-04)
+
+phase9_04_provenance: public-sample (synthesized)
+phase9_04_captured: 2026-05-10
+phase9_04_captured_by: Plan 09-04 executor (autonomous)
+phase9_04_files_added:
+  - nslookup.txt            (synthesized BusyBox nslookup shape — Server preamble + Name: line + answer Address line)
+phase9_04_synthesis_rationale: |
+  Plan 09-04 ships the ReverseDnsProbe surface; the BusyBox nslookup output shape (Server: header,
+  blank line, Name: <fqdn>, Address 1: <ip> <fqdn>) is stable across the 21.02 / 22.03 / 23.05
+  release branches. Synthesized representative content matches the parser contract verbatim
+  (OpenWrtOutputParser.ParseNslookupOutput consumes the `Name:` line first; BIND fallback `name = `
+  shape is also covered but not exercised by this fixture). Operator-driven live capture remains
+  the canonical path for the 23.05-SNAPSHOT slot per the Plan 09-03 hand-off procedure.
+phase9_04_ips_used: 192.168.1.1 (synthesized resolver), 192.168.1.42 (synthesized lookup target)
+phase9_04_theory_row_status: |
+  After Plan 09-04 lands this file, OpenWrtOutputParserTests.ParseNslookupOutput_AcrossAllSupportedVersions_*
+  AND ReverseDnsProbeTests.PollAsync_AcrossAllSupportedVersions_* flip from SKIP to PASS for this version slot.

@@ -24,8 +24,14 @@ public sealed class IndexTests
         public string? UIPasswordHash { get; set; }
         public int PollingIntervalSeconds { get; set; } = 30;
         public bool WizardDismissed => false;
+        public int RefreshIntervalSeconds { get; set; } = 3600;
+        public IReadOnlyList<string> LocalDomainSuffixes { get; set; } = Array.Empty<string>();
         public bool ChangedFiredOnSetPassword;
         public bool ChangedFiredOnSetInterval;
+        public int? LastSetRefreshIntervalSeconds;
+        public IReadOnlyList<string>? LastSetLocalDomainSuffixes;
+        public int SetLocalDomainSuffixesCallCount;
+        public int SetRefreshIntervalSecondsCallCount;
 
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default)
         {
@@ -40,6 +46,21 @@ public sealed class IndexTests
             return Task.CompletedTask;
         }
         public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetRefreshIntervalSecondsAsync(int seconds, CancellationToken ct = default)
+        {
+            RefreshIntervalSeconds = seconds;
+            LastSetRefreshIntervalSeconds = seconds;
+            SetRefreshIntervalSecondsCallCount++;
+            return Task.CompletedTask;
+        }
+        public Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default)
+        {
+            var arr = suffixes.ToArray();
+            LocalDomainSuffixes = arr;
+            LastSetLocalDomainSuffixes = arr;
+            SetLocalDomainSuffixesCallCount++;
+            return Task.CompletedTask;
+        }
         public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }
@@ -71,6 +92,8 @@ public sealed class IndexTests
         public Task UpdateOnlineAsync(int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpdateOnlineAsync(DatabaseContext db, int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetHostKeyFingerprintAsync(DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpdateLastEnrichmentRefreshAtAsync(DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpdateScanSettingsAsync(int id, bool subnetScanEnabled, string? subnetScanRanges, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private static (BunitContext ctx, StubSettings settings, CapturingHasher hasher, CapturingNodeRepo nodes) Build(string? initialHash = null, int initialInterval = 30)
@@ -95,20 +118,42 @@ public sealed class IndexTests
     // ── Tests ───────────────────────────────────────────────────────────────
 
     [Fact]
-    public void RendersThreeCards_InOrder()
+    public void RendersAllCards_InOrder()
     {
         var (ctx, _, _, _) = Build();
         using (ctx)
         {
             var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
-            // D-17 binding: three cards in the locked order.
+            // D-17 + Phase 10 D-05/D-03/D-04 — five cards in the locked order:
+            // Live polling / Active enrichment / Local domain suffixes / UI password / SSH known-hosts.
             var markup = cut.Markup;
-            var i1 = markup.IndexOf(">Polling interval</h5>", StringComparison.Ordinal);
-            var i2 = markup.IndexOf(">UI password</h5>", StringComparison.Ordinal);
-            var i3 = markup.IndexOf(">SSH known-hosts cache</h5>", StringComparison.Ordinal);
-            Assert.True(i1 >= 0, "Card 1 (Polling interval) header missing");
-            Assert.True(i2 > i1, "Card 2 (UI password) header missing or out of order");
-            Assert.True(i3 > i2, "Card 3 (SSH known-hosts cache) header missing or out of order");
+            var i1 = markup.IndexOf(">Live polling interval</h5>", StringComparison.Ordinal);
+            var i2 = markup.IndexOf(">Active enrichment interval</h5>", StringComparison.Ordinal);
+            var i3 = markup.IndexOf(">Local domain suffixes</h5>", StringComparison.Ordinal);
+            var i4 = markup.IndexOf(">UI password</h5>", StringComparison.Ordinal);
+            var i5 = markup.IndexOf(">SSH known-hosts cache</h5>", StringComparison.Ordinal);
+            Assert.True(i1 >= 0, "Card 1 (Live polling interval) header missing");
+            Assert.True(i2 > i1, "Card 2 (Active enrichment interval) header missing or out of order");
+            Assert.True(i3 > i2, "Card 3 (Local domain suffixes) header missing or out of order");
+            Assert.True(i4 > i3, "Card 4 (UI password) header missing or out of order");
+            Assert.True(i5 > i4, "Card 5 (SSH known-hosts cache) header missing or out of order");
+
+            // D-05 verbatim: the OLD bare "Polling interval" title is gone.
+            Assert.DoesNotContain(">Polling interval</h5>", markup, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void Card1_HelperTextRewritten_PerD05()
+    {
+        var (ctx, _, _, _) = Build();
+        using (ctx)
+        {
+            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            // D-05 verbatim helper text.
+            Assert.Contains("How often each AP is polled for connected stations.", cut.Markup);
+            // Old v0.9 helper copy is gone.
+            Assert.DoesNotContain("How often the application SSHes into each access point.", cut.Markup);
         }
     }
 
@@ -245,6 +290,170 @@ public sealed class IndexTests
             Assert.False(r5.HasAttribute("checked"));
             var r30 = cut.Find("#interval-30");
             Assert.False(r30.HasAttribute("checked"));
+        }
+    }
+
+    // ── Phase 10 Plan 10-02 — Active enrichment interval (D-03) ─────────────
+
+    [Fact]
+    public void ActiveEnrichmentCard_RendersAllFivePresets()
+    {
+        var (ctx, _, _, _) = Build();
+        using (ctx)
+        {
+            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            // D-03 verbatim — five presets: 15min/30min/1h/6h/24h.
+            Assert.NotNull(cut.Find("#refresh-900"));
+            Assert.NotNull(cut.Find("#refresh-1800"));
+            Assert.NotNull(cut.Find("#refresh-3600"));
+            Assert.NotNull(cut.Find("#refresh-21600"));
+            Assert.NotNull(cut.Find("#refresh-86400"));
+        }
+    }
+
+    [Fact]
+    public void ActiveEnrichmentCard_PreSelectsCurrentRefreshInterval()
+    {
+        var (ctx, settings, _, _) = Build();
+        settings.RefreshIntervalSeconds = 21600;     // 6 hours
+        using (ctx)
+        {
+            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var r6h = cut.Find("#refresh-21600");
+            Assert.True(r6h.HasAttribute("checked"));
+            var r1h = cut.Find("#refresh-3600");
+            Assert.False(r1h.HasAttribute("checked"));
+        }
+    }
+
+    [Fact]
+    public void ActiveEnrichmentCard_SubmitsSelectedPreset_PersistsViaService()
+    {
+        // Pre-seed a non-default selection (24h = 86400) so OnInitializedAsync pulls it
+        // into _refreshForm.Seconds. Then submit and assert the service was called with
+        // the seeded value. This bypasses the bUnit-vs-InputRadioGroup change-event
+        // marshaling complexity (radios under InputRadioGroup don't propagate checked-bit
+        // changes through bUnit's .Change() in the same way <input> + @bind-Value does).
+        var (ctx, settings, _, _) = Build();
+        settings.RefreshIntervalSeconds = 86400;
+        using (ctx)
+        {
+            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+
+            // Submit the refresh form by triggering the form's submit event directly.
+            var refreshForm = cut.Find("#refresh-86400").Closest("form")
+                ?? throw new InvalidOperationException("Could not locate refresh form ancestor.");
+            refreshForm.Submit();
+
+            Assert.Equal(1, settings.SetRefreshIntervalSecondsCallCount);
+            Assert.Equal(86400, settings.LastSetRefreshIntervalSeconds);
+            Assert.Contains("Active enrichment interval saved.", cut.Markup);
+        }
+    }
+
+    // ── Phase 10 Plan 10-02 — Local domain suffixes (D-04) ──────────────────
+
+    [Fact]
+    public void SuffixesCard_PreFillsFromCurrentLocalDomainSuffixes()
+    {
+        var (ctx, settings, _, _) = Build();
+        settings.LocalDomainSuffixes = new[] { "michelecasa", "lab.local" };
+        using (ctx)
+        {
+            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var input = cut.Find("#suffixes-input");
+            Assert.Equal("michelecasa, lab.local", input.GetAttribute("value"));
+        }
+    }
+
+    [Fact]
+    public async Task SuffixesCard_SubmitWithInvalidToken_RejectsAndShowsBanner()
+    {
+        var (ctx, settings, _, _) = Build();
+        using (ctx)
+        {
+            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            // Second token has a space — invalid per ^[A-Za-z0-9.\-]+$
+            cut.Find("#suffixes-input").Change("foo, bar baz");
+
+            // Submit the suffixes form by walking up from the input to its form ancestor.
+            var suffixesInput = cut.Find("#suffixes-input");
+            var suffixesForm = suffixesInput.Closest("form")
+                ?? throw new InvalidOperationException("Could not locate suffixes form ancestor.");
+            suffixesForm.Submit();
+
+            // Error banner appears, success banner does not, and the service was NOT called.
+            Assert.Contains("Invalid suffix", cut.Markup);
+            Assert.DoesNotContain("Local domain suffixes saved.", cut.Markup);
+            Assert.Equal(0, settings.SetLocalDomainSuffixesCallCount);
+            Assert.Null(settings.LastSetLocalDomainSuffixes);
+        }
+    }
+
+    [Fact]
+    public async Task SuffixesCard_SubmitWithLeadingDot_RejectsAndShowsBanner()
+    {
+        var (ctx, settings, _, _) = Build();
+        using (ctx)
+        {
+            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            cut.Find("#suffixes-input").Change(".lab.local");
+
+            // Submit the suffixes form by walking up from the input to its form ancestor.
+            var suffixesInput = cut.Find("#suffixes-input");
+            var suffixesForm = suffixesInput.Closest("form")
+                ?? throw new InvalidOperationException("Could not locate suffixes form ancestor.");
+            suffixesForm.Submit();
+
+            Assert.Contains("must not start with a dot", cut.Markup);
+            Assert.Equal(0, settings.SetLocalDomainSuffixesCallCount);
+        }
+    }
+
+    [Fact]
+    public async Task SuffixesCard_SubmitWithValidTokens_PersistsCleanedList()
+    {
+        var (ctx, settings, _, _) = Build();
+        using (ctx)
+        {
+            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            cut.Find("#suffixes-input").Change("valid, also-valid");
+
+            // Submit the suffixes form by walking up from the input to its form ancestor.
+            var suffixesInput = cut.Find("#suffixes-input");
+            var suffixesForm = suffixesInput.Closest("form")
+                ?? throw new InvalidOperationException("Could not locate suffixes form ancestor.");
+            suffixesForm.Submit();
+
+            Assert.Equal(1, settings.SetLocalDomainSuffixesCallCount);
+            Assert.NotNull(settings.LastSetLocalDomainSuffixes);
+            Assert.Equal(2, settings.LastSetLocalDomainSuffixes!.Count);
+            Assert.Equal("valid", settings.LastSetLocalDomainSuffixes[0]);
+            Assert.Equal("also-valid", settings.LastSetLocalDomainSuffixes[1]);
+            Assert.Contains("Local domain suffixes saved.", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public async Task SuffixesCard_SubmitWithEmptyInput_PersistsEmptyList()
+    {
+        // Operator clearing the suffixes — D-04: split-on-comma yields zero tokens, all valid by vacuous truth,
+        // service is called with an empty list, persisted as JSON `[]`.
+        var (ctx, settings, _, _) = Build();
+        using (ctx)
+        {
+            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            cut.Find("#suffixes-input").Change("");
+
+            // Submit the suffixes form by walking up from the input to its form ancestor.
+            var suffixesInput = cut.Find("#suffixes-input");
+            var suffixesForm = suffixesInput.Closest("form")
+                ?? throw new InvalidOperationException("Could not locate suffixes form ancestor.");
+            suffixesForm.Submit();
+
+            Assert.Equal(1, settings.SetLocalDomainSuffixesCallCount);
+            Assert.NotNull(settings.LastSetLocalDomainSuffixes);
+            Assert.Empty(settings.LastSetLocalDomainSuffixes!);
         }
     }
 }

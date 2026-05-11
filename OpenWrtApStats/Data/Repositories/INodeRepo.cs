@@ -28,6 +28,15 @@ public interface INodeRepo
     Task UpdateMetadataAsync(int id, string hostname, string username, CancellationToken ct = default);
 
     /// <summary>
+    /// Phase 10 SET-03 / SET-04 (CR-02 closure carry-over from D-09). Updates ONLY
+    /// <see cref="WiFiNode.SubnetScanEnabled"/> and <see cref="WiFiNode.SubnetScanRanges"/>
+    /// via single-statement <c>ExecuteUpdateAsync</c> — never touches Password,
+    /// HostKeyFingerprint, LastEnrichmentRefreshAt, Hostname, or Username. Repo-owned
+    /// only: the Edit-Node UI is a one-shot operation outside any coordinator transaction.
+    /// </summary>
+    Task UpdateScanSettingsAsync(int id, bool subnetScanEnabled, string? subnetScanRanges, CancellationToken ct = default);
+
+    /// <summary>
     /// CR-02 closure (D-09). Updates Password only via single-statement <c>ExecuteUpdateAsync</c>.
     /// Caller passes the already-encrypted ciphertext (Data Protection "node-creds" purpose).
     /// Empty-password "no change" semantics live at the UI layer (D-08): callers MUST NOT
@@ -78,4 +87,12 @@ public interface INodeRepo
     /// (which would clobber the encrypted <c>Password</c>).
     /// </summary>
     Task SetHostKeyFingerprintAsync(DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default);
+
+    /// <summary>
+    /// Phase 10 ORCH-07 caller-owned. Updates ONLY <see cref="WiFiNode.LastEnrichmentRefreshAt"/>;
+    /// composed by <c>PollOrchestrator.RunCycleAsync</c> at the end of a successful enrichment tick,
+    /// inside the same outer coordinator transaction as the station upsert. CR-02-safe single-property
+    /// <c>ExecuteUpdateAsync</c> — never <c>db.WiFiNodes.Update(entity)</c>.
+    /// </summary>
+    Task UpdateLastEnrichmentRefreshAtAsync(DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default);
 }

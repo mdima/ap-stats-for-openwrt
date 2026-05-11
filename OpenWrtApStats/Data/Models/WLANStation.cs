@@ -63,4 +63,12 @@ public class WLANStation
     /// </summary>
     [NotMapped]
     public string? Bssid { get; set; }
+
+    /// <summary>
+    /// Phase 9 SCHEMA-04. Random/locally-administered MAC flag, computed from U/L bit on MAC
+    /// byte 0 — set on existing rows by the Phase 9 migration backfill (D-08 SQL: <c>((instr(...)
+    /// - 1) &amp; 2) != 0</c>); Phase 10 ORCH-03 computes on INSERT for new rows. Default false at
+    /// the SQL level. User-toggleable from station detail page (Phase 10 DASH-22).
+    /// </summary>
+    public bool IsRandomMac { get; set; }
 }

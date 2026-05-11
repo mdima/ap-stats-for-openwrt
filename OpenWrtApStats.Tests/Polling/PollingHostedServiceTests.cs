@@ -52,6 +52,8 @@ public sealed class PollingHostedServiceTests
         public int PollingIntervalSeconds { get; set; } = pollingIntervalSeconds;
         public string? UIPasswordHash => null;
         public bool WizardDismissed => false;
+        public int RefreshIntervalSeconds => 3600;
+        public IReadOnlyList<string> LocalDomainSuffixes => Array.Empty<string>();
         public event Action<IAppSettingsService>? Changed;
 
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default)
@@ -63,6 +65,8 @@ public sealed class PollingHostedServiceTests
 
         public Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetRefreshIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default) => Task.CompletedTask;
         public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 

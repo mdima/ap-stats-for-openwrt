@@ -72,6 +72,12 @@ public sealed class WlansPageTests
 
         public Task SetHostKeyFingerprintAsync(DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default)
             => Task.CompletedTask;
+
+        public Task UpdateLastEnrichmentRefreshAtAsync(DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public Task UpdateScanSettingsAsync(int id, bool subnetScanEnabled, string? subnetScanRanges, CancellationToken ct = default)
+            => Task.CompletedTask;
     }
 
     private sealed class StubNetworkRepo : INetworkRepo
@@ -129,6 +135,8 @@ public sealed class WlansPageTests
         public int PollingIntervalSeconds => 30;
         public string? UIPasswordHash => null;
         public bool WizardDismissed { get; private set; }
+        public int RefreshIntervalSeconds => 3600;
+        public IReadOnlyList<string> LocalDomainSuffixes { get; } = Array.Empty<string>();
 
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default)
             => Task.CompletedTask;
@@ -141,6 +149,12 @@ public sealed class WlansPageTests
             WizardDismissed = dismissed;
             return Task.CompletedTask;
         }
+
+        public Task SetRefreshIntervalSecondsAsync(int seconds, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default)
+            => Task.CompletedTask;
 
         public Task WarmAsync(CancellationToken ct = default)
             => Task.CompletedTask;

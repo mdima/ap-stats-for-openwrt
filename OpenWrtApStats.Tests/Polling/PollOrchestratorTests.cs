@@ -54,7 +54,9 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
             probeAsync,
             new PollNotifier(),
             logger ?? NullLogger<PollOrchestrator>.Instance,
-            new StubSettings(pollingIntervalSeconds));
+            new StubSettings(pollingIntervalSeconds),
+            (_, _, _, _) => Task.FromResult<EnrichmentDelta?>(null),     // Phase 10 default: no enrichment this cycle
+            TimeProvider.System);
     }
 
     private async Task<(int nodeId, int netId, string netBssid)> SeedNodeWithOneNetworkAsync(CancellationToken ct, string? hostKeyFingerprint = null)
@@ -700,7 +702,9 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
             probeAsync,
             new PollNotifier(),
             NullLogger<PollOrchestrator>.Instance,
-            new StubSettings(30));
+            new StubSettings(30),
+            (_, _, _, _) => Task.FromResult<EnrichmentDelta?>(null),
+            TimeProvider.System);
 
         var before = orch.LastSuccessfulCycleUtc;
 
@@ -759,7 +763,12 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
         {
             for (int i = 0; i < 3; i++)
             {
-                var node = new WiFiNode { Hostname = $"par-{Guid.NewGuid():N}", Username = "root", Password = "" };
+                // Phase 10: seed LastEnrichmentRefreshAt = recent so the orchestrator's enrichment
+                // trigger does NOT fire for these nodes — this test asserts probe fan-out concurrency
+                // (POLL-03), not the enrichment cycle. Without this, ShouldRefresh returns true
+                // (cold-start) and the orchestrator runs its enrichment per-node loop, blowing past
+                // the 500ms wall-clock budget.
+                var node = new WiFiNode { Hostname = $"par-{Guid.NewGuid():N}", Username = "root", Password = "", LastEnrichmentRefreshAt = DateTimeOffset.UtcNow };
                 seed.WiFiNodes.Add(node);
                 await seed.SaveChangesAsync(ct);
                 var bssid = $"FD:00:{i:X2}:{Random.Shared.Next(0, 255):X2}:{Random.Shared.Next(0, 255):X2}:{Random.Shared.Next(0, 255):X2}";
@@ -1144,11 +1153,15 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
         public int     PollingIntervalSeconds => pollingIntervalSeconds;
         public string? UIPasswordHash         => null;
         public bool    WizardDismissed        => false;
+        public int     RefreshIntervalSeconds => 3600;
+        public IReadOnlyList<string> LocalDomainSuffixes => Array.Empty<string>();
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
 
         public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetRefreshIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default) => Task.CompletedTask;
         public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 }

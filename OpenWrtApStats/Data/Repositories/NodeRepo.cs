@@ -54,6 +54,19 @@ public sealed class NodeRepo(IDbContextFactory<DatabaseContext> factory) : INode
                 .SetProperty(n => n.Username, username), ct);
     }
 
+    // Phase 10 SET-03 / SET-04 — per-node enrichment scan settings (D-09). Single-statement
+    // ExecuteUpdateAsync writing ONLY SubnetScanEnabled + SubnetScanRanges; never touches
+    // Password, HostKeyFingerprint, LastEnrichmentRefreshAt, Hostname, or Username (CR-02-safe).
+    public async Task UpdateScanSettingsAsync(int id, bool subnetScanEnabled, string? subnetScanRanges, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.WiFiNodes
+            .Where(n => n.Id == id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(n => n.SubnetScanEnabled, subnetScanEnabled)
+                .SetProperty(n => n.SubnetScanRanges, subnetScanRanges), ct);
+    }
+
     public async Task UpdatePasswordAsync(int id, string encryptedPassword, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
@@ -130,4 +143,11 @@ public sealed class NodeRepo(IDbContextFactory<DatabaseContext> factory) : INode
         db.WiFiNodes
             .Where(n => n.Id == nodeId)
             .ExecuteUpdateAsync(s => s.SetProperty(n => n.HostKeyFingerprint, fingerprint), ct);
+
+    // Phase 10 ORCH-07 — caller-owned single-property update for LastEnrichmentRefreshAt.
+    // CR-02-safe: ExecuteUpdateAsync touches only the timestamp column; never db.WiFiNodes.Update(entity).
+    public Task UpdateLastEnrichmentRefreshAtAsync(DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default) =>
+        db.WiFiNodes
+            .Where(n => n.Id == nodeId)
+            .ExecuteUpdateAsync(s => s.SetProperty(n => n.LastEnrichmentRefreshAt, (DateTimeOffset?)ts), ct);
 }
