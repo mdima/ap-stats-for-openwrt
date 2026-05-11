@@ -380,4 +380,56 @@ public sealed class EventDetectionServiceTests
             return gen.FullName?.StartsWith("Microsoft.EntityFrameworkCore.IDbContextFactory", StringComparison.Ordinal) == true;
         }
     }
+
+    // ── Quick task 260511-cmi — ForgetMac invalidates the in-memory MAC cache ──────────────
+    //
+    // Bug: operator deletes a station via /Stations/{mac} → Delete. The DB row is gone
+    // (ExecuteDeleteAsync), but EventDetectionService._knownMacs still contains the MAC.
+    // When the device re-associates, the orchestrator INSERTs a fresh row and the next
+    // cycle's diff hits `_knownMacs.Add(mac)` which returns FALSE (shadow-known), so the
+    // "New station" info toast (D-06 first-time semantics) does NOT fire.
+    //
+    // Fix: a public ForgetMac(string) method removes the MAC from the in-memory set,
+    // called from Stations/Detail.razor's HandleDeleteAsync before DeleteByMacAsync.
+    [Fact]
+    public async Task ForgetMac_AllowsSameMacToToastAsNew_OnNextCycle()
+    {
+        using var h = new Harness();
+        // Seed: MAC is already known (bootstrap will load it from SeedMacs on first cycle).
+        const string mac = "DE:AD:BE:EF:00:01";
+        h.StationRepo.SeedMacs = new() { mac };
+        h.StationRepo.AllStations = new() { Station(mac, name: "Phone-1") };
+        using var svc = h.Build();
+
+        // Cycle 1 — bootstrap loads `mac` into _knownMacs; existing-station: no toast.
+        await h.RaiseAsync();
+        Assert.DoesNotContain(h.Captured, t => t.Title == "New station");
+        h.Captured.Clear();
+
+        // The cache-invalidation moment: operator deletes the station via UI.
+        // EventDetectionService.ForgetMac runs BEFORE StationRepo.DeleteByMacAsync per
+        // Detail.razor:HandleDeleteAsync (quick task 260511-cmi).
+        svc.ForgetMac(mac);
+
+        // Cycle 2 — same station re-observed (in this scenario the device re-associated
+        // and the orchestrator re-INSERTed the row). With Forget, _knownMacs.Add(mac)
+        // returns true → new-station info toast fires.
+        await h.RaiseAsync();
+        var toast = Assert.Single(h.Captured, t => t.Title == "New station");
+        Assert.Equal("info", toast.Severity);
+        Assert.Contains(mac, toast.Message);
+    }
+
+    [Fact]
+    public void ForgetMac_OnUnknownMac_IsNoOp()
+    {
+        using var h = new Harness();
+        using var svc = h.Build();
+
+        // No exception, no state change. Defends the bootstrap-first ordering and
+        // the empty-set / never-seen-MAC case.
+        svc.ForgetMac("ZZ:ZZ:ZZ:ZZ:ZZ:ZZ");
+        svc.ForgetMac("");
+        svc.ForgetMac(null!);
+    }
 }

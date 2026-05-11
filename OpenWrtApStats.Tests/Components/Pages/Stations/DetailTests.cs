@@ -1,7 +1,11 @@
+using System.Reflection;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using OpenWrtApStats.Data.Models;
 using OpenWrtApStats.Data.Repositories;
+using OpenWrtApStats.Services;
+using OpenWrtApStats.Services.Polling;
 using OpenWrtApStats.Services.Settings;
 using OpenWrtApStats.Services.Vendor;
 using Xunit;
@@ -124,7 +128,12 @@ public sealed class DetailTests
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }
 
-    private static (BunitContext ctx, StubStationRepo stations, StubNetworkRepo nets, StubNodeRepo nodes, StubOuiLookup oui) Build()
+    private sealed class StubNotificationsGate : INotificationsGate
+    {
+        public bool IsEnabled { get; set; } = true;
+    }
+
+    private static (BunitContext ctx, StubStationRepo stations, StubNetworkRepo nets, StubNodeRepo nodes, StubOuiLookup oui, EventDetectionService events) Build()
     {
         var ctx = new BunitContext();
         var stations = new StubStationRepo();
@@ -136,7 +145,24 @@ public sealed class DetailTests
         ctx.Services.AddSingleton<INodeRepo>(nodes);
         ctx.Services.AddSingleton<IOuiLookup>(oui);
         ctx.Services.AddSingleton<IAppSettingsService>(new StubSettings());
-        return (ctx, stations, nets, nodes, oui);
+
+        // Quick task 260511-cmi — Detail.razor injects EventDetectionService for the
+        // ForgetMac call in HandleDeleteAsync. Register a real service with stub deps; the
+        // bUnit harness never raises PollNotifier so the service is idle for unrelated tests.
+        var gate = new StubNotificationsGate();
+        var notifier = new PollNotifier();
+        var toasts = new ToastService(gate, NullLogger<ToastService>.Instance);
+        var sc = new ServiceCollection();
+        sc.AddSingleton<INodeRepo>(nodes);
+        sc.AddSingleton<IStationRepo>(stations);
+        var sp = sc.BuildServiceProvider();
+        var events = new EventDetectionService(notifier, toasts, gate, sp.GetRequiredService<IServiceScopeFactory>(), NullLogger<EventDetectionService>.Instance);
+        ctx.Services.AddSingleton(notifier);
+        ctx.Services.AddSingleton<INotificationsGate>(gate);
+        ctx.Services.AddSingleton(toasts);
+        ctx.Services.AddSingleton(events);
+
+        return (ctx, stations, nets, nodes, oui, events);
     }
 
     private static WLANStation MakeStation(string mac = "AA:BB:CC:00:00:01") => new()
@@ -152,7 +178,7 @@ public sealed class DetailTests
     [Fact]
     public void Renders_AllFields_ForExistingStation()
     {
-        var (ctx, stations, nets, nodes, oui) = Build();
+        var (ctx, stations, nets, nodes, oui, _) = Build();
         stations.Existing = MakeStation();
         nets.Existing     = new WiFiNetwork { Id = 10, WiFiNodeId = 1, MacAddress = "00:11:22:33:44:55", SSID = "guest", Enabled = true };
         nodes.Nodes.Add(new WiFiNode { Id = 1, Hostname = "ap-A", Username = "root", Password = "x", Status = Status.Online, LastPollDate = DateTime.UtcNow });
@@ -192,7 +218,7 @@ public sealed class DetailTests
     [Fact]
     public void Renders_404_WhenStationNotFound()
     {
-        var (ctx, stations, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _) = Build();
         stations.Existing = null;
 
         using (ctx)
@@ -208,7 +234,7 @@ public sealed class DetailTests
     [Fact]
     public void MacRouteParam_IsUrlDecoded_AndUppercased()
     {
-        var (ctx, stations, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _) = Build();
         stations.Existing = MakeStation();
 
         using (ctx)
@@ -223,7 +249,7 @@ public sealed class DetailTests
     [Fact]
     public void SaveNameButton_CallsSetNameAsync_WithTrimmedValue()
     {
-        var (ctx, stations, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _) = Build();
         stations.Existing = MakeStation();
 
         using (ctx)
@@ -241,7 +267,7 @@ public sealed class DetailTests
     [Fact]
     public void SaveNameButton_EmptyValue_CallsSetNameAsyncWithNull()
     {
-        var (ctx, stations, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _) = Build();
         stations.Existing = MakeStation();
 
         using (ctx)
@@ -259,7 +285,7 @@ public sealed class DetailTests
     [Fact]
     public void DeleteButton_OpensModal_NotYetCallingRepo()
     {
-        var (ctx, stations, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _) = Build();
         stations.Existing = MakeStation();
 
         using (ctx)
@@ -277,10 +303,49 @@ public sealed class DetailTests
         }
     }
 
+    // Quick task 260511-cmi — operator-initiated delete must invalidate the in-memory
+    // MAC cache held by EventDetectionService. Before this fix, `_knownMacs` was leaky:
+    // a deleted MAC stayed "shadow-known" until app restart and the rebid produced no
+    // new-station toast. Asserts the post-delete state of `_knownMacs` directly via
+    // reflection (the field is private; no public surface exposes the set).
+    [Fact]
+    public void DeleteModal_Confirm_InvalidatesEventDetectionKnownMacs()
+    {
+        var (ctx, stations, _, _, _, events) = Build();
+        stations.Existing = MakeStation();
+
+        // Seed _knownMacs directly so we test the cache-invalidation path without
+        // requiring a real PollNotifier cycle (the Build harness does not raise events).
+        var knownMacsField = typeof(EventDetectionService).GetField(
+            "_knownMacs",
+            BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var knownMacs = (HashSet<string>)knownMacsField.GetValue(events)!;
+        knownMacs.Add("AA:BB:CC:00:00:01");
+        Assert.Contains("AA:BB:CC:00:00:01", knownMacs);   // pre-condition
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            cut.FindAll("button").First(b => b.TextContent.Contains("Delete this station")).Click();
+
+            try
+            {
+                cut.Find(".modal-footer .btn-danger").Click();
+            }
+            catch
+            {
+                // Nav.NavigateTo("/") side-effect — ForgetMac + DeleteByMacAsync ran before this.
+            }
+
+            Assert.Equal(1, stations.DeleteCallCount);
+            Assert.DoesNotContain("AA:BB:CC:00:00:01", knownMacs);   // ForgetMac flushed it
+        }
+    }
+
     [Fact]
     public void DeleteModal_Confirm_CallsDeleteByMacAsync()
     {
-        var (ctx, stations, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _) = Build();
         stations.Existing = MakeStation();
 
         using (ctx)
@@ -308,7 +373,7 @@ public sealed class DetailTests
     [Fact]
     public void DeleteModal_Cancel_DoesNotCallDeleteByMacAsync()
     {
-        var (ctx, stations, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _) = Build();
         stations.Existing = MakeStation();
 
         using (ctx)
@@ -326,7 +391,7 @@ public sealed class DetailTests
     [Fact]
     public void SignalCell_RendersRssiBar_ForKnownSignal()
     {
-        var (ctx, stations, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _) = Build();
         stations.Existing = MakeStation();
 
         using (ctx)
@@ -342,7 +407,7 @@ public sealed class DetailTests
     [Fact]
     public void SignalCell_RendersEmDash_WhenRssNull()
     {
-        var (ctx, stations, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _) = Build();
         var stn = MakeStation();
         stn.RSS = null;
         stations.Existing = stn;
@@ -360,7 +425,7 @@ public sealed class DetailTests
     [Fact]
     public void RandomMacToggle_Prefills_FromIsRandomMac_True()
     {
-        var (ctx, stations, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _) = Build();
         var s = MakeStation();
         s.IsRandomMac = true;
         stations.Existing = s;
@@ -376,7 +441,7 @@ public sealed class DetailTests
     [Fact]
     public void RandomMacToggle_Prefills_FromIsRandomMac_False()
     {
-        var (ctx, stations, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _) = Build();
         var s = MakeStation();
         s.IsRandomMac = false;
         stations.Existing = s;
@@ -392,7 +457,7 @@ public sealed class DetailTests
     [Fact]
     public void RandomMacToggle_Change_InvokesSetIsRandomMacAsync_WithNewValue()
     {
-        var (ctx, stations, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _) = Build();
         var s = MakeStation();
         s.IsRandomMac = false;
         stations.Existing = s;
@@ -412,7 +477,7 @@ public sealed class DetailTests
     [Fact]
     public void RandomMacToggle_Change_ShowsSavedFlash()
     {
-        var (ctx, stations, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _) = Build();
         var s = MakeStation();
         s.IsRandomMac = false;
         stations.Existing = s;
@@ -434,7 +499,7 @@ public sealed class DetailTests
     [Fact]
     public void DeleteModal_Title_ContainsStationName()
     {
-        var (ctx, stations, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _) = Build();
         var stn = MakeStation();
         stn.Name = "Alice's phone";
         stations.Existing = stn;
