@@ -60,6 +60,9 @@ namespace OpenWrtApStats.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime>("FirstSeen")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Hostname")
                         .HasMaxLength(255)
                         .HasColumnType("TEXT");
