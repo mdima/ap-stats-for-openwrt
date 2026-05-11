@@ -652,6 +652,123 @@ public sealed class DashboardTests
         }
     }
 
+    // ── Quick task 260511-osd — orphan WLANStations rendered with "—" placeholders ────────
+    //
+    // When a WiFiNetwork is hard-deleted (cascade SetNull on WLANStation.WiFiNetworkId
+    // after BSSID rotation / AP outage), the dependent station rows become "orphan"
+    // (FK = null) or point at a now-missing network id. Prior behavior: BuildRowsAsync
+    // silently filtered them out, hiding e.g. cameras that connected briefly then powered
+    // off. New behavior: include them with `Ssid = "—"`, `ApHostname = "—"`, `ApNodeId = 0`
+    // so operators see them. Disabled-WLAN exclusion is preserved unchanged.
+
+    [Fact]
+    public void BuildRows_IncludesOrphanStations_WithDashPlaceholders()
+    {
+        // Two orphan shapes: (a) WiFiNetworkId IS NULL (the cascade-SetNull outcome),
+        // (b) WiFiNetworkId points at a network id that no longer exists in networkLookup
+        // (the lookup-miss case — happens if the network is gone but the FK hasn't yet
+        // been nulled, or if the lookup is built from a different node set).
+        var (node, net) = MakeApAndNet();
+        var normal  = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10,   Hostname = "alice", Status = Status.Online,  LastPollDate = DateTime.UtcNow };
+        var orphanA = new WLANStation { Id = 101, MacAddress = "BB:00:00:00:00:02", WiFiNetworkId = null, Hostname = "bob",   Status = Status.Offline, LastPollDate = DateTime.UtcNow };
+        var orphanB = new WLANStation { Id = 102, MacAddress = "CC:00:00:00:00:03", WiFiNetworkId = 999,  Hostname = "carol", Status = Status.Offline, LastPollDate = DateTime.UtcNow };
+
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { normal, orphanA, orphanB }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } });
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+
+            // All three rows are present (MAC visible in column 2 monospace cell for each).
+            Assert.Contains("AA:00:00:00:00:01", cut.Markup);
+            Assert.Contains("BB:00:00:00:00:02", cut.Markup);
+            Assert.Contains("CC:00:00:00:00:03", cut.Markup);
+
+            // Per-row placeholder check: locate the <tr> by MAC and assert its SSID + AP cells
+            // (columns 5 and 6, 0-indexed 4 and 5) render the em-dash placeholder.
+            foreach (var orphanMac in new[] { "BB:00:00:00:00:02", "CC:00:00:00:00:03" })
+            {
+                var row = cut.FindAll("tbody tr")
+                             .First(tr => tr.TextContent.Contains(orphanMac));
+                var cells = row.QuerySelectorAll("td");
+                Assert.Equal("—", cells[4].TextContent.Trim());   // SSID
+                Assert.Equal("—", cells[5].TextContent.Trim());   // AP
+            }
+
+            // Sanity: the non-orphan row still renders its real SSID + AP.
+            var aliceRow = cut.FindAll("tbody tr")
+                              .First(tr => tr.TextContent.Contains("AA:00:00:00:00:01"));
+            var aliceCells = aliceRow.QuerySelectorAll("td");
+            Assert.Equal("guest", aliceCells[4].TextContent.Trim());
+            Assert.Equal("ap-A",  aliceCells[5].TextContent.Trim());
+        }
+    }
+
+    [Fact]
+    public void BuildRows_OrphanStation_RespectsStatusFilter()
+    {
+        // Orphan with Status=Offline must inherit the standard Status-filter semantics:
+        // selecting "Online" hides it (its persisted Status is not Online). The orphan
+        // remains visible when no Status filter is active (the initial render).
+        //
+        // Note: the Offline / Stale partition in production splits on the IsStale predicate,
+        // which depends on `_cycleEndUtc`. That field is only populated by a PollNotifier.Cycled
+        // event, which this bUnit harness does not raise — so an offline row's Offline-vs-Stale
+        // classification under bUnit defaults to Stale (elapsed is negative against MinValue
+        // and thus < threshold). The Online-excludes-Offline-orphan direction is sufficient
+        // to lock the orphan-respects-Status-filter regression; the Offline-vs-Stale partition
+        // is independently covered by the existing IsStale tests.
+        var (node, net) = MakeApAndNet();
+        var onlineNormal = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10,   Hostname = "alice",  Status = Status.Online,  LastPollDate = DateTime.UtcNow };
+        var offlineOrphan = new WLANStation { Id = 101, MacAddress = "BB:00:00:00:00:02", WiFiNetworkId = null, Hostname = "ghost", Status = Status.Offline, LastPollDate = DateTime.UtcNow };
+
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { onlineNormal, offlineOrphan }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } });
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+
+            // No filter: both rows visible.
+            Assert.Contains("AA:00:00:00:00:01", cut.Markup);
+            Assert.Contains("BB:00:00:00:00:02", cut.Markup);
+
+            // Click the "Online" Status chip — only the online normal row should remain.
+            // Status filter chips have no StatusBadgeFor decorator so their button TextContent
+            // is just the label.
+            cut.FindAll("button").First(b => b.TextContent.Trim() == "Online").Click();
+            Assert.Contains("AA:00:00:00:00:01", cut.Markup);
+            Assert.DoesNotContain("BB:00:00:00:00:02", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public void BuildRows_OrphanStation_HiddenByApFilter()
+    {
+        // AP filter selects by hostname label. Orphan rows have ApHostname="—" so they don't
+        // match any real AP label and stay hidden when an AP filter is active.
+        var (node, net) = MakeApAndNet();
+        var normal = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10,   Hostname = "alice", Status = Status.Online,  LastPollDate = DateTime.UtcNow };
+        var orphan = new WLANStation { Id = 101, MacAddress = "BB:00:00:00:00:02", WiFiNetworkId = null, Hostname = "ghost", Status = Status.Online,  LastPollDate = DateTime.UtcNow };
+
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { normal, orphan }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } });
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+
+            // No filter: both visible.
+            Assert.Contains("AA:00:00:00:00:01", cut.Markup);
+            Assert.Contains("BB:00:00:00:00:02", cut.Markup);
+
+            // Click the "ap-A" AP chip. AP chips compose Phase 8's StatusBadgeFor, so the
+            // <button>'s TextContent contains both the label and the nested badge text
+            // (e.g. "ap-A Online"). Match by prefix.
+            cut.FindAll("button").First(b => b.TextContent.Trim().StartsWith("ap-A")).Click();
+            Assert.Contains("AA:00:00:00:00:01", cut.Markup);
+            Assert.DoesNotContain("BB:00:00:00:00:02", cut.Markup);
+        }
+    }
+
     /// <summary>
     /// Walk up from the test binary's BaseDirectory to find the repo root, then load Dashboard.razor.
     /// The test binary lives at OpenWrtApStats.Tests/bin/{Configuration}/net10.0/, so walking up
