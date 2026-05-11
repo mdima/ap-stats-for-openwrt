@@ -88,7 +88,29 @@ public sealed class SubnetSweepProbe(ISshSession session, ILogger<SubnetSweepPro
             else
             {
                 // D-04: auto-derive /24 from the SSH-peer-serving interface.
-                var routeOut = await session.RunCommandAsync($"ip route get {peerIp}", sct);
+                //
+                // Debug session p10-trigger-and-nslookup (2026-05-11 fourth-order fix): the original
+                // implementation used `ip route get {peerIp}`, where `peerIp` is the SSH destination
+                // (the AP's own LAN IP after the factory's Dns.GetHostAddressesAsync resolution at
+                // Program.cs:215-220). On Linux/BusyBox, `ip route get <self-IP>` returns the
+                // loopback route (`local <ip> dev lo`) for any IP bound to a local interface — so
+                // the regex extracted iface='lo', `ip -4 addr show dev lo` returned `127.0.0.1/8`,
+                // MaskToSlash24 derived `127.0.0.0/24`, and arping swept loopback finding zero
+                // mappings on every cycle. The original design intent (see class doc comment above)
+                // was to derive from the SSH-peer-serving interface — i.e. the iface that talks to
+                // the SSH client (the orchestrator host), NOT the SSH destination.
+                //
+                // Fix: use the `$SSH_CLIENT` env var inside the SSH session. OpenSSH sets this on
+                // session start, format: `<client-ip> <client-port> <server-port>` (space-separated).
+                // BusyBox ash/hush supports `${SSH_CLIENT%% *}` parameter expansion to extract the
+                // first field. Route to SSH_CLIENT traverses the LAN-facing interface, which is the
+                // correct subnet for the arping sweep.
+                //
+                // The T-09-03-05 invalid-peerIp gate above (lines 37-43) is preserved as defense-in-
+                // depth — peerIp is still validated on entry but no longer used in shell command
+                // construction here.
+                var routeOut = await session.RunCommandAsync(
+                    "ip route get \"${SSH_CLIENT%% *}\"", sct);
                 iface = SubnetDeriver.ExtractInterfaceFromIpRouteGet(routeOut);
                 // T-09-03-05 defense-in-depth: even though SubnetDeriver's regex restricts the
                 // iface charset, re-validate at the shell-command construction site before
@@ -103,8 +125,8 @@ public sealed class SubnetSweepProbe(ISshSession session, ILogger<SubnetSweepPro
                 if (iface is null)
                 {
                     log.LogInformation(
-                        "Node {Hostname} (Id={NodeId}): subnet auto-derivation failed (no iface from `ip route get {Peer}`); set Node.SubnetScanRanges to enable enrichment.",
-                        node.Hostname, node.Id, peerIp);
+                        "Node {Hostname} (Id={NodeId}): subnet auto-derivation failed (no iface from `ip route get $SSH_CLIENT`); set Node.SubnetScanRanges to enable enrichment.",
+                        node.Hostname, node.Id);
                     return new SubnetSweepProbeResult.Failed(node.Id, "subnet-derivation-failed");
                 }
                 var addrOut = await session.RunCommandAsync($"ip -4 addr show dev {iface}", sct);
