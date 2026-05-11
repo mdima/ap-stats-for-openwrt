@@ -449,6 +449,68 @@ public static class OpenWrtOutputParser
         }
     }
 
+    /// <summary>
+    /// Quick task 260511-lct (2026-05-11): parse the batched <c>nslookup</c> stdout produced by
+    /// <see cref="ReverseDnsProbe"/>'s single-SSH-command shell loop → Dictionary&lt;IP, FQDN?&gt;.
+    /// Each per-IP block in the stream is delimited by a sentinel line of the form
+    /// <c>==&lt;ipv4&gt;==</c> emitted by the AP-side subshell BEFORE its nslookup invocation
+    /// runs (the parenthesised subshell <c>(echo ==$ip==; nslookup ... 2>&amp;1) &amp;</c> shape
+    /// keeps the sentinel-echo and the nslookup output atomic against background-process
+    /// interleaving — see ReverseDnsProbe.BuildBatchedNslookupCommand).
+    ///
+    /// Composition: delegates each sentinel-delimited block body to the existing single-IP
+    /// <see cref="ParseNslookupOutput"/> — that preserves FQDN normalization (lowercase,
+    /// trailing-dot strip) plus the NXDOMAIN/SERVFAIL/can't find/connection-timed-out
+    /// short-circuit (D-12) verbatim. Returns the dictionary using StringComparer.Ordinal
+    /// (IPv4 dotted-quad keys are ASCII; matches the ParseIpNeigh / ParseArpingPingOutput
+    /// convention above).
+    ///
+    /// Tolerant per-block: an unparseable block body simply yields null for its IP (no
+    /// exception escapes). Last-wins on duplicate sentinels (defensive — the production
+    /// command builder does not emit duplicates).
+    /// </summary>
+    public static IReadOnlyDictionary<string, string?> ParseBatchedNslookupOutput(string raw, ILogger log)
+    {
+        var result = new Dictionary<string, string?>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(raw)) return result;
+
+        var matches = BatchedNslookupSentinelRegex.Matches(raw);
+        if (matches.Count == 0) return result;
+
+        for (var i = 0; i < matches.Count; i++)
+        {
+            var ip = matches[i].Groups["ip"].Value;
+            var blockStart = matches[i].Index + matches[i].Length;
+            var blockEnd = (i + 1 < matches.Count) ? matches[i + 1].Index : raw.Length;
+            var block = raw.Substring(blockStart, blockEnd - blockStart);
+            try
+            {
+                result[ip] = ParseNslookupOutput(block, log);
+            }
+            catch (Exception ex)
+            {
+                // Truncate the offending block body to keep log bloat bounded.
+                var truncated = block.Length <= 200 ? block : block.Substring(0, 200) + "…";
+                log.LogWarning(ex,
+                    "ParseBatchedNslookupOutput: failed to parse block for IP {Ip}; storing null. Raw block (truncated): {RawBlock}",
+                    ip, truncated);
+                result[ip] = null;
+            }
+        }
+
+        return result;
+    }
+
+    // Quick task 260511-lct: sentinel line matcher used by ParseBatchedNslookupOutput. The
+    // sentinel shape is `==<ipv4>==` on its own line; the parenthesised subshell in the AP-side
+    // command builder guarantees the echo+nslookup output pair is atomic against background
+    // interleaving, so the match-then-substring slicing here is sufficient for attribution.
+    private static readonly System.Text.RegularExpressions.Regex BatchedNslookupSentinelRegex =
+        new(@"^==(?<ip>[\d.]+)==\s*$",
+            System.Text.RegularExpressions.RegexOptions.Compiled
+            | System.Text.RegularExpressions.RegexOptions.Multiline
+            | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
     // === helpers ===
     private static string ExtractAfter(string line, string key)
     {
