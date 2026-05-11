@@ -123,6 +123,7 @@ public sealed class StationRepo(IDbContextFactory<DatabaseContext> factory) : IS
                 existingRow.Hostname      = probe.Hostname ?? existingRow.Hostname;
                 // existingRow.Name is operator-assigned (DASH-14) — preserve across cycles. (ORCH-02)
                 // existingRow.IsRandomMac is INSERT-only (ORCH-03) — preserve across cycles. (ORCH-02)
+                // existingRow.FirstSeen is INSERT-only (v0.9.2) — preserve across cycles. (ORCH-02)
                 existingRow.TxBitrate     = probe.TxBitrate;
                 existingRow.RxBitrate     = probe.RxBitrate;
                 existingRow.RSS           = probe.RSS;
@@ -140,6 +141,12 @@ public sealed class StationRepo(IDbContextFactory<DatabaseContext> factory) : IS
                 {
                     probe.IsRandomMac = (Convert.ToByte(probe.MacAddress.Substring(0, 2), 16) & 0x02) != 0;
                 }
+                // v0.9.2 — FirstSeen captures the moment of first observation. INSERT-only per the
+                // seed file's locked design: reuse the orchestrator-populated cycle timestamp so
+                // FirstSeen == LastPollDate exactly for any station whose first appearance is this
+                // cycle. Subsequent upsert cycles fall through the UPDATE branch above, which leaves
+                // existingRow.FirstSeen untouched (ORCH-02 preservation).
+                probe.FirstSeen = probe.LastPollDate;
                 db.WLANStations.Add(probe);
             }
         }
