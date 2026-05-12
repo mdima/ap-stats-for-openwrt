@@ -148,7 +148,7 @@ public sealed class SubnetSweepProbe(ISshSession session, ILogger<SubnetSweepPro
                 // Debug session p10-trigger-and-nslookup: distinguish "expanded to empty" from
                 // "ran arping but no devices responded" (the latter is the line-133 main path).
                 log.LogInformation(
-                    "Subnet-sweep pass on node {Hostname} (Id={NodeId}): returned 0 MAC→IP mappings — subnet {Subnet} expanded to 0 hosts; investigate.",
+                    "Subnet-sweep pass on node {Hostname} (Id={NodeId}): returned 0 MAC-IP mappings — subnet {Subnet} expanded to 0 hosts; investigate.",
                     node.Hostname, node.Id, subnetDescription);
                 return new SubnetSweepProbeResult.Success(node.Id,
                     new Dictionary<string, string>(StringComparer.Ordinal));
@@ -173,7 +173,7 @@ public sealed class SubnetSweepProbe(ISshSession session, ILogger<SubnetSweepPro
             // (LAN devices silent / arping disabled / wrong iface), (b) ran arping with N hits
             // (expected steady-state), and (c) Failed/skip paths above (each have their own line).
             log.LogInformation(
-                "Subnet-sweep pass on node {Hostname} (Id={NodeId}): found {Count} MAC→IP mappings via {Probe} on subnet {Subnet}.",
+                "Subnet-sweep pass on node {Hostname} (Id={NodeId}): found {Count} MAC-IP mappings via {Probe} on subnet {Subnet}.",
                 node.Hostname, node.Id, macToIp.Count, useArping ? "arping" : "ping", subnetDescription);
 
             return new SubnetSweepProbeResult.Success(node.Id, macToIp);
