@@ -126,7 +126,7 @@ public sealed class DockerComposeRoundtripSmokeTests(DockerSmokeFixture fixture)
     }
 
     private IContainer BuildContainer() =>
-        new ContainerBuilder("openwrtapstats:smoke")
+        new ContainerBuilder("apstatsforopenwrt:smoke")
             .WithPortBinding(8080, assignRandomHostPort: true)
             .WithVolumeMount(_fixture.DataVolume, "/data")
             .WithVolumeMount(_fixture.LogsVolume, "/logs")

@@ -172,17 +172,17 @@ public sealed class DockerfileStructuralTests
     [Fact]
     public void DockerCompose_DeclaresApStatsForOpenWrtDataVolume()
     {
-        // D-10 / RESEARCH Finding #2: named volume openwrtapstats-data mounted at /data so
+        // D-10 / RESEARCH Finding #2: named volume apstatsforopenwrt-data mounted at /data so
         // SQLite + DataProtection key ring survive `docker compose down && up`.
-        Assert.Contains("openwrtapstats-data:/data", DockerComposeText(), StringComparison.Ordinal);
+        Assert.Contains("apstatsforopenwrt-data:/data", DockerComposeText(), StringComparison.Ordinal);
     }
 
     [Fact]
     public void DockerCompose_DeclaresApStatsForOpenWrtLogsVolume()
     {
-        // D-10: named volume openwrtapstats-logs mounted at /logs for Serilog daily-rolling
+        // D-10: named volume apstatsforopenwrt-logs mounted at /logs for Serilog daily-rolling
         // files; survives container lifecycle.
-        Assert.Contains("openwrtapstats-logs:/logs", DockerComposeText(), StringComparison.Ordinal);
+        Assert.Contains("apstatsforopenwrt-logs:/logs", DockerComposeText(), StringComparison.Ordinal);
     }
 
     [Fact]

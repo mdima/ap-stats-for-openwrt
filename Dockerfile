@@ -14,7 +14,7 @@ ARG DOTNET_VERSION=10.0
 FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION} AS base
 
 # Install curl for the health-check directive CMD (D-04). ~7-10 MB cost; chiseled v2
-# will revisit (HARD-01 in STACK.md) and likely move to a `dotnet OpenWrtApStats.dll
+# will revisit (HARD-01 in STACK.md) and likely move to a `dotnet ApStatsForOpenWrt.dll
 # --healthcheck` self-probe. Single RUN combines update + install + apt-cache cleanup
 # so the cache files never appear in any image layer (T-07-10 mitigation).
 USER root
@@ -38,18 +38,18 @@ ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 
 # csproj-only restore for cache-friendly layer ordering. Only the production csproj is
-# copied separately — `dotnet restore OpenWrtApStats/OpenWrtApStats.csproj` does NOT walk
-# the .sln, so peer csproj files (OpenWrtApStats.Tests, tools/FixtureCapture) are not
+# copied separately — `dotnet restore ApStatsForOpenWrt/ApStatsForOpenWrt.csproj` does NOT walk
+# the .sln, so peer csproj files (ApStatsForOpenWrt.Tests, tools/FixtureCapture) are not
 # needed at this stage and cannot be copied anyway because .dockerignore excludes
-# OpenWrtApStats.Tests/ wholesale (test source must never enter image layers).
-COPY OpenWrtApStats.sln Directory.Build.props global.json ./
-COPY OpenWrtApStats/OpenWrtApStats.csproj OpenWrtApStats/
+# ApStatsForOpenWrt.Tests/ wholesale (test source must never enter image layers).
+COPY ApStatsForOpenWrt.sln Directory.Build.props global.json ./
+COPY ApStatsForOpenWrt/ApStatsForOpenWrt.csproj ApStatsForOpenWrt/
 
-RUN dotnet restore OpenWrtApStats/OpenWrtApStats.csproj
+RUN dotnet restore ApStatsForOpenWrt/ApStatsForOpenWrt.csproj
 
 COPY . .
 
-RUN dotnet publish OpenWrtApStats/OpenWrtApStats.csproj \
+RUN dotnet publish ApStatsForOpenWrt/ApStatsForOpenWrt.csproj \
     -c ${BUILD_CONFIGURATION} \
     -o /app/publish \
     --no-restore \
@@ -67,4 +67,4 @@ COPY --from=build --chown=app:app /app/publish .
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -fsS http://localhost:8080/health || exit 1
 
-ENTRYPOINT ["dotnet", "OpenWrtApStats.dll"]
+ENTRYPOINT ["dotnet", "ApStatsForOpenWrt.dll"]

@@ -34,7 +34,7 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
     /// just on /health responding.
     /// </summary>
     private IContainer BuildContainer() =>
-        new ContainerBuilder("openwrtapstats:smoke")
+        new ContainerBuilder("apstatsforopenwrt:smoke")
             .WithPortBinding(8080, assignRandomHostPort: true)
             .WithVolumeMount(_fixture.DataVolume, "/data")
             .WithVolumeMount(_fixture.LogsVolume, "/logs")
@@ -61,7 +61,7 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
     /// <c>start-period=30s</c>).
     /// </summary>
     private IContainer BuildHealthyContainer() =>
-        new ContainerBuilder("openwrtapstats:smoke")
+        new ContainerBuilder("apstatsforopenwrt:smoke")
             .WithPortBinding(8080, assignRandomHostPort: true)
             .WithVolumeMount(_fixture.DataVolume, "/data")
             .WithVolumeMount(_fixture.LogsVolume, "/logs")

@@ -29,7 +29,7 @@ public sealed class DockerSmokeFixture : IAsyncLifetime
         Image = new ImageFromDockerfileBuilder()
             .WithDockerfileDirectory(CommonDirectoryPath.GetSolutionDirectory(), string.Empty)
             .WithDockerfile("Dockerfile")
-            .WithName("openwrtapstats:smoke")
+            .WithName("apstatsforopenwrt:smoke")
             .WithCleanUp(true)
             .Build();
         await Image.CreateAsync();
@@ -40,13 +40,13 @@ public sealed class DockerSmokeFixture : IAsyncLifetime
         // DockerComposeRoundtripSmokeTests still re-uses the SAME volume reference
         // because the disposal happens at fixture teardown, not container teardown.
         DataVolume = new VolumeBuilder()
-            .WithName($"openwrtapstats-data-smoke-{Guid.NewGuid():N}")
+            .WithName($"apstatsforopenwrt-data-smoke-{Guid.NewGuid():N}")
             .WithCleanUp(true)
             .Build();
         await DataVolume.CreateAsync();
 
         LogsVolume = new VolumeBuilder()
-            .WithName($"openwrtapstats-logs-smoke-{Guid.NewGuid():N}")
+            .WithName($"apstatsforopenwrt-logs-smoke-{Guid.NewGuid():N}")
             .WithCleanUp(true)
             .Build();
         await LogsVolume.CreateAsync();
