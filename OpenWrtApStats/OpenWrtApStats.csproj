@@ -31,6 +31,7 @@
       that serves the file produced here.
     -->
     <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
+    <Version>0.10.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -69,8 +70,6 @@
     (e.g., very first build before Container Tools has produced anything).
   -->
   <Target Name="EnsureContainerLatestTag" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
-    <Exec Command="docker tag openwrtapstats:dev openwrtapstats:latest"
-          ContinueOnError="true"
-          IgnoreExitCode="true" />
+    <Exec Command="docker tag openwrtapstats:dev openwrtapstats:latest" ContinueOnError="true" IgnoreExitCode="true" />
   </Target>
 </Project>
