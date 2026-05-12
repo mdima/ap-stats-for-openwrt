@@ -1,7 +1,7 @@
 <!-- GSD:project-start source:PROJECT.md -->
 ## Project
 
-**AP-Stats-for-OpenWrt** — A self-hosted Docker dashboard that gives operators of OpenWRT-based access points a live view of who is connected to which WLAN on which AP. The native LuCI UI in AP mode does not surface this information cleanly across multiple APs and WLANs, so this dashboard fills that gap. The application is delivered as a single Docker container that polls each declared AP over SSH and renders the results through a Blazor live UI.
+**AP Stats for OpenWrt** — A self-hosted Docker dashboard that gives operators of OpenWRT-based access points a live view of who is connected to which WLAN on which AP. The native LuCI UI in AP mode does not surface this information cleanly across multiple APs and WLANs, so this dashboard fills that gap. The application is delivered as a single Docker container that polls each declared AP over SSH and renders the results through a Blazor live UI.
 
 **Core value:** A network operator can see, at a glance and in real time, every WiFi station currently associated with every monitored WLAN across every declared OpenWRT access point.
 
