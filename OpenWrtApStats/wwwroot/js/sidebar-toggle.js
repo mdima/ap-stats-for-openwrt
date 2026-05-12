@@ -17,6 +17,7 @@
     var COLLAPSED = 'sidebar-collapse';
     var MOBILE_OPEN = 'sidebar-open';
     var TRIGGER_SELECTOR = '[data-app-toggle="sidebar"]';
+    var SIDEBAR_OVERLAY_SELECTOR = '.sidebar-overlay';
 
     function isMobile() {
         return window.innerWidth <= SIDEBAR_BREAKPOINT_PX;
@@ -49,6 +50,13 @@
 
     document.addEventListener('click', function (event) {
         var trigger = event.target.closest && event.target.closest(TRIGGER_SELECTOR);
+        if (!trigger) return;
+        event.preventDefault();
+        toggleSidebar();
+    });
+
+    document.addEventListener('click', function (event) {
+        var trigger = event.target.closest && event.target.closest(SIDEBAR_OVERLAY_SELECTOR);
         if (!trigger) return;
         event.preventDefault();
         toggleSidebar();
