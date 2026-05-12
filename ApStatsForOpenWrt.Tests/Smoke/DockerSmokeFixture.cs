@@ -6,7 +6,7 @@ using Xunit;
 namespace ApStatsForOpenWrt.Tests.Smoke;
 
 /// <summary>
-/// IAsyncLifetime fixture for the OpenWRT-AP-Stats Docker smoke tests.
+/// IAsyncLifetime fixture for the AP Stats for OpenWrt Docker smoke tests.
 /// Builds the image ONCE via <see cref="ImageFromDockerfileBuilder"/> and creates
 /// GUID-scoped named volumes per test run so concurrent CI invocations do not collide.
 ///

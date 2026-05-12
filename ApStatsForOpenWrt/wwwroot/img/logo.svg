@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-labelledby="logo-title">
-  <title id="logo-title">OpenWRT-AP-Stats</title>
+  <title id="logo-title">AP Stats for OpenWrt</title>
   <g fill="none" stroke="#D6D8D9" stroke-width="4" stroke-linecap="round">
     <path d="M19 23.34a10 10 0 0 1 0 17.32"/>
     <path d="M23 16.41a18 18 0 0 1 0 31.18"/>

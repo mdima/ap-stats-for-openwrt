@@ -180,6 +180,6 @@ phase10_uat_followup: |
   Bug 2 ("0/41 hostnames in production despite working sweep") root cause remains under
   investigation as of fixture commit. See `.planning/debug/p10-trigger-and-nslookup.md` and
   the new LogInformation observability line in ReverseDnsProbe.cs (Phase 10 same-commit pair).
-  Next operator step: restart `OpenWrtApStats.exe`, capture one poll cycle's logs, share for
+  Next operator step: restart `ApStatsForOpenWrt.exe`, capture one poll cycle's logs, share for
   analysis. The new log line will discriminate among three residual hypotheses (see debug
   session file).

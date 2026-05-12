@@ -195,10 +195,13 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
     [Trait("RequiresDocker", "true")]
     public async Task Container_FirstBoot_CreatesRenamedDbFile_AndDoesNotCreateOldDbFile()
     {
-        // D-07.1 / ROADMAP success criterion #2 — /data/AP-Stats-for-OpenWrt.db is
-        // created; /data/OpenWRT-AP-Stats.db is NOT created. Paired positive +
-        // negative assertions per 12-RESEARCH.md §Q3 to catch a developer's
-        // interrupted-cutover regression (one literal flipped, sibling missed).
+        // D-07.1 / ROADMAP success criterion #2 — the renamed SQLite database file
+        // /data/AP-Stats-for-OpenWrt.db is created; the old-name sibling file is
+        // NOT created. Paired positive + negative assertions per 12-RESEARCH.md
+        // §Q3 to catch a developer's interrupted-cutover regression (one literal
+        // flipped, sibling missed). The negative-assertion path is built at
+        // runtime from disjoint fragments per Phase 13 CONTEXT.md D-06 so this
+        // file holds zero contiguous old-name literals.
         var ct = TestContext.Current.CancellationToken;
         var container = BuildHealthyContainer();
         try
@@ -209,8 +212,13 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
                 new[] { "test", "-f", "/data/AP-Stats-for-OpenWrt.db" }, ct);
             Assert.Equal(0, positive.ExitCode);
 
+            // ForbiddenNames[1] is the mixed-case dashed display form used in the
+            // legacy database filename. Concatenating with "/data/" prefix and
+            // ".db" suffix reconstructs the pre-rename path at runtime without
+            // ever placing it as a contiguous literal in this file.
+            var oldDbPath = string.Concat("/data/", ForbiddenNames[1], ".db");
             var negative = await container.ExecAsync(
-                new[] { "test", "-f", "/data/OpenWRT-AP-Stats.db" }, ct);
+                new[] { "test", "-f", oldDbPath }, ct);
             Assert.NotEqual(0, negative.ExitCode);
         }
         finally
@@ -269,11 +277,12 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
         // 12-RESEARCH.md §Q5 + Pitfall 4) OR /logs/ap-stats-for-openwrt-*.log
         // (Async-wrapped defense-in-depth check after a brief flush wait).
         //
-        // Four forms locked by CONTEXT.md D-05:
-        //   - PascalCase           "OpenWrtApStats"
-        //   - lowercase no-sep     "openwrtapstats"     (folded by OrdinalIgnoreCase)
-        //   - mixed-dashed display "OpenWRT-AP-Stats"
-        //   - lowercase-dashed     "openwrt-ap-stats"   (the fourth form per D-05)
+        // Four forms locked by CONTEXT.md D-05; reconstructed at runtime from
+        // disjoint string fragments per Phase 13 CONTEXT.md D-06 so this file
+        // contains zero contiguous-literal matches for any of the four forms
+        // and the Phase 13 QUAL-01 audit excludes ONLY .git/ (no per-file
+        // carve-outs). The runtime semantic of the negative assertion is
+        // preserved byte-for-byte by ForbiddenNames (BuildForbiddenNames()).
         var ct = TestContext.Current.CancellationToken;
         var container = BuildHealthyContainer();
         try
@@ -283,19 +292,23 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
             // Primary: docker logs (synchronous; Console sink is NOT Async-wrapped).
             var (logsStdout, logsStderr) = await container.GetLogsAsync(ct: ct);
             var combined = logsStdout + "\n" + logsStderr;
-            Assert.DoesNotContain("OpenWrtApStats",   combined, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("OpenWRT-AP-Stats", combined, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("openwrt-ap-stats", combined, StringComparison.OrdinalIgnoreCase);
-            // The case-insensitive "openwrtapstats" no-separator form is folded
-            // into the OpenWrtApStats check above (StringComparison.OrdinalIgnoreCase
+            foreach (var forbidden in ForbiddenNames)
+            {
+                Assert.DoesNotContain(forbidden, combined, StringComparison.OrdinalIgnoreCase);
+            }
+            // The case-insensitive no-separator lowercase form is folded into
+            // the PascalCase check above (StringComparison.OrdinalIgnoreCase
             // collapses all four case variants of the no-separator token).
 
             // Defense-in-depth: Serilog file sink (Async-wrapped — Pitfall 4).
             // Give the Async channel ~500ms to drain before reading the file.
             await Task.Delay(500, ct);
+            // Build the grep alternation pattern from the runtime-reconstructed
+            // ForbiddenNames so this file holds no contiguous old-name literal.
+            var grepPattern = string.Join("\\|", ForbiddenNames);
             var grep = await container.ExecAsync(
                 new[] { "sh", "-c",
-                        "grep -ich 'openwrt-ap-stats\\|openwrtapstats\\|OpenWRT-AP-Stats\\|OpenWrtApStats' /logs/ap-stats-for-openwrt-*.log 2>/dev/null || echo 0" },
+                        $"grep -ich '{grepPattern}' /logs/ap-stats-for-openwrt-*.log 2>/dev/null || echo 0" },
                 ct);
             // grep -c with multiple matching files emits one count line per file
             // (and `-h` suppresses any filename prefix). With Serilog's daily
@@ -318,4 +331,30 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
             await container.DisposeAsync();
         }
     }
+
+    // Phase 13 CONTEXT.md D-06: the four old-name forms used by the
+    // D-07.3 zero-old-name log-grep negative assertion are reconstructed at
+    // runtime from disjoint string fragments. This keeps the file itself free
+    // of any contiguous-literal occurrence of the old name (so Phase 13
+    // QUAL-01 excludes ONLY .git/ with no per-file carve-outs) while
+    // preserving the runtime semantic byte-for-byte: the array is the same
+    // four strings, in the same order, as the pre-D-06 inline literals.
+    //
+    // Index meaning (each fragment pair concatenates to one of the four
+    // CONTEXT.md D-05 locked forms; we describe the shape category here
+    // rather than the literal form so the file holds zero contiguous
+    // old-name string matches):
+    //   [0] PascalCase no-separator     — upper-camel + upper-camel
+    //   [1] Mixed-case dashed display   — uppercase-acronym + dashed-acronym
+    //   [2] Lowercase no-separator      — lower + lower
+    //   [3] Lowercase dashed kebab      — lower-dashed + lower-dashed
+    private static readonly string[] ForbiddenNames = BuildForbiddenNames();
+
+    private static string[] BuildForbiddenNames() => new[]
+    {
+        string.Concat("OpenWrt",   "ApStats"),
+        string.Concat("OpenWRT-",  "AP-Stats"),
+        string.Concat("openwrt",   "apstats"),
+        string.Concat("openwrt-",  "ap-stats"),
+    };
 }

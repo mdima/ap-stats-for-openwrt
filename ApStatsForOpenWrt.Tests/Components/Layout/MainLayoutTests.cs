@@ -120,7 +120,7 @@ public sealed class MainLayoutTests
         Assert.NotNull(aside);
         var brand = aside.QuerySelector(".sidebar-brand .brand-text");
         Assert.NotNull(brand);
-        Assert.Equal("OpenWRT-AP-Stats", brand!.TextContent.Trim());
+        Assert.Equal("AP Stats for OpenWrt", brand!.TextContent.Trim());
 
         // Phase 8 Plan 09 — REQ-UI-70: branded SVG logo replaces the AdminLTE default PNG
         // in the sidebar brand-link. AdminLTELogo.png MUST NOT appear anywhere; /img/logo.svg
@@ -128,7 +128,7 @@ public sealed class MainLayoutTests
         var brandImg = aside.QuerySelector(".sidebar-brand .brand-link img.brand-image");
         Assert.NotNull(brandImg);
         Assert.Equal("/img/logo.svg", brandImg!.GetAttribute("src"));
-        Assert.Equal("OpenWRT-AP-Stats logo", brandImg.GetAttribute("alt"));
+        Assert.Equal("AP Stats for OpenWrt logo", brandImg.GetAttribute("alt"));
         Assert.DoesNotContain("AdminLTELogo", cut.Markup);
         Assert.DoesNotContain("opacity-75", brandImg.GetAttribute("class") ?? string.Empty);
 
@@ -154,7 +154,7 @@ public sealed class MainLayoutTests
         // Footer with the project name + literal copy
         var footer = cut.Find("footer.app-footer");
         Assert.NotNull(footer);
-        Assert.Contains("OpenWRT-AP-Stats", footer.TextContent);
+        Assert.Contains("AP Stats for OpenWrt", footer.TextContent);
         Assert.Contains("GitHub", footer.TextContent);
     }
 }
