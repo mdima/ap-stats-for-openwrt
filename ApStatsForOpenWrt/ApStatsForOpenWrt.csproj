@@ -58,11 +58,11 @@
 
   <!--
     VS Container Tools (Microsoft.VisualStudio.Azure.Containers.Tools.Targets) builds the image
-    as `openwrtapstats:dev` by default. The "Local registry" publish profile uses
-    DockerCustomContainerRegistry which does `docker tag openwrtapstats:latest <registry>/...`
-    + push, so it requires an `openwrtapstats:latest` tag to exist locally — which the regular
+    as `apstatsforopenwrt:dev` by default. The "Local registry" publish profile uses
+    DockerCustomContainerRegistry which does `docker tag apstatsforopenwrt:latest <registry>/...`
+    + push, so it requires an `apstatsforopenwrt:latest` tag to exist locally — which the regular
     build does not produce. Without this target, Publish fails with
-    "Error response from daemon: No such image: openwrtapstats:latest".
+    "Error response from daemon: No such image: apstatsforopenwrt:latest".
 
     AfterTargets="Build" Condition='$(Configuration) == Release': ensures the :latest alias
     is refreshed every Release build (the configuration Publish uses). ContinueOnError +
@@ -70,6 +70,6 @@
     (e.g., very first build before Container Tools has produced anything).
   -->
   <Target Name="EnsureContainerLatestTag" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
-    <Exec Command="docker tag openwrtapstats:dev openwrtapstats:latest" ContinueOnError="true" IgnoreExitCode="true" />
+    <Exec Command="docker tag apstatsforopenwrt:dev apstatsforopenwrt:latest" ContinueOnError="true" IgnoreExitCode="true" />
   </Target>
 </Project>
