@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
+#pragma warning disable CA1814 // Prefer jagged arrays over multidimensional
+
 namespace ApStatsForOpenWrt.Data.Migrations
 {
     /// <inheritdoc />
@@ -35,7 +37,11 @@ namespace ApStatsForOpenWrt.Data.Migrations
                     Username = table.Column<string>(type: "TEXT", maxLength: 64, nullable: false),
                     Password = table.Column<string>(type: "TEXT", maxLength: 2048, nullable: false),
                     Status = table.Column<int>(type: "INTEGER", nullable: false),
-                    LastPollDate = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    LastPollDate = table.Column<DateTime>(type: "TEXT", nullable: false),
+                    HostKeyFingerprint = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
+                    SubnetScanRanges = table.Column<string>(type: "TEXT", nullable: true),
+                    SubnetScanEnabled = table.Column<bool>(type: "INTEGER", nullable: false, defaultValue: true),
+                    LastEnrichmentRefreshAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -73,16 +79,18 @@ namespace ApStatsForOpenWrt.Data.Migrations
                 {
                     Id = table.Column<int>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    WiFiNetworkId = table.Column<int>(type: "INTEGER", nullable: false),
+                    WiFiNetworkId = table.Column<int>(type: "INTEGER", nullable: true),
                     MacAddress = table.Column<string>(type: "TEXT", maxLength: 17, nullable: false),
                     IPAddress = table.Column<string>(type: "TEXT", maxLength: 45, nullable: true),
                     Hostname = table.Column<string>(type: "TEXT", maxLength: 255, nullable: true),
                     Name = table.Column<string>(type: "TEXT", maxLength: 255, nullable: true),
                     TxBitrate = table.Column<double>(type: "REAL", nullable: false),
                     RxBitrate = table.Column<double>(type: "REAL", nullable: false),
-                    RSS = table.Column<int>(type: "INTEGER", nullable: false),
+                    RSS = table.Column<int>(type: "INTEGER", nullable: true),
                     Status = table.Column<int>(type: "INTEGER", nullable: false),
-                    LastPollDate = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    LastPollDate = table.Column<DateTime>(type: "TEXT", nullable: false),
+                    IsRandomMac = table.Column<bool>(type: "INTEGER", nullable: false),
+                    FirstSeen = table.Column<DateTime>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -92,13 +100,18 @@ namespace ApStatsForOpenWrt.Data.Migrations
                         column: x => x.WiFiNetworkId,
                         principalTable: "WiFiNetworks",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.SetNull);
                 });
 
             migrationBuilder.InsertData(
                 table: "AppSettings",
                 columns: new[] { "Key", "BoolValue", "IntValue", "StringValue" },
-                values: new object[] { "PollingIntervalSeconds", null, 30, null });
+                values: new object[,]
+                {
+                    { "LocalDomainSuffixes", null, null, "[]" },
+                    { "PollingIntervalSeconds", null, 30, null },
+                    { "RefreshIntervalSeconds", null, 3600, null }
+                });
 
             migrationBuilder.CreateIndex(
                 name: "IX_WiFiNetworks_WiFiNodeId_MacAddress",

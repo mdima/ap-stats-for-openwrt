@@ -5,13 +5,21 @@ using Xunit;
 namespace ApStatsForOpenWrt.Tests.Migrations;
 
 /// <summary>
-/// Phase 9 D-14 migration-apply test for <c>AddV091EnrichmentColumns</c>. Each fact builds a
+/// Phase 9 D-14 migration-apply test for the v0.9.1 enrichment columns. Each fact builds a
 /// fresh per-test SQLite file (NOT the InMemory provider — STACK.md ban) so the migration
-/// chain runs end-to-end. The U/L-bit backfill (D-08) is exercised by seeding the database
-/// at the v0.9 head (<c>Phase04_RSS_Nullable</c>) via raw SQL, then applying the Phase 9
-/// migration and asserting <c>IsRandomMac</c> was set correctly per row.
+/// chain runs end-to-end.
 ///
-/// Covers SCHEMA-01..06, ENRICH-07: column presence, default values, raw-SQL backfill, AppSetting seeds.
+/// Covers SCHEMA-01..04, SCHEMA-06, ENRICH-07: column presence, default values, AppSetting seeds.
+///
+/// Historical context (pre-Phase 12 Wave B): this fixture originally also exercised the
+/// raw-SQL U/L-bit backfill (D-08) by seeding the database at the v0.9 head
+/// (<c>Phase04_RSS_Nullable</c>) and migrating up. Phase 12 Wave B (RUNTIME-03) collapsed the
+/// 6-migration chain into a single <c>InitialCreate</c> baseline per CONTEXT.md D-01 ("pure
+/// delete + regen — no schema-parity exercise, no data port"); milestone v0.10 is a clean-break,
+/// so there are no pre-existing rows to back-fill at boot time. The backfill <c>[Fact]</c> was
+/// removed because its named intermediate migration target (<c>Phase04_RSS_Nullable</c>) no
+/// longer exists. The schema-presence + seed-content assertions below survive — they remain
+/// useful drift detectors for the regenerated baseline's column shape and seed correctness.
 /// </summary>
 public sealed class AddV091EnrichmentColumnsTests : IDisposable
 {
@@ -74,59 +82,13 @@ public sealed class AddV091EnrichmentColumnsTests : IDisposable
         Assert.Equal(2, keyCount);
     }
 
-    /// <summary>
-    /// SCHEMA-05 / ENRICH-07 / D-08: existing WLANStation rows are back-filled correctly from
-    /// the U/L bit on MAC byte 0.
-    ///
-    /// Strategy: migrate up to the v0.9 head (Phase04_RSS_Nullable), seed two stations via
-    /// raw SQL (the v0.9 schema lacks the IsRandomMac column so EF tracking cannot be used),
-    /// then apply the Phase 9 migration and read <c>IsRandomMac</c> back via raw SQL.
-    /// </summary>
-    [Fact]
-    public async Task MigrateAsync_BackfillsIsRandomMac_FromULBit()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var (factory, _) = BuildFactory();
-
-        // Step 1: migrate up to v0.9 head (Phase04_RSS_Nullable — pre-Phase 9 schema).
-        await using (var preDb = await factory.CreateDbContextAsync(ct))
-        {
-            await preDb.Database.MigrateAsync("Phase04_RSS_Nullable", ct);
-
-            // Step 2: seed v0.9-shaped data via raw SQL. The EF model carries Phase 9
-            // properties (IsRandomMac, SubnetScanRanges, ...) but this DB schema does NOT,
-            // so we cannot use the change tracker; raw SQL is the correct seam at this point.
-            // Note: at v0.9 head, WLANStations.WiFiNetworkId is non-nullable
-            // (SetNull cascade lands in NodeDeleteCascadeBehavior — already applied here).
-            await preDb.Database.ExecuteSqlRawAsync(
-                "INSERT INTO WiFiNodes (Hostname, Username, Password, Status, LastPollDate) " +
-                "VALUES ('seed-node', 'op', '', 0, '2026-01-01T00:00:00Z'); " +
-                "INSERT INTO WiFiNetworks (WiFiNodeId, SSID, Channel, Width, MacAddress, TxPower, Enabled) " +
-                "VALUES (1, 'seed-ssid', 1, 0, 'AA:BB:CC:DD:EE:FF', 0, 1); " +
-                "INSERT INTO WLANStations (WiFiNetworkId, MacAddress, TxBitrate, RxBitrate, RSS, Status, LastPollDate) " +
-                "VALUES (1, '02:11:22:33:44:55', 0, 0, NULL, 0, '2026-01-01T00:00:00Z'), " +
-                "       (1, '00:11:22:33:44:55', 0, 0, NULL, 0, '2026-01-01T00:00:00Z');",
-                ct);
-        }
-
-        // Step 3: apply the Phase 9 migration (head). This runs the D-08 backfill.
-        await using (var postDb = await factory.CreateDbContextAsync(ct))
-        {
-            await postDb.Database.MigrateAsync(ct);
-
-            // Step 4: assert backfill correctness via raw SQL (avoids any EF default-value
-            // surprises on tracked entities).
-            var randomMacRow = await postDb.Database.SqlQueryRaw<int>(
-                "SELECT IsRandomMac AS Value FROM WLANStations WHERE MacAddress = '02:11:22:33:44:55'")
-                .SingleAsync(ct);
-            Assert.Equal(1, randomMacRow); // U/L bit set => IsRandomMac == true => stored as 1.
-
-            var stableMacRow = await postDb.Database.SqlQueryRaw<int>(
-                "SELECT IsRandomMac AS Value FROM WLANStations WHERE MacAddress = '00:11:22:33:44:55'")
-                .SingleAsync(ct);
-            Assert.Equal(0, stableMacRow); // U/L bit clear => IsRandomMac == false => stored as 0.
-        }
-    }
+    // Phase 12 Wave B (RUNTIME-03): the original D-08 U/L-bit backfill [Fact]
+    // (MigrateAsync_BackfillsIsRandomMac_FromULBit) was removed because its named
+    // intermediate target migration `Phase04_RSS_Nullable` no longer exists after the
+    // 6-chain was collapsed into a single InitialCreate baseline. Per CONTEXT.md D-01
+    // milestone v0.10 is a clean-break (no data port), so backfill semantics are
+    // unreachable by design — the InitialCreate Up() runs against an empty DB. The
+    // schema-presence + seed-content facts in this file remain as drift detectors.
 
     /// <summary>
     /// SCHEMA-06 / D-09: after MigrateAsync the two new AppSetting seed rows have the exact
