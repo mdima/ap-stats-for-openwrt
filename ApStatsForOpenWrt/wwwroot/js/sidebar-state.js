@@ -1,4 +1,4 @@
-// OpenWrtApStats/wwwroot/js/sidebar-state.js
+// ApStatsForOpenWrt/wwwroot/js/sidebar-state.js
 // Phase 8 — D-17. Side-effect module: listens for the
 // 'openwrt-ap-stats:sidebar-toggled' CustomEvent (dispatched by the
 // EXTENDED sidebar-toggle.js) and persists the resulting collapsed

@@ -1,4 +1,4 @@
-// OpenWrtApStats/wwwroot/js/theme.js
+// ApStatsForOpenWrt/wwwroot/js/theme.js
 // Phase 8 — D-13/D-31. Runtime theme application helpers.
 // The anti-FOUC inline script in App.razor handles the pre-attach
 // synchronous case. THIS module handles in-session toggles after the

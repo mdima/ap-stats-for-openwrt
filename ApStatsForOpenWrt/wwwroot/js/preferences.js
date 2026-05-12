@@ -1,4 +1,4 @@
-// OpenWrtApStats/wwwroot/js/preferences.js
+// ApStatsForOpenWrt/wwwroot/js/preferences.js
 // Phase 8 — D-09/D-12 strongly-typed preferences interop.
 // Loaded by Services/PreferencesService.cs via dynamic import('./preferences.js').
 // All keys are prefixed with 'openwrt-ap-stats:' to namespace localStorage.
