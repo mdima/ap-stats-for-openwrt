@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Integration;
+namespace ApStatsForOpenWrt.Tests.Integration;
 
 /// <summary>
 /// ONB-01 integration suite. Verifies WizardRedirectMiddleware D-07 three-condition gate

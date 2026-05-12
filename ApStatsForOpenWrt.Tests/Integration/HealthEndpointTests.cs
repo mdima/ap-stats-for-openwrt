@@ -2,11 +2,11 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Services.Gating;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Services.Gating;
+using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Integration;
+namespace ApStatsForOpenWrt.Tests.Integration;
 
 /// <summary>
 /// ROADMAP success #2 + #3 + D-07 JSON shape + D-11 auth bypass coverage for the /health

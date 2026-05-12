@@ -1,14 +1,14 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
-using OpenWrtApStats.Data;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services.Bootstrap;
-using OpenWrtApStats.Services.Onboarding;
-using OpenWrtApStats.Services.Polling;
-using OpenWrtApStats.Services.Polling.Ssh;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Data;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Bootstrap;
+using ApStatsForOpenWrt.Services.Onboarding;
+using ApStatsForOpenWrt.Services.Polling;
+using ApStatsForOpenWrt.Services.Polling.Ssh;
+using ApStatsForOpenWrt.Services.Settings;
 using Serilog;
 using Serilog.Formatting.Compact;
 using System.Net;
@@ -22,7 +22,7 @@ Log.Logger = new LoggerConfiguration()
 
 try
 {
-    Log.Information("OpenWrtApStats starting");
+    Log.Information("ApStatsForOpenWrt starting");
 
     var builder = WebApplication.CreateBuilder(args);
 
@@ -75,12 +75,12 @@ try
     //    the /data volume is the encryption boundary (acceptable per threat model).
     builder.Services.AddDataProtection()
         .PersistKeysToFileSystem(new DirectoryInfo($"{dataRoot}/keys"))  // SEC-02
-        .SetApplicationName("OpenWrtApStats")                            // SEC-03, D-02 — VERBATIM string
+        .SetApplicationName("ApStatsForOpenWrt")                            // SEC-03, D-02 — VERBATIM string
         .SetDefaultKeyLifetime(TimeSpan.FromDays(90));                   // framework default — RESEARCH Pattern 3 §3
 
     // 5. Repositories (Transient — RESEARCH lifetimes table) + Settings service (Singleton — D-11).
     //    Repository registrations come first because AppSettingsService consumes IAppSettingsRepo
-    //    (PER-04 — only repositories under OpenWrtApStats.Data.Repositories may inject IDbContextFactory).
+    //    (PER-04 — only repositories under ApStatsForOpenWrt.Data.Repositories may inject IDbContextFactory).
     builder.Services.AddTransient<INodeRepo,        NodeRepo>();
     builder.Services.AddTransient<INetworkRepo,     NetworkRepo>();
     builder.Services.AddTransient<IStationRepo,     StationRepo>();
@@ -105,27 +105,27 @@ try
     //   2) INotificationsGate factory (Singleton)   — forwards to NotificationsGate.
     //   3) PreferencesService (Scoped)              — captures IJSRuntime + the gate.
     //   4) ToastService / EventDetectionService     — Singletons consuming INotificationsGate.
-    builder.Services.AddSingleton<OpenWrtApStats.Services.NotificationsGate>();
-    builder.Services.AddSingleton<OpenWrtApStats.Services.INotificationsGate>(sp =>
-        sp.GetRequiredService<OpenWrtApStats.Services.NotificationsGate>());
+    builder.Services.AddSingleton<ApStatsForOpenWrt.Services.NotificationsGate>();
+    builder.Services.AddSingleton<ApStatsForOpenWrt.Services.INotificationsGate>(sp =>
+        sp.GetRequiredService<ApStatsForOpenWrt.Services.NotificationsGate>());
     // Phase 8 D-09 (post-fix): PreferencesService is Scoped — wraps wwwroot/js/preferences.js
     // (per-browser localStorage) with a thin async interop layer + cached
     // IsNotificationsEnabled hot-path. The cached value is mirrored into the Singleton
     // NotificationsGate on first read and on every Set so cross-circuit consumers
     // (ToastService, EventDetectionService) see the operator's preference.
-    builder.Services.AddScoped<OpenWrtApStats.Services.PreferencesService>();
+    builder.Services.AddScoped<ApStatsForOpenWrt.Services.PreferencesService>();
     // Phase 8 Plan 08-06 D-08 — ToastService is the in-process event bus consumed by
     // ToastHost (Wave 3 mount in MainLayout) and emitted to by EventDetectionService.
     // Registered as Singleton AFTER PreferencesService + INotificationsGate so the DI
     // graph resolves cleanly at startup.
-    builder.Services.AddSingleton<OpenWrtApStats.Services.ToastService>();
+    builder.Services.AddSingleton<ApStatsForOpenWrt.Services.ToastService>();
     // Phase 8 Plan 08-07 D-08/D-11 — EventDetectionService subscribes to PollNotifier.Cycled
     // in its constructor. Singletons are constructed lazily on first resolve, so we register
     // an eager-start IHostedService shim that resolves the Singleton at app startup; without
     // it, a session with no UI activity would never instantiate the detector. Ordered AFTER
     // ToastService (its dependency) and BEFORE the polling pipeline registrations so the DI
     // graph remains acyclic.
-    builder.Services.AddSingleton<OpenWrtApStats.Services.EventDetectionService>();
+    builder.Services.AddSingleton<ApStatsForOpenWrt.Services.EventDetectionService>();
     // Phase 10 ORCH-07 — TimeProvider DI lets PollOrchestrator's enrichment loop accept an injected
     // clock (TimeProvider.System in production; a fake in tests). Required for the trigger evaluator
     // and the LastEnrichmentRefreshAt write timestamp.
@@ -159,16 +159,16 @@ try
     // per refresh tick (default <= once per hour at RefreshIntervalSeconds=3600). The orchestrator
     // gates this factory call on EnrichmentRefreshTrigger.ShouldRefresh — it is NOT invoked
     // when the trigger does not fire (SC4 isolation invariant inverted in Phase 10).
-    builder.Services.AddSingleton<Func<WiFiNode, IReadOnlyList<string>, string, CancellationToken, Task<OpenWrtApStats.Services.Polling.EnrichmentDelta?>>>(sp =>
+    builder.Services.AddSingleton<Func<WiFiNode, IReadOnlyList<string>, string, CancellationToken, Task<ApStatsForOpenWrt.Services.Polling.EnrichmentDelta?>>>(sp =>
         async (node, ipsForReverseDns, peerIp, ct) =>
         {
             // W-03 fix: only resolve services we actually use. The probes (sweepLocal, dnsLocal)
             // are constructed per-call from the just-connected session — sp-resolved Transient
             // SubnetSweepProbe / ReverseDnsProbe instances would be unused here and trigger
             // IDE0059/CS0219 warnings under warnings-as-errors.
-            var session = sp.GetRequiredService<OpenWrtApStats.Services.Polling.Ssh.ISshSession>();
+            var session = sp.GetRequiredService<ApStatsForOpenWrt.Services.Polling.Ssh.ISshSession>();
             var dpp     = sp.GetRequiredService<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>();
-            var log     = sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<OpenWrtApStats.Services.Polling.PollOrchestrator>>();
+            var log     = sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ApStatsForOpenWrt.Services.Polling.PollOrchestrator>>();
 
             try
             {
@@ -194,10 +194,10 @@ try
                 // DIFFERENT instances. Defensive shape: construct the probes inline binding the just-
                 // connected session, mirroring the SubnetSweepProbeTests / ReverseDnsProbeTests
                 // composition. This avoids a second connect inside the probes.
-                var sweepLocal = new OpenWrtApStats.Services.Polling.SubnetSweepProbe(session,
-                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<OpenWrtApStats.Services.Polling.SubnetSweepProbe>>());
-                var dnsLocal = new OpenWrtApStats.Services.Polling.ReverseDnsProbe(session,
-                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<OpenWrtApStats.Services.Polling.ReverseDnsProbe>>());
+                var sweepLocal = new ApStatsForOpenWrt.Services.Polling.SubnetSweepProbe(session,
+                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ApStatsForOpenWrt.Services.Polling.SubnetSweepProbe>>());
+                var dnsLocal = new ApStatsForOpenWrt.Services.Polling.ReverseDnsProbe(session,
+                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ApStatsForOpenWrt.Services.Polling.ReverseDnsProbe>>());
 
                 // QUICK 260510-kjt: SubnetSweepProbe's T-09-03-05 defense-in-depth gate
                 // (IPAddress.TryParse) refuses to sweep when peerIp is a DNS name. The orchestrator
@@ -230,7 +230,7 @@ try
                 }
 
                 var sweepRes = await sweepLocal.PollAsync(node, resolvedPeerIp, ct);
-                var sweepMap = sweepRes is OpenWrtApStats.Services.Polling.SubnetSweepProbeResult.Success ss
+                var sweepMap = sweepRes is ApStatsForOpenWrt.Services.Polling.SubnetSweepProbeResult.Success ss
                     ? ss.MacToIp
                     : (IReadOnlyDictionary<string, string>)new Dictionary<string, string>(StringComparer.Ordinal);
 
@@ -242,10 +242,10 @@ try
                 // sweep-only IPs) and TWO on rebid cycles where sweep discovered an IP the
                 // orchestrator did not pre-supply in ipsForReverseDns. dnsMap2 wins on
                 // collisions; partial-failure preserves dnsMap1 verbatim (DB-as-cache).
-                var mergedDns = await OpenWrtApStats.Services.Polling.EnrichmentFactoryClosure
+                var mergedDns = await ApStatsForOpenWrt.Services.Polling.EnrichmentFactoryClosure
                     .BuildMergedDnsMapAsync(dnsLocal, node, ipsForReverseDns, sweepMap, ct);
 
-                return new OpenWrtApStats.Services.Polling.EnrichmentDelta(node.Id, sweepMap, mergedDns);
+                return new ApStatsForOpenWrt.Services.Polling.EnrichmentDelta(node.Id, sweepMap, mergedDns);
             }
             catch (Exception ex)
             {
@@ -276,7 +276,7 @@ try
     builder.Services.AddAuthentication(Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme)
         .AddCookie(o =>
         {
-            o.Cookie.Name = "OpenWrtApStats.Auth";   // D-05 verbatim
+            o.Cookie.Name = "ApStatsForOpenWrt.Auth";   // D-05 verbatim
             o.Cookie.HttpOnly = true;
             o.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
             o.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest;
@@ -290,11 +290,11 @@ try
     builder.Services.AddAuthorization(o =>
     {
         o.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
-            .AddRequirements(new OpenWrtApStats.Services.Auth.ConditionalAuthRequirement())
+            .AddRequirements(new ApStatsForOpenWrt.Services.Auth.ConditionalAuthRequirement())
             .Build();
     });
     builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler,
-        OpenWrtApStats.Services.Auth.ConditionalAuthHandler>();
+        ApStatsForOpenWrt.Services.Auth.ConditionalAuthHandler>();
 
     builder.Services.AddRateLimiter(opts =>
     {
@@ -312,14 +312,14 @@ try
     });
 
     // SEC-04 password hasher; DASH-13 OUI singleton; D-07 + D-12 UI services.
-    builder.Services.AddTransient<OpenWrtApStats.Services.Auth.IUIPasswordHasher,
-                                  OpenWrtApStats.Services.Auth.UIPasswordHasher>();
-    builder.Services.AddSingleton<OpenWrtApStats.Services.Vendor.IOuiLookup,
-                                  OpenWrtApStats.Services.Vendor.OuiLookup>();
-    builder.Services.AddTransient<OpenWrtApStats.Services.Nodes.ITestConnectionService,
-                                  OpenWrtApStats.Services.Nodes.TestConnectionService>();
-    builder.Services.AddTransient<OpenWrtApStats.Services.Nodes.IWlanDiscoveryService,
-                                  OpenWrtApStats.Services.Nodes.WlanDiscoveryService>();
+    builder.Services.AddTransient<ApStatsForOpenWrt.Services.Auth.IUIPasswordHasher,
+                                  ApStatsForOpenWrt.Services.Auth.UIPasswordHasher>();
+    builder.Services.AddSingleton<ApStatsForOpenWrt.Services.Vendor.IOuiLookup,
+                                  ApStatsForOpenWrt.Services.Vendor.OuiLookup>();
+    builder.Services.AddTransient<ApStatsForOpenWrt.Services.Nodes.ITestConnectionService,
+                                  ApStatsForOpenWrt.Services.Nodes.TestConnectionService>();
+    builder.Services.AddTransient<ApStatsForOpenWrt.Services.Nodes.IWlanDiscoveryService,
+                                  ApStatsForOpenWrt.Services.Nodes.WlanDiscoveryService>();
 
     // Phase 6 INF-06 / POLL-05 / POLL-06 — real visitor gate.
     // CircuitTracker holds the Interlocked counter + re-armable TCS; CircuitTrackerHandler is
@@ -328,7 +328,7 @@ try
     // (Pattern 2 subscribers — Plans 05-03 / 05-05 unchanged).
     // CircuitOptions.DisconnectedCircuitRetentionPeriod = 3 min (D-03 — hard-coded, NOT App Settings
     // in v1; total grace = 3 min + 30s in CircuitTracker semantics).
-    builder.Services.AddSingleton<OpenWrtApStats.Services.Gating.CircuitTracker>();
+    builder.Services.AddSingleton<ApStatsForOpenWrt.Services.Gating.CircuitTracker>();
     // Phase 7+ smoke-test escape hatch (debug session smoke-poll-gate-not-armed, 2026-05-09):
     // The visitor gate is normally CircuitTrackerGate, which only releases its TaskCompletionSource
     // when the Blazor framework opens a real SignalR circuit (browser executes blazor.web.js).
@@ -342,17 +342,17 @@ try
     var gateMode = builder.Configuration["Polling:GateMode"];
     if (string.Equals(gateMode, "AlwaysLive", StringComparison.OrdinalIgnoreCase))
     {
-        builder.Services.AddSingleton<OpenWrtApStats.Services.Gating.ICircuitGate,
-                                      OpenWrtApStats.Services.Gating.AlwaysLiveGate>();
+        builder.Services.AddSingleton<ApStatsForOpenWrt.Services.Gating.ICircuitGate,
+                                      ApStatsForOpenWrt.Services.Gating.AlwaysLiveGate>();
         Log.Information("Polling:GateMode=AlwaysLive - registering AlwaysLiveGate (visitor gate disabled). Smoke/test path only.");
     }
     else
     {
-        builder.Services.AddSingleton<OpenWrtApStats.Services.Gating.ICircuitGate,
-                                      OpenWrtApStats.Services.Gating.CircuitTrackerGate>();
+        builder.Services.AddSingleton<ApStatsForOpenWrt.Services.Gating.ICircuitGate,
+                                      ApStatsForOpenWrt.Services.Gating.CircuitTrackerGate>();
     }
     builder.Services.AddScoped<Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler,
-                               OpenWrtApStats.Services.Gating.CircuitTrackerHandler>();
+                               ApStatsForOpenWrt.Services.Gating.CircuitTrackerHandler>();
     builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions>(o =>
     {
         o.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(3);  // D-03
@@ -361,8 +361,8 @@ try
     // Phase 6 INF-06 / D-08 — request-time health checks. Two named checks; status code
     // (200 / 503) is auto-derived from HealthReport.Status by MapHealthChecks below.
     builder.Services.AddHealthChecks()
-        .AddCheck<OpenWrtApStats.Services.Health.DbHealthCheck>("db")
-        .AddCheck<OpenWrtApStats.Services.Health.DataProtectionHealthCheck>("dataProtection");
+        .AddCheck<ApStatsForOpenWrt.Services.Health.DbHealthCheck>("db")
+        .AddCheck<ApStatsForOpenWrt.Services.Health.DataProtectionHealthCheck>("dataProtection");
 
     // 6. Bootstrap order (registration order = StartAsync order — Pitfall 10):
     //    Writability -> Migrations -> D-12 probe -> AppSettings warm-up -> Polling.
@@ -382,7 +382,7 @@ try
     // to instantiate (and therefore subscribe to PollNotifier.Cycled) at app startup, before
     // any UI page is opened. Order is irrelevant within the hosted-service group: this shim
     // does no work in StartAsync — DI resolution alone wires up the Cycled subscription.
-    builder.Services.AddHostedService<OpenWrtApStats.Services.EventDetectionEagerStartHostedService>(); // 6th — Phase 8
+    builder.Services.AddHostedService<ApStatsForOpenWrt.Services.EventDetectionEagerStartHostedService>(); // 6th — Phase 8
 
     // 7. Razor components (Phase 3 starts here). Auth + ratelimit + forwarded headers are
     //    added in Plan 03-03; this Plan 03-01 only lights up the Razor seam so the smoke
@@ -418,7 +418,7 @@ try
 
         // D-09 — read PollOrchestrator.LastSuccessfulCycleUtc via Volatile.Read (non-blocking).
         var orchestrator = ctx.RequestServices
-            .GetRequiredService<OpenWrtApStats.Services.Polling.PollOrchestrator>();
+            .GetRequiredService<ApStatsForOpenWrt.Services.Polling.PollOrchestrator>();
         var lastSuccess = orchestrator.LastSuccessfulCycleUtc;
         string? lastPollAge = lastSuccess == default
             ? null
@@ -459,7 +459,7 @@ try
         ResponseWriter = WriteJsonResponse,
     }).AllowAnonymous();
 
-    app.UseAuthentication();        // reads "OpenWrtApStats.Auth" cookie
+    app.UseAuthentication();        // reads "ApStatsForOpenWrt.Auth" cookie
     app.UseAuthorization();         // applies fallback ConditionalAuthRequirement
     app.UseRateLimiter();           // sees rewritten IP (Pitfall 4)
 
@@ -484,7 +484,7 @@ try
     // Step 1 password submission — auth needs the HTTP response pipeline, not the Blazor circuit.
     // Password.razor is a normal InteractiveServer page; this endpoint handles the POST.
     app.MapPost("/setup/submit-password", async (
-        OpenWrtApStats.Services.Auth.IUIPasswordHasher hasher,
+        ApStatsForOpenWrt.Services.Auth.IUIPasswordHasher hasher,
         IAppSettingsService settings,
         HttpContext ctx) =>
     {
@@ -535,14 +535,14 @@ try
     // fallback policy does not redirect them to /Login.
     app.MapStaticAssets();
 
-    app.MapRazorComponents<OpenWrtApStats.Components.App>()
+    app.MapRazorComponents<ApStatsForOpenWrt.Components.App>()
         .AddInteractiveServerRenderMode();
 
     await app.RunAsync();
 }
 catch (Exception ex) when (ex is not HostAbortedException)
 {
-    Log.Fatal(ex, "OpenWrtApStats terminated unexpectedly");
+    Log.Fatal(ex, "ApStatsForOpenWrt terminated unexpectedly");
     return 1;
 }
 finally

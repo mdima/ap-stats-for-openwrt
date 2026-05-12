@@ -1,8 +1,8 @@
 using Bunit;
-using OpenWrtApStats.Services;
+using ApStatsForOpenWrt.Services;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Services;
+namespace ApStatsForOpenWrt.Tests.Services;
 
 /// <summary>
 /// Phase 8 Plan 08-01 Task 2 — exercises <see cref="PreferencesService"/> against a

@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Microsoft.JSInterop;
 
-namespace OpenWrtApStats.Services;
+namespace ApStatsForOpenWrt.Services;
 
 /// <summary>
 /// Phase 8 Plan 08-06 D-10 — minimal abstraction <see cref="NotificationsGate"/> implements

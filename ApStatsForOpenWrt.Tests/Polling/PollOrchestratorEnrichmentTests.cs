@@ -1,14 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenWrtApStats.Data;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services.Polling;
-using OpenWrtApStats.Services.Settings;
-using OpenWrtApStats.Tests.TestSupport;
+using ApStatsForOpenWrt.Data;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Polling;
+using ApStatsForOpenWrt.Services.Settings;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Polling;
+namespace ApStatsForOpenWrt.Tests.Polling;
 
 /// <summary>
 /// Phase 10 ORCH-02..07 integration suite. Drives PollOrchestrator.RunCycleAsync end-to-end through
@@ -548,7 +548,7 @@ public sealed class PollOrchestratorEnrichmentTests(SqliteInMemoryFixture fixtur
     /// without the host CancellationToken being cancelled — mirrors the linked-CTS-budget
     /// exhaustion shape ReverseDnsProbe surfaces as <c>Failed(timeout)</c>.
     /// </summary>
-    private sealed class TogglingFakeSshSession(string fixtureDir, int throwOnNthCall) : OpenWrtApStats.Services.Polling.Ssh.ISshSession
+    private sealed class TogglingFakeSshSession(string fixtureDir, int throwOnNthCall) : ApStatsForOpenWrt.Services.Polling.Ssh.ISshSession
     {
         private readonly FakeSshSession _inner = new(fixtureDir);
         private int _callCount;

@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenWrtApStats.Services.Polling;
+using ApStatsForOpenWrt.Services.Polling;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Polling;
+namespace ApStatsForOpenWrt.Tests.Polling;
 
 /// <summary>
 /// Phase 9 ENRICH-06 / D-04 / D-06 — coverage for the static SubnetDeriver helpers:

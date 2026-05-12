@@ -1,10 +1,10 @@
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Components.Shared;
-using OpenWrtApStats.Services;
+using ApStatsForOpenWrt.Components.Shared;
+using ApStatsForOpenWrt.Services;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Components.Shared;
+namespace ApStatsForOpenWrt.Tests.Components.Shared;
 
 /// <summary>
 /// Phase 8 D-18 / REQ-UI-30..32, REQ-UI-51 — ThemeToggle component, 4 bUnit-testable

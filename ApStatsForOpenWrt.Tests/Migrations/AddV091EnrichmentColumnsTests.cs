@@ -1,8 +1,8 @@
 using Microsoft.EntityFrameworkCore;
-using OpenWrtApStats.Data;
+using ApStatsForOpenWrt.Data;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Migrations;
+namespace ApStatsForOpenWrt.Tests.Migrations;
 
 /// <summary>
 /// Phase 9 D-14 migration-apply test for <c>AddV091EnrichmentColumns</c>. Each fact builds a

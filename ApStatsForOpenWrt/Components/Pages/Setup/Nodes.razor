@@ -1,10 +1,10 @@
 @page "/setup/nodes"
 @layout SetupLayout
 @using Microsoft.AspNetCore.DataProtection
-@using OpenWrtApStats.Components.Pages.Nodes
-@using OpenWrtApStats.Data.Models
-@using OpenWrtApStats.Data.Repositories
-@using OpenWrtApStats.Services.Settings
+@using ApStatsForOpenWrt.Components.Pages.Nodes
+@using ApStatsForOpenWrt.Data.Models
+@using ApStatsForOpenWrt.Data.Repositories
+@using ApStatsForOpenWrt.Services.Settings
 
 @inject INodeRepo NodeRepo
 @inject IDataProtectionProvider Dpp
@@ -105,7 +105,7 @@
         _savedNodes = (await NodeRepo.GetAllAsync()).ToList();
     }
 
-    // internal for bUnit testability via InternalsVisibleTo (OpenWrtApStats.csproj)
+    // internal for bUnit testability via InternalsVisibleTo (ApStatsForOpenWrt.csproj)
     internal async Task HandleSaveAsync(NodeFormModel form)
     {
         if (string.IsNullOrEmpty(form.Password))

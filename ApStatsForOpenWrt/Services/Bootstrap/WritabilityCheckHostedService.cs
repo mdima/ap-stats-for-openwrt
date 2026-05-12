@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Services.Bootstrap;
+namespace ApStatsForOpenWrt.Services.Bootstrap;
 
 /// <summary>
 /// INF-07 / D-01 / D-02 fail-fast writability probe. Registered FIRST in the IHostedService

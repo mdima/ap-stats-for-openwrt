@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Services.Polling.Exceptions;
+namespace ApStatsForOpenWrt.Services.Polling.Exceptions;
 
 /// <summary>
 /// Thrown by <c>SubnetDeriver</c> / <c>SubnetSweepProbe</c> when auto-derivation cannot proceed

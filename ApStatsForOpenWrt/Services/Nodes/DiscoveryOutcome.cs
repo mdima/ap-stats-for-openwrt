@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Services.Nodes;
+namespace ApStatsForOpenWrt.Services.Nodes;
 
 /// <summary>WLAN-01 result of one Discover probe (D-12 / D-15).</summary>
 public abstract record DiscoveryOutcome(string UserMessage, OutcomeSeverity Severity)

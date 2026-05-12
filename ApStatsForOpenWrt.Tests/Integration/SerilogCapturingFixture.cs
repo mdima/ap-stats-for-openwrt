@@ -4,13 +4,13 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using OpenWrtApStats.Data;
+using ApStatsForOpenWrt.Data;
 using Serilog;
 using Serilog.Core;
 using Serilog.Events;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Integration;
+namespace ApStatsForOpenWrt.Tests.Integration;
 
 /// <summary>
 /// W7 / B2 — fixture that mirrors <see cref="SmokeFactoryFixture"/>'s in-memory SQLite +

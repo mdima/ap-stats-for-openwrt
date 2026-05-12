@@ -1,10 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using OpenWrtApStats.Data;
+using ApStatsForOpenWrt.Data;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Bootstrap;
+namespace ApStatsForOpenWrt.Tests.Bootstrap;
 
 /// <summary>
 /// PER-05 architectural invariant: the host registers <see cref="IDbContextFactory{TContext}"/>,
@@ -47,7 +47,7 @@ public sealed class DependencyInjectionTests
 
         // Architectural firewall — production code does not inject DatabaseContext directly
         // (architecturally enforced by ArchitectureTests.DbContext_IsOnlyUsedByRepositories);
-        // Phase 1 ships only repositories under OpenWrtApStats.Data.Repositories that consume
+        // Phase 1 ships only repositories under ApStatsForOpenWrt.Data.Repositories that consume
         // IDbContextFactory<DatabaseContext>. Asserting on a Scoped DbContext descriptor here
         // would test EF Core's internal plumbing (AddDbContextFactory itself registers a Scoped
         // DatabaseContext as a private resolution path) — not the user-facing PER-05 contract.

@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Integration;
+namespace ApStatsForOpenWrt.Tests.Integration;
 
 /// <summary>
 /// SEC-06 + Pitfall 3 + Pitfall 4 integration suite. Drives the named "LoginPolicy"

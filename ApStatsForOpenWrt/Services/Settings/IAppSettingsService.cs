@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Services.Settings;
+namespace ApStatsForOpenWrt.Services.Settings;
 
 /// <summary>
 /// Singleton typed accessor for application settings (D-11). Implementations expose an

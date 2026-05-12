@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace OpenWrtApStats.Services.Polling;
+namespace ApStatsForOpenWrt.Services.Polling;
 
 /// <summary>
 /// Process-scoped cache of which adapter binding (iwinfo or iw dev) each node speaks. Lost on

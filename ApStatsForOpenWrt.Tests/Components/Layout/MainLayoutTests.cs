@@ -3,14 +3,14 @@ using Bunit.TestDoubles;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenWrtApStats.Components.Layout;
-using OpenWrtApStats.Services;
-using OpenWrtApStats.Services.Gating;
-using OpenWrtApStats.Services.Polling;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Components.Layout;
+using ApStatsForOpenWrt.Services;
+using ApStatsForOpenWrt.Services.Gating;
+using ApStatsForOpenWrt.Services.Polling;
+using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Components.Layout;
+namespace ApStatsForOpenWrt.Tests.Components.Layout;
 
 /// <summary>
 /// D-20 smoke spike checkpoint #2 (structural). Verifies MainLayout renders the

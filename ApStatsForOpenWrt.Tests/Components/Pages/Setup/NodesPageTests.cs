@@ -1,15 +1,15 @@
 using Bunit;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Data;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services.Nodes;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Data;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Nodes;
+using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
-using NodesPage = OpenWrtApStats.Components.Pages.Setup.Nodes;
+using NodesPage = ApStatsForOpenWrt.Components.Pages.Setup.Nodes;
 
-namespace OpenWrtApStats.Tests.Components.Pages.Setup;
+namespace ApStatsForOpenWrt.Tests.Components.Pages.Setup;
 
 /// <summary>
 /// Nodes.razor (Step 2) bUnit tests. Covers: empty-table initial state, Continue button
@@ -114,7 +114,7 @@ public sealed class NodesPageTests
         ctx.Services.AddSingleton<INodeRepo>(repo);
         ctx.Services.AddSingleton<IAppSettingsService>(new StubSettings());
         ctx.Services.AddSingleton<ITestConnectionService>(new StubTestConn());
-        ctx.Services.AddDataProtection().SetApplicationName("OpenWrtApStats-Tests-Plan04-03");
+        ctx.Services.AddDataProtection().SetApplicationName("ApStatsForOpenWrt-Tests-Plan04-03");
         return (ctx, repo);
     }
 
@@ -155,7 +155,7 @@ public sealed class NodesPageTests
             var cut = ctx.Render<NodesPage>();
             await cut.InvokeAsync(async () =>
                 await cut.Instance.HandleSaveForTestAsync(
-                    new OpenWrtApStats.Components.Pages.Nodes.NodeFormModel
+                    new ApStatsForOpenWrt.Components.Pages.Nodes.NodeFormModel
                     {
                         Hostname = "ap-test.local",
                         Username = "root",
@@ -175,7 +175,7 @@ public sealed class NodesPageTests
             var cut = ctx.Render<NodesPage>();
             await cut.InvokeAsync(async () =>
                 await cut.Instance.HandleSaveForTestAsync(
-                    new OpenWrtApStats.Components.Pages.Nodes.NodeFormModel
+                    new ApStatsForOpenWrt.Components.Pages.Nodes.NodeFormModel
                     {
                         Hostname = "ap2.local",
                         Username = "root",
@@ -196,7 +196,7 @@ public sealed class NodesPageTests
             // Add a node first
             await cut.InvokeAsync(async () =>
                 await cut.Instance.HandleSaveForTestAsync(
-                    new OpenWrtApStats.Components.Pages.Nodes.NodeFormModel
+                    new ApStatsForOpenWrt.Components.Pages.Nodes.NodeFormModel
                     {
                         Hostname = "ap3.local",
                         Username = "root",

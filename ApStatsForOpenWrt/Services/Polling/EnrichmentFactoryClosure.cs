@@ -1,6 +1,6 @@
-using OpenWrtApStats.Data.Models;
+using ApStatsForOpenWrt.Data.Models;
 
-namespace OpenWrtApStats.Services.Polling;
+namespace ApStatsForOpenWrt.Services.Polling;
 
 /// <summary>
 /// QUICK 260511-ma0 (2026-05-11). Extracts the sweep-then-DNS merge logic from the

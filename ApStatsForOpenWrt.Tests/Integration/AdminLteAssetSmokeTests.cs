@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Integration;
+namespace ApStatsForOpenWrt.Tests.Integration;
 
 /// <summary>
 /// D-20 binding: the 5-checkpoint smoke spike (RESEARCH §Pitfall 6).

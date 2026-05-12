@@ -1,11 +1,11 @@
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Integration;
+namespace ApStatsForOpenWrt.Tests.Integration;
 
 /// <summary>
 /// SET-02 enable/disable + SET-03 bulk + SET-04 propagation. End-to-end through the real

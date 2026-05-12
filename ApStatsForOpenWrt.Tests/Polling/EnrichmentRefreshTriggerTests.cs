@@ -1,8 +1,8 @@
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Services.Polling;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Services.Polling;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Polling;
+namespace ApStatsForOpenWrt.Tests.Polling;
 
 /// <summary>
 /// Phase 10 ORCH-01 — pure-function unit tests for the composite refresh trigger.

@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Services.Polling;
+namespace ApStatsForOpenWrt.Services.Polling;
 
 /// <summary>
 /// Snapshot of one completed poll cycle. Phase 5's Dashboard subscribes to <see cref="PollNotifier.Cycled"/>

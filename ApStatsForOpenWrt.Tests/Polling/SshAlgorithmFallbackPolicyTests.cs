@@ -1,8 +1,8 @@
-using OpenWrtApStats.Services.Polling.Ssh;
+using ApStatsForOpenWrt.Services.Polling.Ssh;
 using Renci.SshNet;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Polling;
+namespace ApStatsForOpenWrt.Tests.Polling;
 
 public sealed class SshAlgorithmFallbackPolicyTests
 {

@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Services.Polling.Exceptions;
+namespace ApStatsForOpenWrt.Services.Polling.Exceptions;
 
 /// <summary>
 /// Thrown by RealSshSession.HostKeyReceived when the reported host key does NOT match the stored

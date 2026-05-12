@@ -1,10 +1,10 @@
 using Microsoft.Extensions.Logging;
-using OpenWrtApStats.Services.Gating;
-using OpenWrtApStats.Services.Polling;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Services.Gating;
+using ApStatsForOpenWrt.Services.Polling;
+using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Polling;
+namespace ApStatsForOpenWrt.Tests.Polling;
 
 /// <summary>
 /// PollingHostedService tests. Closes:

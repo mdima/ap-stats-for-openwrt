@@ -3,7 +3,7 @@ using DotNet.Testcontainers.Images;
 using DotNet.Testcontainers.Volumes;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Smoke;
+namespace ApStatsForOpenWrt.Tests.Smoke;
 
 /// <summary>
 /// IAsyncLifetime fixture for the OpenWRT-AP-Stats Docker smoke tests.
@@ -23,7 +23,7 @@ public sealed class DockerSmokeFixture : IAsyncLifetime
     public async ValueTask InitializeAsync()
     {
         // ImageFromDockerfileBuilder.WithDockerfileDirectory(GetSolutionDirectory(), "")
-        // walks up from the test binary to the OpenWrtApStats.sln directory and uses
+        // walks up from the test binary to the ApStatsForOpenWrt.sln directory and uses
         // it as the Docker build context. WithDockerfile("Dockerfile") is the verbatim
         // shape from PATTERNS.md / RESEARCH Finding #5.
         Image = new ImageFromDockerfileBuilder()

@@ -3,8 +3,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>OpenWrtApStats</RootNamespace>
-    <AssemblyName>OpenWrtApStats</AssemblyName>
+    <RootNamespace>ApStatsForOpenWrt</RootNamespace>
+    <AssemblyName>ApStatsForOpenWrt</AssemblyName>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     <DockerfileContext>.</DockerfileContext>
     <DockerfileFile>..\Dockerfile</DockerfileFile>
@@ -36,8 +36,8 @@
 
   <ItemGroup>
     <!-- Allow the test project to exercise internal types (e.g., SshAlgorithmFallbackPolicy)
-         without forcing them public. Production callers within OpenWrtApStats remain unaffected. -->
-    <InternalsVisibleTo Include="OpenWrtApStats.Tests" />
+         without forcing them public. Production callers within ApStatsForOpenWrt remain unaffected. -->
+    <InternalsVisibleTo Include="ApStatsForOpenWrt.Tests" />
   </ItemGroup>
 
   <ItemGroup>

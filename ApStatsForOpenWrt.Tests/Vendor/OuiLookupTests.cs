@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenWrtApStats.Services.Vendor;
+using ApStatsForOpenWrt.Services.Vendor;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Vendor;
+namespace ApStatsForOpenWrt.Tests.Vendor;
 
 /// <summary>
 /// DASH-13 / D-21 OUI lookup tests. The fixture row "00-00-0C" → "Cisco Systems, Inc"

@@ -1,11 +1,11 @@
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
 using Xunit;
-using IndexPage = OpenWrtApStats.Components.Pages.Nodes.Index;
+using IndexPage = ApStatsForOpenWrt.Components.Pages.Nodes.Index;
 
-namespace OpenWrtApStats.Tests.Components.Pages.Nodes;
+namespace ApStatsForOpenWrt.Tests.Components.Pages.Nodes;
 
 /// <summary>
 /// /Nodes Index page bUnit tests. Covers the empty-state branch (DASH-09 visual mirrored)
@@ -30,11 +30,11 @@ public sealed class IndexTests
         public Task<bool> AnyEncryptedPasswordsAsync(CancellationToken ct = default) => Task.FromResult(_nodes.Any(n => !string.IsNullOrEmpty(n.Password)));
         public Task<bool> AnyAsync(CancellationToken ct = default) => Task.FromResult(_nodes.Count > 0);
         public Task MarkAllOfflineAsync(CancellationToken ct = default) => Task.CompletedTask;
-        public Task MarkAllOfflineAsync(OpenWrtApStats.Data.DatabaseContext db, CancellationToken ct = default) => Task.CompletedTask;
+        public Task MarkAllOfflineAsync(ApStatsForOpenWrt.Data.DatabaseContext db, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpdateOnlineAsync(int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
-        public Task UpdateOnlineAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
-        public Task SetHostKeyFingerprintAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default) => Task.CompletedTask;
-        public Task UpdateLastEnrichmentRefreshAtAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpdateOnlineAsync(ApStatsForOpenWrt.Data.DatabaseContext db, int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetHostKeyFingerprintAsync(ApStatsForOpenWrt.Data.DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpdateLastEnrichmentRefreshAtAsync(ApStatsForOpenWrt.Data.DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpdateScanSettingsAsync(int id, bool subnetScanEnabled, string? subnetScanRanges, CancellationToken ct = default) => Task.CompletedTask;
     }
 

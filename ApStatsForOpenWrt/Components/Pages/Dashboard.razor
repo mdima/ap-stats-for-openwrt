@@ -1,10 +1,10 @@
 @page "/"
-@using OpenWrtApStats.Components.Shared
-@using OpenWrtApStats.Services
-@using OpenWrtApStats.Services.Polling
-@using OpenWrtApStats.Services.Settings
-@using OpenWrtApStats.Services.Vendor
-@using OpenWrtApStats.Web.Helpers
+@using ApStatsForOpenWrt.Components.Shared
+@using ApStatsForOpenWrt.Services
+@using ApStatsForOpenWrt.Services.Polling
+@using ApStatsForOpenWrt.Services.Settings
+@using ApStatsForOpenWrt.Services.Vendor
+@using ApStatsForOpenWrt.Web.Helpers
 @implements IDisposable
 
 @inject INodeRepo Nodes
@@ -227,7 +227,7 @@ else
     private StatusFilter? _statusFilter;                                                     // KPI tile selection (bidirectionally synced with _selectedStatuses)
     private List<DashboardKpiRow> _lastFilteredKpiRows = new();                              // projection passed to <KpiTileBar Rows="..."/>
     private readonly HashSet<string> _changedRowMacs = new();                                // REQ-UI-53 row-status-changed hook (one render frame)
-    private Dictionary<string, OpenWrtApStats.Data.Models.Status> _prevRowStatus = new();    // diff source for DetectRowStatusChanges
+    private Dictionary<string, ApStatsForOpenWrt.Data.Models.Status> _prevRowStatus = new();    // diff source for DetectRowStatusChanges
 
     private string DashTenBody =>
         $"You have {_nodeCount} access point{(_nodeCount == 1 ? "" : "s")} configured, but every WLAN is disabled. Enable at least one WLAN to start seeing connected stations.";
@@ -581,10 +581,10 @@ else
     /// </summary>
     private FilterChipGroup.BadgeState MapNodeStatus(string apHostname)
     {
-        OpenWrtApStats.Data.Models.WiFiNode? node = null;
+        ApStatsForOpenWrt.Data.Models.WiFiNode? node = null;
         foreach (var n in _nodes) { if (n.Hostname == apHostname) { node = n; break; } }
         if (node is null) return FilterChipGroup.BadgeState.Hidden;
-        if (node.Status == OpenWrtApStats.Data.Models.Status.Online) return FilterChipGroup.BadgeState.Online;
+        if (node.Status == ApStatsForOpenWrt.Data.Models.Status.Online) return FilterChipGroup.BadgeState.Online;
         var threshold = TimeSpan.FromSeconds(2 * Settings.PollingIntervalSeconds);
         var elapsed = _cycleEndUtc - DateTime.SpecifyKind(node.LastPollDate, DateTimeKind.Utc);
         return elapsed < threshold ? FilterChipGroup.BadgeState.Stale : FilterChipGroup.BadgeState.Offline;

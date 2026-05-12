@@ -1,7 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace OpenWrtApStats.Services.Gating;
+namespace ApStatsForOpenWrt.Services.Gating;
 
 /// <summary>
 /// Phase 6 INF-06 / POLL-05 / POLL-06. Singleton visitor counter feeding both the polling-policy

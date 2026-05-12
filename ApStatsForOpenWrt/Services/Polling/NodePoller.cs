@@ -2,12 +2,12 @@ using System.Collections.Concurrent;
 using System.Net.Sockets;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Services.Polling.Exceptions;
-using OpenWrtApStats.Services.Polling.Ssh;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Services.Polling.Exceptions;
+using ApStatsForOpenWrt.Services.Polling.Ssh;
 using Renci.SshNet.Common;
 
-namespace OpenWrtApStats.Services.Polling;
+namespace ApStatsForOpenWrt.Services.Polling;
 
 /// <summary>
 /// One per node per cycle (constructed via the <c>Func&lt;WiFiNode, CancellationToken,

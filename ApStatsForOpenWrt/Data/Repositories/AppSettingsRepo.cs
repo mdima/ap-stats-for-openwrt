@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using OpenWrtApStats.Data.Models;
+using ApStatsForOpenWrt.Data.Models;
 
-namespace OpenWrtApStats.Data.Repositories;
+namespace ApStatsForOpenWrt.Data.Repositories;
 
 /// <summary>
 /// <see cref="IAppSettingsRepo"/> implementation. The only type permitted to construct a

@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Services.Settings;
 
-namespace OpenWrtApStats.Services.Auth;
+namespace ApStatsForOpenWrt.Services.Auth;
 
 /// <summary>
 /// D-01 conditional auth gate. Reads <see cref="IAppSettingsService.UIPasswordHash"/> per

@@ -1,8 +1,8 @@
 using Bunit;
-using OpenWrtApStats.Components.Shared;
+using ApStatsForOpenWrt.Components.Shared;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Components.Shared;
+namespace ApStatsForOpenWrt.Tests.Components.Shared;
 
 /// <summary>
 /// Phase 5 B1 ownership — EmptyState.razor's CTA is optional. Both forms must work:

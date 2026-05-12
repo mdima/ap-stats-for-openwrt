@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace OpenWrtApStats.Data.Migrations
+namespace ApStatsForOpenWrt.Data.Migrations
 {
     /// <inheritdoc />
     public partial class InitialCreate : Migration

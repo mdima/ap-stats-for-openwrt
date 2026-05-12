@@ -1,7 +1,7 @@
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Settings;
 
-namespace OpenWrtApStats.Services.Bootstrap;
+namespace ApStatsForOpenWrt.Services.Bootstrap;
 
 /// <summary>
 /// Final bootstrap step: confirms the AppSettings table is reachable and warms the

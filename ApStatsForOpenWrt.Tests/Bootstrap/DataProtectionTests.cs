@@ -2,10 +2,10 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using OpenWrtApStats.Tests.TestSupport;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Bootstrap;
+namespace ApStatsForOpenWrt.Tests.Bootstrap;
 
 /// <summary>
 /// Verifies the production Data Protection wiring shape (SEC-01 round-trip, SEC-02 persistence
@@ -24,7 +24,7 @@ public sealed class DataProtectionTests(TempDirectoryFixture temp) : IClassFixtu
         var services = new ServiceCollection();
         services.AddDataProtection()
             .PersistKeysToFileSystem(new DirectoryInfo(keys))
-            .SetApplicationName("OpenWrtApStats")
+            .SetApplicationName("ApStatsForOpenWrt")
             .SetDefaultKeyLifetime(TimeSpan.FromDays(90));
         return services.BuildServiceProvider();
     }
@@ -53,7 +53,7 @@ public sealed class DataProtectionTests(TempDirectoryFixture temp) : IClassFixtu
             var s1 = new ServiceCollection();
             s1.AddDataProtection()
                 .PersistKeysToFileSystem(new DirectoryInfo(keys))
-                .SetApplicationName("OpenWrtApStats");
+                .SetApplicationName("ApStatsForOpenWrt");
             using var sp1 = s1.BuildServiceProvider();
             var p = sp1.GetRequiredService<IDataProtectionProvider>().CreateProtector("node-creds");
             ciphertext = p.Protect("persisted");
@@ -65,7 +65,7 @@ public sealed class DataProtectionTests(TempDirectoryFixture temp) : IClassFixtu
             var s2 = new ServiceCollection();
             s2.AddDataProtection()
                 .PersistKeysToFileSystem(new DirectoryInfo(keys))
-                .SetApplicationName("OpenWrtApStats");
+                .SetApplicationName("ApStatsForOpenWrt");
             using var sp2 = s2.BuildServiceProvider();
             var p2 = sp2.GetRequiredService<IDataProtectionProvider>().CreateProtector("node-creds");
             Assert.Equal("persisted", p2.Unprotect(ciphertext));
@@ -73,9 +73,9 @@ public sealed class DataProtectionTests(TempDirectoryFixture temp) : IClassFixtu
     }
 
     [Fact]
-    public void SetApplicationName_IsOpenWrtApStats_Verbatim()
+    public void SetApplicationName_IsApStatsForOpenWrt_Verbatim()
     {
-        // SEC-03 / D-02: ApplicationDiscriminator string is exactly "OpenWrtApStats".
+        // SEC-03 / D-02: ApplicationDiscriminator string is exactly "ApStatsForOpenWrt".
         // An assembly rename without preserving this string would silently invalidate every
         // ciphertext on disk, so the verbatim assertion is the trip-wire.
         var sp = BuildDp();
@@ -83,6 +83,6 @@ public sealed class DataProtectionTests(TempDirectoryFixture temp) : IClassFixtu
         Assert.NotNull(opts);
 
         var dpOptions = sp.GetRequiredService<IOptions<DataProtectionOptions>>();
-        Assert.Equal("OpenWrtApStats", dpOptions.Value.ApplicationDiscriminator);
+        Assert.Equal("ApStatsForOpenWrt", dpOptions.Value.ApplicationDiscriminator);
     }
 }

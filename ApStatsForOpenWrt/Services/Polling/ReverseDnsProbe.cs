@@ -1,11 +1,11 @@
 using System.Net.Sockets;
 using System.Text;
 using Microsoft.Extensions.Logging;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Services.Polling.Ssh;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Services.Polling.Ssh;
 using Renci.SshNet.Common;
 
-namespace OpenWrtApStats.Services.Polling;
+namespace ApStatsForOpenWrt.Services.Polling;
 
 /// <summary>
 /// Phase 9 ENRICH-03 + ENRICH-05. Reverse-DNS probe via ONE batched SSH command per non-empty

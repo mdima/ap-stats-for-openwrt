@@ -1,11 +1,11 @@
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenWrtApStats.Components.Shared;
-using OpenWrtApStats.Services;
+using ApStatsForOpenWrt.Components.Shared;
+using ApStatsForOpenWrt.Services;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Components;
+namespace ApStatsForOpenWrt.Tests.Components;
 
 /// <summary>
 /// Phase 8 Plan 08-06 Task 2 — exercises <see cref="ToastHost"/> against a real

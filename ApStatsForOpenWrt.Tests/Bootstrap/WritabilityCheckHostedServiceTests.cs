@@ -1,10 +1,10 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using OpenWrtApStats.Services.Bootstrap;
-using OpenWrtApStats.Tests.TestSupport;
+using ApStatsForOpenWrt.Services.Bootstrap;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Bootstrap;
+namespace ApStatsForOpenWrt.Tests.Bootstrap;
 
 /// <summary>
 /// Verifies the INF-07 / D-01 / D-02 writability probe both arms (success and failure).

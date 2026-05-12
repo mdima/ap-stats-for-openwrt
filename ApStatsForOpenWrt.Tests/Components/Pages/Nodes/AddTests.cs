@@ -1,13 +1,13 @@
 using Bunit;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services.Nodes;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Nodes;
 using Xunit;
-using AddPage = OpenWrtApStats.Components.Pages.Nodes.Add;
+using AddPage = ApStatsForOpenWrt.Components.Pages.Nodes.Add;
 
-namespace OpenWrtApStats.Tests.Components.Pages.Nodes;
+namespace ApStatsForOpenWrt.Tests.Components.Pages.Nodes;
 
 /// <summary>
 /// /Nodes/Add page bUnit tests. Covers: form rendering with the verbatim UI-SPEC §Node Add
@@ -36,11 +36,11 @@ public sealed class AddTests
         public Task<bool> AnyEncryptedPasswordsAsync(CancellationToken ct = default) => Task.FromResult(false);
         public Task<bool> AnyAsync(CancellationToken ct = default) => Task.FromResult(false);
         public Task MarkAllOfflineAsync(CancellationToken ct = default) => Task.CompletedTask;
-        public Task MarkAllOfflineAsync(OpenWrtApStats.Data.DatabaseContext db, CancellationToken ct = default) => Task.CompletedTask;
+        public Task MarkAllOfflineAsync(ApStatsForOpenWrt.Data.DatabaseContext db, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpdateOnlineAsync(int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
-        public Task UpdateOnlineAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
-        public Task SetHostKeyFingerprintAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default) => Task.CompletedTask;
-        public Task UpdateLastEnrichmentRefreshAtAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpdateOnlineAsync(ApStatsForOpenWrt.Data.DatabaseContext db, int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetHostKeyFingerprintAsync(ApStatsForOpenWrt.Data.DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpdateLastEnrichmentRefreshAtAsync(ApStatsForOpenWrt.Data.DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpdateScanSettingsAsync(int id, bool subnetScanEnabled, string? subnetScanRanges, CancellationToken ct = default) => Task.CompletedTask;
     }
 
@@ -62,7 +62,7 @@ public sealed class AddTests
         conn = new StubTestConn();
         ctx.Services.AddSingleton<INodeRepo>(repo);
         ctx.Services.AddSingleton<ITestConnectionService>(conn);
-        ctx.Services.AddDataProtection().SetApplicationName("OpenWrtApStats-Tests-Plan03-04");
+        ctx.Services.AddDataProtection().SetApplicationName("ApStatsForOpenWrt-Tests-Plan03-04");
         return ctx;
     }
 

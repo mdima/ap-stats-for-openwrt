@@ -2,16 +2,16 @@ using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenWrtApStats.Data;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services.Polling;
-using OpenWrtApStats.Services.Polling.Exceptions;
-using OpenWrtApStats.Services.Settings;
-using OpenWrtApStats.Tests.TestSupport;
+using ApStatsForOpenWrt.Data;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Polling;
+using ApStatsForOpenWrt.Services.Polling.Exceptions;
+using ApStatsForOpenWrt.Services.Settings;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Polling;
+namespace ApStatsForOpenWrt.Tests.Polling;
 
 /// <summary>
 /// PollOrchestrator coordinator-transaction tests. Closes:

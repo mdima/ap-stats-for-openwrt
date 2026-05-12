@@ -1,8 +1,8 @@
 using Microsoft.EntityFrameworkCore;
-using OpenWrtApStats.Data;
+using ApStatsForOpenWrt.Data;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Migrations;
+namespace ApStatsForOpenWrt.Tests.Migrations;
 
 /// <summary>
 /// v0.9.2 — proves the AddFirstSeenToStation migration backfills FirstSeen from

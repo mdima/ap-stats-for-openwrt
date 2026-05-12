@@ -1,18 +1,18 @@
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services;
-using OpenWrtApStats.Services.Auth;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services;
+using ApStatsForOpenWrt.Services.Auth;
+using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Components;
+namespace ApStatsForOpenWrt.Tests.Components;
 
 /// <summary>
 /// Phase 8 Plan 08-07 Task 2 — exercises the new "UI preferences" card on
-/// <see cref="OpenWrtApStats.Components.Pages.Settings.Index"/>. The card uses
+/// <see cref="ApStatsForOpenWrt.Components.Pages.Settings.Index"/>. The card uses
 /// <see cref="PreferencesService"/> ONLY (REQ-UI-44 lockdown — never IAppSettingsService).
 ///
 /// Test stack: xUnit v3 + bUnit 2.7.2 + Microsoft.Testing.Extensions.CodeCoverage
@@ -22,7 +22,7 @@ namespace OpenWrtApStats.Tests.Components;
 /// The Settings/Index.razor page hosts FOUR cards: Polling interval, UI password,
 /// SSH known-hosts, and (new) UI preferences. To render the page, bUnit must supply
 /// dependencies for all four cards' @inject directives. Stubs below mirror the test
-/// patterns in OpenWrtApStats.Tests.Integration.SettingsRoundTripTests.
+/// patterns in ApStatsForOpenWrt.Tests.Integration.SettingsRoundTripTests.
 /// </summary>
 public sealed class SettingsUiPreferencesCardTests
 {
@@ -65,11 +65,11 @@ public sealed class SettingsUiPreferencesCardTests
         public Task<bool> AnyEncryptedPasswordsAsync(CancellationToken ct = default) => Task.FromResult(false);
         public Task<bool> AnyAsync(CancellationToken ct = default) => Task.FromResult(false);
         public Task MarkAllOfflineAsync(CancellationToken ct = default) => Task.CompletedTask;
-        public Task MarkAllOfflineAsync(OpenWrtApStats.Data.DatabaseContext db, CancellationToken ct = default) => Task.CompletedTask;
+        public Task MarkAllOfflineAsync(ApStatsForOpenWrt.Data.DatabaseContext db, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpdateOnlineAsync(int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
-        public Task UpdateOnlineAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
-        public Task SetHostKeyFingerprintAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default) => Task.CompletedTask;
-        public Task UpdateLastEnrichmentRefreshAtAsync(OpenWrtApStats.Data.DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpdateOnlineAsync(ApStatsForOpenWrt.Data.DatabaseContext db, int nodeId, DateTime lastPoll, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SetHostKeyFingerprintAsync(ApStatsForOpenWrt.Data.DatabaseContext db, int nodeId, string fingerprint, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpdateLastEnrichmentRefreshAtAsync(ApStatsForOpenWrt.Data.DatabaseContext db, int nodeId, DateTimeOffset ts, CancellationToken ct = default) => Task.CompletedTask;
         public Task UpdateScanSettingsAsync(int id, bool subnetScanEnabled, string? subnetScanRanges, CancellationToken ct = default) => Task.CompletedTask;
     }
 
@@ -102,7 +102,7 @@ public sealed class SettingsUiPreferencesCardTests
         // PreferencesService default for IsNotificationsEnabled is true (bool? null → true).
         module.Setup<bool?>("getJson", PreferencesService.KeyNotificationsEnabled).SetResult(null);
 
-        var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+        var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
 
         cut.WaitForAssertion(() =>
         {
@@ -122,7 +122,7 @@ public sealed class SettingsUiPreferencesCardTests
         using var _disp = ctx;
         module.Setup<bool?>("getJson", PreferencesService.KeyNotificationsEnabled).SetResult(true);
 
-        var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+        var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
         cut.WaitForAssertion(() => Assert.Contains("bi-bell-fill", cut.Markup));
 
         // Act — flip the toggle off.
@@ -151,7 +151,7 @@ public sealed class SettingsUiPreferencesCardTests
         using var _disp = ctx;
         module.Setup<bool?>("getJson", PreferencesService.KeyNotificationsEnabled).SetResult(false);
 
-        var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+        var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
         cut.WaitForAssertion(() => Assert.Contains("bi-bell-slash-fill", cut.Markup));
 
         cut.Find("input#notifications-toggle").Change(true);
@@ -180,7 +180,7 @@ public sealed class SettingsUiPreferencesCardTests
         using var _disp = ctx;
         module.Setup<bool?>("getJson", PreferencesService.KeyNotificationsEnabled).SetResult(true);
 
-        var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+        var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
         cut.WaitForAssertion(() => Assert.Contains("bi-bell-fill", cut.Markup));
 
         // Fire @onchange with a string value — exercises the non-bool branch of
@@ -209,7 +209,7 @@ public sealed class SettingsUiPreferencesCardTests
     {
         var razorPath = Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "..",
-            "OpenWrtApStats", "Components", "Pages", "Settings", "Index.razor");
+            "ApStatsForOpenWrt", "Components", "Pages", "Settings", "Index.razor");
         var src = File.ReadAllText(razorPath);
 
         Assert.Contains("UI preferences", src);

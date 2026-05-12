@@ -1,14 +1,14 @@
 using Bunit;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Data;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services.Auth;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Data;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Auth;
+using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Components.Pages.Settings;
+namespace ApStatsForOpenWrt.Tests.Components.Pages.Settings;
 
 /// <summary>
 /// bUnit tests for /Settings/Index.razor (Plan 03-05). Renders the three D-17 cards
@@ -110,8 +110,8 @@ public sealed class IndexTests
         ctx.Services.AddSingleton<IAppSettingsService>(settings);
         ctx.Services.AddSingleton<IUIPasswordHasher>(hasher);
         ctx.Services.AddSingleton<INodeRepo>(nodes);
-        ctx.Services.AddSingleton<OpenWrtApStats.Services.PreferencesService>(
-            new OpenWrtApStats.Services.PreferencesService(ctx.JSInterop.JSRuntime));
+        ctx.Services.AddSingleton<ApStatsForOpenWrt.Services.PreferencesService>(
+            new ApStatsForOpenWrt.Services.PreferencesService(ctx.JSInterop.JSRuntime));
         return (ctx, settings, hasher, nodes);
     }
 
@@ -123,7 +123,7 @@ public sealed class IndexTests
         var (ctx, _, _, _) = Build();
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
             // D-17 + Phase 10 D-05/D-03/D-04 — five cards in the locked order:
             // Live polling / Active enrichment / Local domain suffixes / UI password / SSH known-hosts.
             var markup = cut.Markup;
@@ -149,7 +149,7 @@ public sealed class IndexTests
         var (ctx, _, _, _) = Build();
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
             // D-05 verbatim helper text.
             Assert.Contains("How often each AP is polled for connected stations.", cut.Markup);
             // Old v0.9 helper copy is gone.
@@ -163,7 +163,7 @@ public sealed class IndexTests
         var (ctx, _, _, _) = Build(initialHash: null);
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
             Assert.Contains("No password is set.", cut.Markup);
             Assert.DoesNotContain(">Clear password</button>", cut.Markup);
         }
@@ -175,7 +175,7 @@ public sealed class IndexTests
         var (ctx, _, _, _) = Build(initialHash: "AQAAA-existing");
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
             Assert.Contains("Sign-in is required.", cut.Markup);
             Assert.Contains(">Clear password</button>", cut.Markup);
         }
@@ -187,7 +187,7 @@ public sealed class IndexTests
         var (ctx, _, _, _) = Build();
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
             Assert.Contains("Clear all host keys", cut.Markup);
         }
     }
@@ -198,7 +198,7 @@ public sealed class IndexTests
         var (ctx, settings, hasher, _) = Build(initialHash: null);
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
             // Set the two password fields to different values.
             cut.Find("#new-password").Change("alpha");
             cut.Find("#confirm-password").Change("beta");
@@ -221,7 +221,7 @@ public sealed class IndexTests
         var (ctx, settings, hasher, _) = Build(initialHash: null);
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
             // Leave both fields empty (default null/empty), submit.
             var submit = cut.FindAll("button[type='submit']")
                             .First(b => b.TextContent.Contains("Set password", StringComparison.Ordinal));
@@ -239,7 +239,7 @@ public sealed class IndexTests
         var (ctx, settings, hasher, _) = Build(initialHash: null);
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
             cut.Find("#new-password").Change("hunter2");
             cut.Find("#confirm-password").Change("hunter2");
 
@@ -261,7 +261,7 @@ public sealed class IndexTests
         var (ctx, settings, hasher, _) = Build(initialHash: "AQAAA-existing");
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
             cut.Find("#new-password").Change("brandnew");
             cut.Find("#confirm-password").Change("brandnew");
 
@@ -282,7 +282,7 @@ public sealed class IndexTests
         var (ctx, _, _, _) = Build(initialInterval: 10);
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
             // The 10-second radio should carry checked=""; the others should not.
             var r10 = cut.Find("#interval-10");
             Assert.True(r10.HasAttribute("checked"));
@@ -301,7 +301,7 @@ public sealed class IndexTests
         var (ctx, _, _, _) = Build();
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
             // D-03 verbatim — five presets: 15min/30min/1h/6h/24h.
             Assert.NotNull(cut.Find("#refresh-900"));
             Assert.NotNull(cut.Find("#refresh-1800"));
@@ -318,7 +318,7 @@ public sealed class IndexTests
         settings.RefreshIntervalSeconds = 21600;     // 6 hours
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
             var r6h = cut.Find("#refresh-21600");
             Assert.True(r6h.HasAttribute("checked"));
             var r1h = cut.Find("#refresh-3600");
@@ -338,7 +338,7 @@ public sealed class IndexTests
         settings.RefreshIntervalSeconds = 86400;
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
 
             // Submit the refresh form by triggering the form's submit event directly.
             var refreshForm = cut.Find("#refresh-86400").Closest("form")
@@ -360,7 +360,7 @@ public sealed class IndexTests
         settings.LocalDomainSuffixes = new[] { "michelecasa", "lab.local" };
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
             var input = cut.Find("#suffixes-input");
             Assert.Equal("michelecasa, lab.local", input.GetAttribute("value"));
         }
@@ -372,7 +372,7 @@ public sealed class IndexTests
         var (ctx, settings, _, _) = Build();
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
             // Second token has a space — invalid per ^[A-Za-z0-9.\-]+$
             cut.Find("#suffixes-input").Change("foo, bar baz");
 
@@ -396,7 +396,7 @@ public sealed class IndexTests
         var (ctx, settings, _, _) = Build();
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
             cut.Find("#suffixes-input").Change(".lab.local");
 
             // Submit the suffixes form by walking up from the input to its form ancestor.
@@ -416,7 +416,7 @@ public sealed class IndexTests
         var (ctx, settings, _, _) = Build();
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
             cut.Find("#suffixes-input").Change("valid, also-valid");
 
             // Submit the suffixes form by walking up from the input to its form ancestor.
@@ -442,7 +442,7 @@ public sealed class IndexTests
         var (ctx, settings, _, _) = Build();
         using (ctx)
         {
-            var cut = ctx.Render<OpenWrtApStats.Components.Pages.Settings.Index>();
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
             cut.Find("#suffixes-input").Change("");
 
             // Submit the suffixes form by walking up from the input to its form ancestor.

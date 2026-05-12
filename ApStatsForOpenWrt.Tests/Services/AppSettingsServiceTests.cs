@@ -1,11 +1,11 @@
 using Microsoft.EntityFrameworkCore;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services.Settings;
-using OpenWrtApStats.Tests.TestSupport;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Settings;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Services;
+namespace ApStatsForOpenWrt.Tests.Services;
 
 /// <summary>
 /// Exercises <see cref="AppSettingsService"/> against a real <see cref="AppSettingsRepo"/>

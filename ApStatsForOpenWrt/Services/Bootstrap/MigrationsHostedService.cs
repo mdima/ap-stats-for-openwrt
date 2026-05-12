@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using OpenWrtApStats.Data;
+using ApStatsForOpenWrt.Data;
 
-namespace OpenWrtApStats.Services.Bootstrap;
+namespace ApStatsForOpenWrt.Services.Bootstrap;
 
 /// <summary>
 /// Boot-time runner for EF Core migrations (INF-03). Owns the migration pipeline directly —

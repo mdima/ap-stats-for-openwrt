@@ -1,16 +1,16 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using OpenWrtApStats.Data;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services.Bootstrap;
-using OpenWrtApStats.Services.Polling;
-using OpenWrtApStats.Services.Polling.Ssh;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Data;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Bootstrap;
+using ApStatsForOpenWrt.Services.Polling;
+using ApStatsForOpenWrt.Services.Polling.Ssh;
+using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Bootstrap;
+namespace ApStatsForOpenWrt.Tests.Bootstrap;
 
 /// <summary>
 /// Pitfall 10 mitigation: hosted-service registration order = StartAsync order. If a developer
@@ -62,8 +62,8 @@ public sealed class HostedServiceRegistrationOrderTests
         // ctor now takes ICircuitGate; this stub keeps the descriptor-enumeration test compiling
         // and resolvable. W-new-2 — exactly ONE AddSingleton<ICircuitGate, ...> registration in
         // this file (no double-registration drift).
-        builder.Services.AddSingleton<OpenWrtApStats.Services.Gating.ICircuitGate,
-                                      OpenWrtApStats.Services.Gating.AlwaysLiveGate>();
+        builder.Services.AddSingleton<ApStatsForOpenWrt.Services.Gating.ICircuitGate,
+                                      ApStatsForOpenWrt.Services.Gating.AlwaysLiveGate>();
 
         builder.Services.AddHostedService<WritabilityCheckHostedService>();      // NEW — Phase 7
         builder.Services.AddHostedService<MigrationsHostedService>();

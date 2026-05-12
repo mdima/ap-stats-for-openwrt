@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Services.Gating;
+namespace ApStatsForOpenWrt.Services.Gating;
 
 /// <summary>
 /// Phase 6 INF-06 / POLL-05 / POLL-06 — replaces <see cref="AlwaysLiveGate"/> (Plan 05-01 D-12 stub).

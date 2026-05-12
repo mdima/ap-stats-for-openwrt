@@ -1,7 +1,7 @@
-using OpenWrtApStats.Web.Helpers;
+using ApStatsForOpenWrt.Web.Helpers;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Web.Helpers;
+namespace ApStatsForOpenWrt.Tests.Web.Helpers;
 
 /// <summary>
 /// Phase 10 DASH-18 / DASH-19 unit tests for the suffix-stripping helper.

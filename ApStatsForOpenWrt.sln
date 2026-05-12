@@ -3,9 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenWrtApStats", "OpenWrtApStats\OpenWrtApStats.csproj", "{3204BD06-B07F-4649-99F5-78799F81DD10}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ApStatsForOpenWrt", "ApStatsForOpenWrt\ApStatsForOpenWrt.csproj", "{3204BD06-B07F-4649-99F5-78799F81DD10}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenWrtApStats.Tests", "OpenWrtApStats.Tests\OpenWrtApStats.Tests.csproj", "{B1B32BA0-F92E-43C8-97EF-3AF4EF7AA842}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ApStatsForOpenWrt.Tests", "ApStatsForOpenWrt.Tests\ApStatsForOpenWrt.Tests.csproj", "{B1B32BA0-F92E-43C8-97EF-3AF4EF7AA842}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{07C2787E-EAC7-C090-1BA3-A61EC2A24D84}"
 EndProject

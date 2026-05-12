@@ -1,9 +1,9 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using OpenWrtApStats.Services.Gating;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Services.Gating;
+using ApStatsForOpenWrt.Services.Settings;
 
-namespace OpenWrtApStats.Services.Polling;
+namespace ApStatsForOpenWrt.Services.Polling;
 
 /// <summary>
 /// 4th IHostedService — registered after AppSettingsBootstrapHostedService. Drives PollOrchestrator

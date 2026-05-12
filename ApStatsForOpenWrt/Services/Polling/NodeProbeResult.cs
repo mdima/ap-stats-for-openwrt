@@ -1,6 +1,6 @@
-using OpenWrtApStats.Data.Models;
+using ApStatsForOpenWrt.Data.Models;
 
-namespace OpenWrtApStats.Services.Polling;
+namespace ApStatsForOpenWrt.Services.Polling;
 
 /// <summary>
 /// POCO result of one node's probe. Per-node SSH workers (NodePoller) return this; the

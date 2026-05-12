@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using OpenWrtApStats.Data;
+using ApStatsForOpenWrt.Data;
 
-namespace OpenWrtApStats.Tests.TestSupport;
+namespace ApStatsForOpenWrt.Tests.TestSupport;
 
 /// <summary>
 /// Test-only adapter that satisfies <see cref="IDbContextFactory{TContext}"/> against the

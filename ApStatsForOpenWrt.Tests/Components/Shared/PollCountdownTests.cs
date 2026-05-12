@@ -1,12 +1,12 @@
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Components.Shared;
-using OpenWrtApStats.Services.Gating;
-using OpenWrtApStats.Services.Polling;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Components.Shared;
+using ApStatsForOpenWrt.Services.Gating;
+using ApStatsForOpenWrt.Services.Polling;
+using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Components.Shared;
+namespace ApStatsForOpenWrt.Tests.Components.Shared;
 
 /// <summary>
 /// Phase 5 D-12 paired PollCountdown — pre-cycle, post-cycle, paused, dispose paths.

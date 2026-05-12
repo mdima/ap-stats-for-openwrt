@@ -1,9 +1,9 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Services.Polling;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Services.Polling;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Polling;
+namespace ApStatsForOpenWrt.Tests.Polling;
 
 /// <summary>
 /// Phase 9 ENRICH-01..02 + ENRICH-04 + ENRICH-06 — fixture-replay integration arms for

@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #pragma warning disable CA1814 // Prefer jagged arrays over multidimensional
 
-namespace OpenWrtApStats.Data.Migrations
+namespace ApStatsForOpenWrt.Data.Migrations
 {
     /// <inheritdoc />
     public partial class AddV091EnrichmentColumns : Migration

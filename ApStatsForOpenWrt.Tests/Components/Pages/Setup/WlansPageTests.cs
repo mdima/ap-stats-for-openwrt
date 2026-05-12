@@ -1,14 +1,14 @@
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Data;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services.Nodes;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Data;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Nodes;
+using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
-using WlansPage = OpenWrtApStats.Components.Pages.Setup.Wlans;
+using WlansPage = ApStatsForOpenWrt.Components.Pages.Setup.Wlans;
 
-namespace OpenWrtApStats.Tests.Components.Pages.Setup;
+namespace ApStatsForOpenWrt.Tests.Components.Pages.Setup;
 
 /// <summary>
 /// Wlans.razor (Step 3) bUnit tests. Covers: parallel discovery triggered, success renders

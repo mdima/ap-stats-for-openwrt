@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Services.Polling;
+namespace ApStatsForOpenWrt.Services.Polling;
 
 /// <summary>
 /// Phase 10 POCO carrier returned by the enrichmentFactory delegate. Combines the Phase 9

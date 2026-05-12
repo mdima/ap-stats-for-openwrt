@@ -1,10 +1,10 @@
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Components.Shared;
-using OpenWrtApStats.Services.Gating;
+using ApStatsForOpenWrt.Components.Shared;
+using ApStatsForOpenWrt.Services.Gating;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Components.Shared;
+namespace ApStatsForOpenWrt.Tests.Components.Shared;
 
 /// <summary>
 /// Phase 5 D-12 / DASH-08 LivePausedBadge — renders Live (Phase 5 default via AlwaysLiveGate)

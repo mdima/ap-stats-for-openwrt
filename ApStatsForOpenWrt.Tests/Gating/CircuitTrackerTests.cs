@@ -1,7 +1,7 @@
-using OpenWrtApStats.Services.Gating;
+using ApStatsForOpenWrt.Services.Gating;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Gating;
+namespace ApStatsForOpenWrt.Tests.Gating;
 
 /// <summary>
 /// Phase 6 INF-06 / POLL-05 / POLL-06. Covers:

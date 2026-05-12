@@ -1,9 +1,9 @@
 using Bunit;
-using OpenWrtApStats.Components.Shared;
-using OpenWrtApStats.Data.Models;
+using ApStatsForOpenWrt.Components.Shared;
+using ApStatsForOpenWrt.Data.Models;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Components.Shared;
+namespace ApStatsForOpenWrt.Tests.Components.Shared;
 
 /// <summary>
 /// Phase 5 D-09 StatusBadge — extended Online/Offline/Stale derivation per UI-SPEC §Status Badges.

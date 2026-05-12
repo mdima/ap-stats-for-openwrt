@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Integration;
+namespace ApStatsForOpenWrt.Tests.Integration;
 
 /// <summary>
 /// SEC-05 + Pitfall 1 integration suite. Drives the auth gate end-to-end via
@@ -171,7 +171,7 @@ public sealed class AuthGateTests(SmokeFactoryFixture factory) : IClassFixture<S
         var ct = TestContext.Current.CancellationToken;
         using var scope = _factory.Services.CreateScope();
         var settings = scope.ServiceProvider.GetRequiredService<IAppSettingsService>();
-        var hasher = scope.ServiceProvider.GetRequiredService<OpenWrtApStats.Services.Auth.IUIPasswordHasher>();
+        var hasher = scope.ServiceProvider.GetRequiredService<ApStatsForOpenWrt.Services.Auth.IUIPasswordHasher>();
         var hash = hasher.Hash("operator-pw");
         await settings.SetUIPasswordHashAsync(hash, ct);
 

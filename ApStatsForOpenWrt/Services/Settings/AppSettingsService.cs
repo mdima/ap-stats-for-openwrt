@@ -1,8 +1,8 @@
 using System.Text.Json;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
 
-namespace OpenWrtApStats.Services.Settings;
+namespace ApStatsForOpenWrt.Services.Settings;
 
 /// <summary>
 /// <see cref="IAppSettingsService"/> implementation. Per PER-04 this service consumes

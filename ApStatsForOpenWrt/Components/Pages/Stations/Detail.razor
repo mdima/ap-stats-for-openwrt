@@ -1,9 +1,9 @@
 @page "/Stations/{Mac}"
 @using System.ComponentModel.DataAnnotations
-@using OpenWrtApStats.Data.Models
-@using OpenWrtApStats.Data.Repositories
-@using OpenWrtApStats.Services.Settings
-@using OpenWrtApStats.Services.Vendor
+@using ApStatsForOpenWrt.Data.Models
+@using ApStatsForOpenWrt.Data.Repositories
+@using ApStatsForOpenWrt.Services.Settings
+@using ApStatsForOpenWrt.Services.Vendor
 
 @inject IStationRepo Stations
 @inject INodeRepo Nodes
@@ -11,7 +11,7 @@
 @inject IOuiLookup Oui
 @inject IAppSettingsService Settings
 @inject NavigationManager Nav
-@inject OpenWrtApStats.Services.EventDetectionService Events
+@inject ApStatsForOpenWrt.Services.EventDetectionService Events
 
 @* Stations/Detail.razor — Phase 5 D-13 / DASH-15 / DASH-14 / DASH-16. UI-SPEC §Layout
    Contracts §/Stations/{mac} (lines 244-316), §Component Contracts §Detail Page (lines

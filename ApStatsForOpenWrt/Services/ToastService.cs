@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
 
-namespace OpenWrtApStats.Services;
+namespace ApStatsForOpenWrt.Services;
 
 /// <summary>
 /// Phase 8 D-08 / D-10 — Singleton event-bus for toast emission.

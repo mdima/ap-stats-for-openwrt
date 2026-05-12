@@ -3,13 +3,13 @@ using System.Net.Sockets;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Services.Polling;
-using OpenWrtApStats.Services.Polling.Exceptions;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Services.Polling;
+using ApStatsForOpenWrt.Services.Polling.Exceptions;
 using Renci.SshNet.Common;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Polling;
+namespace ApStatsForOpenWrt.Tests.Polling;
 
 /// <summary>
 /// NodePoller tests. POLL-04 (5s timeout belt + braces), POLL-12 (iwinfo→iw fallback + cache),

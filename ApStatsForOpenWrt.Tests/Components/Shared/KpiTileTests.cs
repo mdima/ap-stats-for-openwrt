@@ -1,9 +1,9 @@
 using Bunit;
 using Microsoft.AspNetCore.Components;
-using OpenWrtApStats.Components.Shared;
+using ApStatsForOpenWrt.Components.Shared;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Components.Shared;
+namespace ApStatsForOpenWrt.Tests.Components.Shared;
 
 /// <summary>
 /// Phase 8 D-18 / REQ-UI-01..04 — KpiTile component, 6 bUnit-testable visual states locked

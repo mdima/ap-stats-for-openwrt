@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Identity;
 
-namespace OpenWrtApStats.Services.Auth;
+namespace ApStatsForOpenWrt.Services.Auth;
 
 /// <summary>
 /// <see cref="IUIPasswordHasher"/> implementation. The generic-type slot of

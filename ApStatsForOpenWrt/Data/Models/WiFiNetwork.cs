@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
-namespace OpenWrtApStats.Data.Models;
+namespace ApStatsForOpenWrt.Data.Models;
 
 /// <summary>
 /// A WLAN exposed by a <see cref="WiFiNode"/>. Composite uniqueness on

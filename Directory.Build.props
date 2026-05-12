@@ -6,9 +6,9 @@
     <NeutralLanguage>en-US</NeutralLanguage>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'OpenWrtApStats'">
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'ApStatsForOpenWrt'">
     <!-- Production code is held to warnings-as-errors. Test projects (any other MSBuildProjectName,
-         e.g. OpenWrtApStats.Tests) skip this PropertyGroup so warnings never fail their build. -->
+         e.g. ApStatsForOpenWrt.Tests) skip this PropertyGroup so warnings never fail their build. -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
 

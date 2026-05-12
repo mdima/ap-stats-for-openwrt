@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Services.Polling;
+namespace ApStatsForOpenWrt.Services.Polling;
 
 /// <summary>
 /// POCO result of one node's reverse-DNS probe (Phase 9 ENRICH-03 + ENRICH-05). Sibling to

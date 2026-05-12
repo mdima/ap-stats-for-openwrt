@@ -1,6 +1,6 @@
-using OpenWrtApStats.Data.Models;
+using ApStatsForOpenWrt.Data.Models;
 
-namespace OpenWrtApStats.Data.Repositories;
+namespace ApStatsForOpenWrt.Data.Repositories;
 
 /// <summary>
 /// Repository contract for <see cref="WiFiNode"/>. Method shapes lock decisions

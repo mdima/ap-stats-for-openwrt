@@ -1,11 +1,11 @@
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Integration;
+namespace ApStatsForOpenWrt.Tests.Integration;
 
 /// <summary>
 /// NODE-04 cascade test + end-to-end /Nodes flow integration. Asserts that
@@ -26,7 +26,7 @@ public sealed class NodesPageTests(SmokeFactoryFixture factory) : IClassFixture<
         using var scope = _factory.Services.CreateScope();
         var nodes = scope.ServiceProvider.GetRequiredService<INodeRepo>();
         var nets = scope.ServiceProvider.GetRequiredService<INetworkRepo>();
-        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<OpenWrtApStats.Data.DatabaseContext>>();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<ApStatsForOpenWrt.Data.DatabaseContext>>();
 
         // Seed: 1 WiFiNode with 2 WiFiNetworks, each with 3 WLANStations (6 total).
         var node = new WiFiNode

@@ -1,6 +1,6 @@
-using OpenWrtApStats.Data.Models;
+using ApStatsForOpenWrt.Data.Models;
 
-namespace OpenWrtApStats.Data.Repositories;
+namespace ApStatsForOpenWrt.Data.Repositories;
 
 /// <summary>
 /// Repository contract for <see cref="WLANStation"/>. PER-02 binds <see cref="WLANStation.MacAddress"/>

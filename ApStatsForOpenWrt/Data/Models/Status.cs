@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Data.Models;
+namespace ApStatsForOpenWrt.Data.Models;
 
 /// <summary>
 /// Lifecycle status of a polled entity (node or station). Stored on disk as <see cref="int"/>

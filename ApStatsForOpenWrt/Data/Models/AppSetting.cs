@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace OpenWrtApStats.Data.Models;
+namespace ApStatsForOpenWrt.Data.Models;
 
 /// <summary>
 /// Singleton key-value row for application settings (D-09 vocabulary:

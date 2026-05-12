@@ -1,11 +1,11 @@
 using Microsoft.Extensions.Logging;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Services.Polling.Exceptions;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Services.Polling.Exceptions;
 using Renci.SshNet;
 using Renci.SshNet.Common;
 using ConnectionInfo = Renci.SshNet.ConnectionInfo;
 
-namespace OpenWrtApStats.Services.Polling.Ssh;
+namespace ApStatsForOpenWrt.Services.Polling.Ssh;
 
 /// <summary>
 /// Production <see cref="ISshSession"/>. Wraps SSH.NET 2025.1.0 <see cref="SshClient"/>. Wires

@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using OpenWrtApStats.Data.Repositories;
+using ApStatsForOpenWrt.Data.Repositories;
 
-namespace OpenWrtApStats.Services.Health;
+namespace ApStatsForOpenWrt.Services.Health;
 
 /// <summary>
 /// Phase 6 INF-06 — request-time Data Protection key-ring readability probe. Reuses the

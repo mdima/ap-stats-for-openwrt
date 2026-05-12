@@ -6,12 +6,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
-using OpenWrtApStats.Data;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Services.Polling;
+using ApStatsForOpenWrt.Data;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Services.Polling;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Integration;
+namespace ApStatsForOpenWrt.Tests.Integration;
 
 /// <summary>
 /// ROADMAP success #4 + D-05/D-06 — SIGTERM mid-cycle drain regression test. Brings up the
@@ -59,7 +59,7 @@ public sealed class SigtermDrainTests
         // Open the gate so the polling loop kicks the cold-start cycle. The probe stub awaits
         // f.ProbeBlocker.Task, so once the cycle reaches the probe step it parks until we
         // either complete the TCS or cancel via shutdown.
-        var tracker = f.Services.GetRequiredService<OpenWrtApStats.Services.Gating.CircuitTracker>();
+        var tracker = f.Services.GetRequiredService<ApStatsForOpenWrt.Services.Gating.CircuitTracker>();
         tracker.OnOpened();
 
         // Give the polling loop a brief window to reach the probe-await point. 200ms is far
@@ -108,7 +108,7 @@ public sealed class SigtermDrainTests
         _ = f.CreateClient();
         await f.SeedNodeAsync(ct);
 
-        var tracker = f.Services.GetRequiredService<OpenWrtApStats.Services.Gating.CircuitTracker>();
+        var tracker = f.Services.GetRequiredService<ApStatsForOpenWrt.Services.Gating.CircuitTracker>();
         tracker.OnOpened();
         await Task.Delay(200, ct);
 

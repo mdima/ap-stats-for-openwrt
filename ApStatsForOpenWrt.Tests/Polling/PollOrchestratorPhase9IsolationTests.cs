@@ -1,16 +1,16 @@
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenWrtApStats.Data;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services.Polling;
-using OpenWrtApStats.Services.Polling.Ssh;
-using OpenWrtApStats.Services.Settings;
-using OpenWrtApStats.Tests.TestSupport;
+using ApStatsForOpenWrt.Data;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Polling;
+using ApStatsForOpenWrt.Services.Polling.Ssh;
+using ApStatsForOpenWrt.Services.Settings;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Polling;
+namespace ApStatsForOpenWrt.Tests.Polling;
 
 /// <summary>
 /// Phase 9 SC4 / D-10 validation: the orchestrator's RunCycleAsync against a fixture-replay node
@@ -80,7 +80,7 @@ public sealed class PollOrchestratorPhase9IsolationTests(SqliteInMemoryFixture f
 
         // Build a PollOrchestrator with the recording session. Constructor signature
         // matches the verbatim ctor used by PollOrchestratorTests.BuildOrchestrator
-        // (see OpenWrtApStats.Tests/Polling/PollOrchestratorTests.cs:43-58).
+        // (see ApStatsForOpenWrt.Tests/Polling/PollOrchestratorTests.cs:43-58).
         // Per CLAUDE.md / PER-04: PollOrchestrator is the only carve-out that consumes
         // IDbContextFactory directly outside the repository tier.
         var dpFactory = new TestDbContextFactory(_fixture.Options);

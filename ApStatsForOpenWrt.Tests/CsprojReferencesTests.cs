@@ -1,7 +1,7 @@
 using System.Xml.Linq;
 using Xunit;
 
-namespace OpenWrtApStats.Tests;
+namespace ApStatsForOpenWrt.Tests;
 
 /// <summary>
 /// CI-02 architectural gate at test time. Inspects the test project's csproj as XML and asserts
@@ -25,11 +25,11 @@ public sealed class CsprojReferencesTests
         for (int i = 0; i < 10; i++)
         {
             var candidate = Path.Combine(
-                dir, "OpenWrtApStats.Tests", "OpenWrtApStats.Tests.csproj");
+                dir, "ApStatsForOpenWrt.Tests", "ApStatsForOpenWrt.Tests.csproj");
             if (File.Exists(candidate)) return candidate;
             dir = Path.GetFullPath(Path.Combine(dir, ".."));
         }
-        throw new FileNotFoundException("Could not locate OpenWrtApStats.Tests.csproj");
+        throw new FileNotFoundException("Could not locate ApStatsForOpenWrt.Tests.csproj");
     }
 
     [Fact]

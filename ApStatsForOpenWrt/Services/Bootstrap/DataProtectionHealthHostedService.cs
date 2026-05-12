@@ -1,6 +1,6 @@
-using OpenWrtApStats.Data.Repositories;
+using ApStatsForOpenWrt.Data.Repositories;
 
-namespace OpenWrtApStats.Services.Bootstrap;
+namespace ApStatsForOpenWrt.Services.Bootstrap;
 
 /// <summary>
 /// D-12 key-ring health probe. Runs AFTER <see cref="MigrationsHostedService"/> (so the
@@ -9,7 +9,7 @@ namespace OpenWrtApStats.Services.Bootstrap;
 /// <para>
 /// Per PER-04 this service does NOT inject <c>IDbContextFactory&lt;DatabaseContext&gt;</c> —
 /// it goes through the <see cref="INodeRepo.AnyEncryptedPasswordsAsync"/> seam so DbContext
-/// access stays exclusive to the <c>OpenWrtApStats.Data.Repositories</c> namespace
+/// access stays exclusive to the <c>ApStatsForOpenWrt.Data.Repositories</c> namespace
 /// (architecturally enforced by <c>ArchitectureTests.DbContext_IsOnlyUsedByRepositories</c>).
 /// </para>
 /// <para>

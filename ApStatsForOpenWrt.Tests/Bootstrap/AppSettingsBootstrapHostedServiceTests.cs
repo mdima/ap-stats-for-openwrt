@@ -1,12 +1,12 @@
 using Microsoft.Extensions.Logging;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services.Bootstrap;
-using OpenWrtApStats.Services.Settings;
-using OpenWrtApStats.Tests.TestSupport;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Bootstrap;
+using ApStatsForOpenWrt.Services.Settings;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Bootstrap;
+namespace ApStatsForOpenWrt.Tests.Bootstrap;
 
 /// <summary>
 /// Verifies the AppSettings warm-up arm of the bootstrap pipeline:

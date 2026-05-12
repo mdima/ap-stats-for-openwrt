@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using OpenWrtApStats.Data.Models;
+using ApStatsForOpenWrt.Data.Models;
 
-namespace OpenWrtApStats.Data.Repositories;
+namespace ApStatsForOpenWrt.Data.Repositories;
 
 /// <summary>
 /// <see cref="INodeRepo"/> implementation. Per PER-05, NEVER constructor-inject a scoped

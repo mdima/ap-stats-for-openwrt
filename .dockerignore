@@ -16,6 +16,6 @@
 support/
 *.md
 docker-compose*.yml
-OpenWrtApStats.Tests/
+ApStatsForOpenWrt.Tests/
 Dockerfile*
 .dockerignore

@@ -1,7 +1,7 @@
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Services.Polling.Ssh;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Services.Polling.Ssh;
 
-namespace OpenWrtApStats.Tests.Polling;
+namespace ApStatsForOpenWrt.Tests.Polling;
 
 /// <summary>
 /// Test ISshSession that replays canned strings from a fixture folder. Identified by the

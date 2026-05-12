@@ -1,13 +1,13 @@
 using System.Reflection;
-using OpenWrtApStats.Data;
+using ApStatsForOpenWrt.Data;
 using Xunit;
 
-namespace OpenWrtApStats.Tests;
+namespace ApStatsForOpenWrt.Tests;
 
 /// <summary>
 /// Architectural reflection probe enforcing PER-04 / ROADMAP §Phase 1 Success Criterion 5
 /// ("Repositories are the only code that touches DbContext"). Adding a class outside
-/// <c>OpenWrtApStats.Data.Repositories</c> that takes <c>IDbContextFactory&lt;DatabaseContext&gt;</c>
+/// <c>ApStatsForOpenWrt.Data.Repositories</c> that takes <c>IDbContextFactory&lt;DatabaseContext&gt;</c>
 /// or holds a <see cref="DatabaseContext"/> field/property MUST fail this test.
 /// <para>
 /// <see cref="DatabaseContext"/> itself is special-cased by full type name (it legitimately
@@ -32,18 +32,18 @@ public sealed class ArchitectureTests
         //   2) MigrationsHostedService — owner of the migration pipeline (Plan 01-04 will land
         //      this type; the carve-out is registered now so the test stays green when it
         //      arrives). There is no repo seam below the migration system itself.
-        const string migrationsHostedServiceFullName = "OpenWrtApStats.Services.Bootstrap.MigrationsHostedService";
+        const string migrationsHostedServiceFullName = "ApStatsForOpenWrt.Services.Bootstrap.MigrationsHostedService";
 
         // Carve-out 3 (Phase 2): PollOrchestrator owns the per-cycle coordinator transaction and
         // MUST inject IDbContextFactory<DatabaseContext> directly to call BeginTransactionAsync over
         // the caller-owned repo overloads. This is the Phase 2 PER-04 carve-out (D-04 binding).
-        const string pollOrchestratorFullName = "OpenWrtApStats.Services.Polling.PollOrchestrator";
+        const string pollOrchestratorFullName = "ApStatsForOpenWrt.Services.Polling.PollOrchestrator";
 
         // Whitelist: ONLY the repositories namespace.
         // ROADMAP §Phase 1 Success Criterion 5: "Repositories are the only code that touches DbContext."
         // PER-04 (verbatim REQUIREMENTS): "A repository layer encapsulates all DB access; no DbContext is
         // referenced directly from Blazor components or background services."
-        const string repositoriesNamespace = "OpenWrtApStats.Data.Repositories";
+        const string repositoriesNamespace = "ApStatsForOpenWrt.Data.Repositories";
 
         var violators = asm.GetTypes()
             // Special-case DatabaseContext itself by FULL TYPE NAME.
@@ -93,7 +93,7 @@ public sealed class ArchitectureTests
 
     /// <summary>
     /// D-09 CR-02 architectural proof. Any method named "UpdateAsync" with a
-    /// <see cref="OpenWrtApStats.Data.Models.WiFiNode"/> parameter would re-track the whole row
+    /// <see cref="ApStatsForOpenWrt.Data.Models.WiFiNode"/> parameter would re-track the whole row
     /// and clobber the encrypted Password from a stub's default value. <c>UpdateMetadataAsync</c>
     /// + <c>UpdatePasswordAsync</c> replace it with single-property
     /// <c>ExecuteUpdateAsync</c> shapes. This test makes any future re-introduction
@@ -102,10 +102,10 @@ public sealed class ArchitectureTests
     [Fact]
     public void INodeRepo_HasNoUpdateAsyncWiFiNodeMethod()
     {
-        var methods = typeof(OpenWrtApStats.Data.Repositories.INodeRepo).GetMethods();
+        var methods = typeof(ApStatsForOpenWrt.Data.Repositories.INodeRepo).GetMethods();
         var violators = methods
             .Where(m => m.Name == "UpdateAsync"
-                     && m.GetParameters().Any(p => p.ParameterType == typeof(OpenWrtApStats.Data.Models.WiFiNode)))
+                     && m.GetParameters().Any(p => p.ParameterType == typeof(ApStatsForOpenWrt.Data.Models.WiFiNode)))
             .Select(m => $"{m.DeclaringType?.Name}.{m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name))})")
             .ToList();
 
@@ -122,15 +122,15 @@ public sealed class ArchitectureTests
     [Fact]
     public void PollNotifier_EventSignature_IsFuncTask()
     {
-        var ev = typeof(OpenWrtApStats.Services.Polling.PollNotifier).GetEvent("Cycled");
+        var ev = typeof(ApStatsForOpenWrt.Services.Polling.PollNotifier).GetEvent("Cycled");
         Assert.NotNull(ev);
-        var expected = typeof(Func<OpenWrtApStats.Services.Polling.PollSnapshot, Task>);
+        var expected = typeof(Func<ApStatsForOpenWrt.Services.Polling.PollSnapshot, Task>);
         Assert.Equal(expected, ev!.EventHandlerType);
     }
 
     /// <summary>
-    /// D-09 / Phase 5 CR-02 mirror on <see cref="OpenWrtApStats.Data.Repositories.IStationRepo"/>.
-    /// Any method named <c>UpdateAsync</c> taking <see cref="OpenWrtApStats.Data.Models.WLANStation"/>
+    /// D-09 / Phase 5 CR-02 mirror on <see cref="ApStatsForOpenWrt.Data.Repositories.IStationRepo"/>.
+    /// Any method named <c>UpdateAsync</c> taking <see cref="ApStatsForOpenWrt.Data.Models.WLANStation"/>
     /// would re-track the whole row and clobber operator-assigned <c>Name</c> from a stub's
     /// default value. The repo exposes <c>SetNameAsync</c> (single-property
     /// <c>ExecuteUpdateAsync</c>) and <c>DeleteByMacAsync</c> (single-row <c>ExecuteDeleteAsync</c>)
@@ -139,10 +139,10 @@ public sealed class ArchitectureTests
     [Fact]
     public void IStationRepo_DoesNotExposeUpdateWLANStation()
     {
-        var methods = typeof(OpenWrtApStats.Data.Repositories.IStationRepo).GetMethods();
+        var methods = typeof(ApStatsForOpenWrt.Data.Repositories.IStationRepo).GetMethods();
         var violators = methods
             .Where(m => m.Name == "UpdateAsync"
-                     && m.GetParameters().Any(p => p.ParameterType == typeof(OpenWrtApStats.Data.Models.WLANStation)))
+                     && m.GetParameters().Any(p => p.ParameterType == typeof(ApStatsForOpenWrt.Data.Models.WLANStation)))
             .Select(m => $"{m.DeclaringType?.Name}.{m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name))})")
             .ToList();
 
@@ -159,9 +159,9 @@ public sealed class ArchitectureTests
     [Fact]
     public void ICircuitGate_ChangedEventSignature_IsFuncTask()
     {
-        var ev = typeof(OpenWrtApStats.Services.Gating.ICircuitGate).GetEvent("Changed");
+        var ev = typeof(ApStatsForOpenWrt.Services.Gating.ICircuitGate).GetEvent("Changed");
         Assert.NotNull(ev);
-        var expected = typeof(Func<OpenWrtApStats.Services.Gating.GateState, Task>);
+        var expected = typeof(Func<ApStatsForOpenWrt.Services.Gating.GateState, Task>);
         Assert.Equal(expected, ev!.EventHandlerType);
     }
 }

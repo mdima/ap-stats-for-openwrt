@@ -2,7 +2,7 @@
 
 #nullable disable
 
-namespace OpenWrtApStats.Data.Migrations
+namespace ApStatsForOpenWrt.Data.Migrations
 {
     /// <inheritdoc />
     public partial class AddHostKeyFingerprint : Migration

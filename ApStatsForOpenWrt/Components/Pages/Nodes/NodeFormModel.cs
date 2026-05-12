@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace OpenWrtApStats.Components.Pages.Nodes;
+namespace ApStatsForOpenWrt.Components.Pages.Nodes;
 
 /// <summary>
 /// Form model for the shared <c>_NodeForm</c> component (Add + Edit). Hostname / Username

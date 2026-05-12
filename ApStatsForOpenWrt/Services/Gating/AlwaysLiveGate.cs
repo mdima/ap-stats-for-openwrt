@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Services.Gating;
+namespace ApStatsForOpenWrt.Services.Gating;
 
 /// <summary>
 /// Phase 5 stub. Always reports <see cref="GateState.Live"/>. The <c>add</c>/<c>remove</c>

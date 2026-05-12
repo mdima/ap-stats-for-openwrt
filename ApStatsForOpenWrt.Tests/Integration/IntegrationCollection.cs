@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Integration;
+namespace ApStatsForOpenWrt.Tests.Integration;
 
 /// <summary>
 /// Disables parallelization across all integration test classes that build a

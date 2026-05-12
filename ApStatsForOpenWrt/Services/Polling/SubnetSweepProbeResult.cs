@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Services.Polling;
+namespace ApStatsForOpenWrt.Services.Polling;
 
 /// <summary>
 /// POCO result of one node's subnet-sweep probe (Phase 9 ENRICH-01..02 + ENRICH-04). Sibling

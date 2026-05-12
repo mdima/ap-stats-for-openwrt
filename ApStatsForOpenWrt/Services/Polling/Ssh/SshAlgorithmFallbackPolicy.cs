@@ -1,6 +1,6 @@
 using ConnectionInfo = Renci.SshNet.ConnectionInfo;
 
-namespace OpenWrtApStats.Services.Polling.Ssh;
+namespace ApStatsForOpenWrt.Services.Polling.Ssh;
 
 /// <summary>
 /// Pitfall 1 mitigation. EXTENDS — never replaces — the SSH.NET 2025.1.0 default algorithm

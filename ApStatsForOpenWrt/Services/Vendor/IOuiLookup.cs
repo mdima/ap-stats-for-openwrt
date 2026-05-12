@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Services.Vendor;
+namespace ApStatsForOpenWrt.Services.Vendor;
 
 /// <summary>
 /// DASH-13 vendor seam. Looks up the OUI prefix (first 3 octets) of a MAC address in

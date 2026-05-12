@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Services.Nodes;
+namespace ApStatsForOpenWrt.Services.Nodes;
 
 /// <summary>
 /// NODE-02 / D-11 result of a Test Connection probe. The UI surface (Plan 03-04 Add/Edit

@@ -1,9 +1,9 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using OpenWrtApStats.Data;
+using ApStatsForOpenWrt.Data;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.TestSupport;
+namespace ApStatsForOpenWrt.Tests.TestSupport;
 
 /// <summary>
 /// Per-test SQLite :memory: fixture. Holds one <see cref="SqliteConnection"/> open for the

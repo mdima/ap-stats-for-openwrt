@@ -4,7 +4,7 @@ using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Smoke;
+namespace ApStatsForOpenWrt.Tests.Smoke;
 
 /// <summary>
 /// INF-08 live arm — verifies that the production Docker image (built by

@@ -1,13 +1,13 @@
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Components.Shared;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Services;
-using OpenWrtApStats.Services.Polling;
+using ApStatsForOpenWrt.Components.Shared;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Services;
+using ApStatsForOpenWrt.Services.Polling;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Components.Shared;
+namespace ApStatsForOpenWrt.Tests.Components.Shared;
 
 /// <summary>
 /// Phase 8 D-18 / REQ-UI-01..04 — KpiTileBar component, 6 bUnit-testable states locked

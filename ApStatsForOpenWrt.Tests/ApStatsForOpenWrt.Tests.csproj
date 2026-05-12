@@ -4,7 +4,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
-    <RootNamespace>OpenWrtApStats.Tests</RootNamespace>
+    <RootNamespace>ApStatsForOpenWrt.Tests</RootNamespace>
     <!-- DEVIATION (Rule 3, blocking) the .NET 10 SDK default dotnet test mode is VSTest, which
          is incompatible with xunit.v3 + Microsoft.Testing.Platform v2 (the configuration this
          plan locks). The repo-root global.json opts the SDK into MTP-aware dotnet test mode
@@ -63,7 +63,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\OpenWrtApStats\OpenWrtApStats.csproj" />
+    <ProjectReference Include="..\ApStatsForOpenWrt\ApStatsForOpenWrt.csproj" />
   </ItemGroup>
 
   <ItemGroup>

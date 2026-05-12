@@ -1,11 +1,11 @@
-using OpenWrtApStats.Data.Models;
+using ApStatsForOpenWrt.Data.Models;
 
-namespace OpenWrtApStats.Data.Repositories;
+namespace ApStatsForOpenWrt.Data.Repositories;
 
 /// <summary>
 /// Persistence seam for the <see cref="AppSetting"/> key-value table. Keeps
 /// <c>IDbContextFactory&lt;DatabaseContext&gt;</c> exclusive to the
-/// <c>OpenWrtApStats.Data.Repositories</c> namespace per PER-04 (ROADMAP §Phase 1
+/// <c>ApStatsForOpenWrt.Data.Repositories</c> namespace per PER-04 (ROADMAP §Phase 1
 /// Success Criterion 5: "Repositories are the only code that touches DbContext").
 /// AppSettingsService is the singleton typed accessor (D-11) — it consumes this
 /// repo, NEVER an EF factory directly.

@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Services.Nodes;
+namespace ApStatsForOpenWrt.Services.Nodes;
 
 /// <summary>
 /// WLAN-01 / D-12 seam: probe one node, persist discovered networks via UpsertManyAsync,

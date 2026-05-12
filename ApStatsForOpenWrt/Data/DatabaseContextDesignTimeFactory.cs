@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 
-namespace OpenWrtApStats.Data;
+namespace ApStatsForOpenWrt.Data;
 
 /// <summary>
 /// Design-time-only factory used by <c>dotnet ef migrations add</c> /

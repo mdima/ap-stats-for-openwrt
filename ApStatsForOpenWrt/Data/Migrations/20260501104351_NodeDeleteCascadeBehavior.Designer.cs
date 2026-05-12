@@ -4,11 +4,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using OpenWrtApStats.Data;
+using ApStatsForOpenWrt.Data;
 
 #nullable disable
 
-namespace OpenWrtApStats.Data.Migrations
+namespace ApStatsForOpenWrt.Data.Migrations
 {
     [DbContext(typeof(DatabaseContext))]
     [Migration("20260501104351_NodeDeleteCascadeBehavior")]
@@ -20,7 +20,7 @@ namespace OpenWrtApStats.Data.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.7");
 
-            modelBuilder.Entity("OpenWrtApStats.Data.Models.AppSetting", b =>
+            modelBuilder.Entity("ApStatsForOpenWrt.Data.Models.AppSetting", b =>
                 {
                     b.Property<string>("Key")
                         .HasMaxLength(128)
@@ -47,7 +47,7 @@ namespace OpenWrtApStats.Data.Migrations
                         });
                 });
 
-            modelBuilder.Entity("OpenWrtApStats.Data.Models.WLANStation", b =>
+            modelBuilder.Entity("ApStatsForOpenWrt.Data.Models.WLANStation", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -98,7 +98,7 @@ namespace OpenWrtApStats.Data.Migrations
                     b.ToTable("WLANStations");
                 });
 
-            modelBuilder.Entity("OpenWrtApStats.Data.Models.WiFiNetwork", b =>
+            modelBuilder.Entity("ApStatsForOpenWrt.Data.Models.WiFiNetwork", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -137,7 +137,7 @@ namespace OpenWrtApStats.Data.Migrations
                     b.ToTable("WiFiNetworks");
                 });
 
-            modelBuilder.Entity("OpenWrtApStats.Data.Models.WiFiNode", b =>
+            modelBuilder.Entity("ApStatsForOpenWrt.Data.Models.WiFiNode", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -173,9 +173,9 @@ namespace OpenWrtApStats.Data.Migrations
                     b.ToTable("WiFiNodes");
                 });
 
-            modelBuilder.Entity("OpenWrtApStats.Data.Models.WLANStation", b =>
+            modelBuilder.Entity("ApStatsForOpenWrt.Data.Models.WLANStation", b =>
                 {
-                    b.HasOne("OpenWrtApStats.Data.Models.WiFiNetwork", "Network")
+                    b.HasOne("ApStatsForOpenWrt.Data.Models.WiFiNetwork", "Network")
                         .WithMany()
                         .HasForeignKey("WiFiNetworkId")
                         .OnDelete(DeleteBehavior.SetNull);
@@ -183,9 +183,9 @@ namespace OpenWrtApStats.Data.Migrations
                     b.Navigation("Network");
                 });
 
-            modelBuilder.Entity("OpenWrtApStats.Data.Models.WiFiNetwork", b =>
+            modelBuilder.Entity("ApStatsForOpenWrt.Data.Models.WiFiNetwork", b =>
                 {
-                    b.HasOne("OpenWrtApStats.Data.Models.WiFiNode", "Node")
+                    b.HasOne("ApStatsForOpenWrt.Data.Models.WiFiNode", "Node")
                         .WithMany()
                         .HasForeignKey("WiFiNodeId")
                         .OnDelete(DeleteBehavior.Cascade)

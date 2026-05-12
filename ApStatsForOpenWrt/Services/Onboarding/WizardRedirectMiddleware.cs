@@ -1,7 +1,7 @@
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Settings;
 
-namespace OpenWrtApStats.Services.Onboarding;
+namespace ApStatsForOpenWrt.Services.Onboarding;
 
 /// <summary>
 /// D-07: Fires a 302 redirect to /setup/password on GET / when ALL three conditions hold:

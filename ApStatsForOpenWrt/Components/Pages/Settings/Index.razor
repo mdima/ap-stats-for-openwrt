@@ -5,16 +5,16 @@
 
    Plan 03-05: SET-01 (interval radio), SET-02 (password set/clear), SET-03 (bulk known-hosts
    clear), SET-04 (no-restart propagation via IAppSettingsService.Changed event chain). *@
-@using OpenWrtApStats.Data.Repositories
-@using OpenWrtApStats.Services.Auth
-@using OpenWrtApStats.Services.Settings
+@using ApStatsForOpenWrt.Data.Repositories
+@using ApStatsForOpenWrt.Services.Auth
+@using ApStatsForOpenWrt.Services.Settings
 
 @inject IAppSettingsService Settings
 @inject IUIPasswordHasher Hasher
 @inject INodeRepo Nodes
 @* Phase 8 Plan 08-07 REQ-UI-44 — the new UI preferences card consumes PreferencesService
    ONLY. NEVER IAppSettingsService — per-browser preference, not a DB setting. *@
-@inject OpenWrtApStats.Services.PreferencesService Prefs
+@inject ApStatsForOpenWrt.Services.PreferencesService Prefs
 
 <PageHeader Title="Settings" />
 

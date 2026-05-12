@@ -1,9 +1,9 @@
 using Bunit;
 using Microsoft.AspNetCore.Components;
-using OpenWrtApStats.Components.Shared;
+using ApStatsForOpenWrt.Components.Shared;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Components.Shared;
+namespace ApStatsForOpenWrt.Tests.Components.Shared;
 
 /// <summary>
 /// D-20 smoke spike checkpoint #3 (Pitfall 6): modal opens from Blazor button click.

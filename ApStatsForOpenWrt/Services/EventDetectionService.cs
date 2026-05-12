@@ -1,10 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services.Polling;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Polling;
 
-namespace OpenWrtApStats.Services;
+namespace ApStatsForOpenWrt.Services;
 
 /// <summary>
 /// Phase 8 D-08 / D-11 — Singleton snapshot-diff detector that subscribes to

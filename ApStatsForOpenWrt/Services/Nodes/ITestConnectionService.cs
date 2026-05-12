@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Services.Nodes;
+namespace ApStatsForOpenWrt.Services.Nodes;
 
 /// <summary>
 /// NODE-02 / D-07 seam: drives an SSH probe against a hostname/username/plaintext-password

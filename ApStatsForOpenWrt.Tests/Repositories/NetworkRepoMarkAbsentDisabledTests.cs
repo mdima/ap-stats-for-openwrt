@@ -1,9 +1,9 @@
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Tests.TestSupport;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Repositories;
+namespace ApStatsForOpenWrt.Tests.Repositories;
 
 /// <summary>
 /// D-15 / WLAN-03 tests: re-discovery is idempotent + absent rows get Enabled=false

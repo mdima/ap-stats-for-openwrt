@@ -1,8 +1,8 @@
 using Microsoft.AspNetCore.Identity;
-using OpenWrtApStats.Services.Auth;
+using ApStatsForOpenWrt.Services.Auth;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Auth;
+namespace ApStatsForOpenWrt.Tests.Auth;
 
 /// <summary>
 /// SEC-04 PBKDF2 hasher contract tests. Plus Pitfall 8 detection — a committed Identity V3

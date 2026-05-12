@@ -1,11 +1,11 @@
 using System.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Tests.TestSupport;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Migrations;
+namespace ApStatsForOpenWrt.Tests.Migrations;
 
 /// <summary>
 /// Drives the InitialCreate migration against :memory: SQLite (NOT the EF InMemory provider —

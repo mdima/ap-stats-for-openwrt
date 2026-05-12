@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Smoke;
+namespace ApStatsForOpenWrt.Tests.Smoke;
 
 /// <summary>
 /// INF-07 / INF-08 / D-01..D-04 plain-text lint of the repo-root Dockerfile + .dockerignore +
@@ -20,9 +20,9 @@ public sealed class DockerfileStructuralTests
     private static string SolutionRoot()
     {
         var dir = AppContext.BaseDirectory;
-        while (dir is not null && !File.Exists(Path.Combine(dir, "OpenWrtApStats.sln")))
+        while (dir is not null && !File.Exists(Path.Combine(dir, "ApStatsForOpenWrt.sln")))
             dir = Directory.GetParent(dir)?.FullName;
-        return dir ?? throw new InvalidOperationException("OpenWrtApStats.sln not found");
+        return dir ?? throw new InvalidOperationException("ApStatsForOpenWrt.sln not found");
     }
 
     private static string DockerfileText() =>
@@ -101,7 +101,7 @@ public sealed class DockerfileStructuralTests
         Assert.Contains("HEALTHCHECK", t, StringComparison.Ordinal);
         Assert.Contains("--interval=30s", t, StringComparison.Ordinal);
         Assert.Contains("--timeout=5s", t, StringComparison.Ordinal);
-        Assert.Contains("--start-period=30s", t, StringComparison.Ordinal);
+        Assert.Contains("--start-period=15s", t, StringComparison.Ordinal);
         Assert.Contains("--retries=3", t, StringComparison.Ordinal);
         Assert.Contains("curl -fsS http://localhost:8080/health", t, StringComparison.Ordinal);
     }
@@ -140,7 +140,7 @@ public sealed class DockerfileStructuralTests
         // T-07-02 mitigation: the test project is restored for csproj-only layer cache, but
         // its source must NOT enter the published image. The COPY . . in the build stage is
         // filtered by this entry so test code never lands at /app.
-        Assert.Contains("OpenWrtApStats.Tests/", DockerignoreText(), StringComparison.Ordinal);
+        Assert.Contains("ApStatsForOpenWrt.Tests/", DockerignoreText(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -170,7 +170,7 @@ public sealed class DockerfileStructuralTests
     // ── docker-compose.yml structural facts (Plan 07-02 — RESEARCH Finding #8) ───
 
     [Fact]
-    public void DockerCompose_DeclaresOpenWrtApStatsDataVolume()
+    public void DockerCompose_DeclaresApStatsForOpenWrtDataVolume()
     {
         // D-10 / RESEARCH Finding #2: named volume openwrtapstats-data mounted at /data so
         // SQLite + DataProtection key ring survive `docker compose down && up`.
@@ -178,7 +178,7 @@ public sealed class DockerfileStructuralTests
     }
 
     [Fact]
-    public void DockerCompose_DeclaresOpenWrtApStatsLogsVolume()
+    public void DockerCompose_DeclaresApStatsForOpenWrtLogsVolume()
     {
         // D-10: named volume openwrtapstats-logs mounted at /logs for Serilog daily-rolling
         // files; survives container lifecycle.

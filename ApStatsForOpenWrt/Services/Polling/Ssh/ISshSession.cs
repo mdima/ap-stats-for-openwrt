@@ -1,13 +1,13 @@
-using OpenWrtApStats.Data.Models;
+using ApStatsForOpenWrt.Data.Models;
 
-namespace OpenWrtApStats.Services.Polling.Ssh;
+namespace ApStatsForOpenWrt.Services.Polling.Ssh;
 
 /// <summary>
 /// Abstracts an SSH session against one OpenWRT node. <c>RealSshSession</c> wraps SSH.NET 2025.1.0
-/// (lands in Plan 02-03); <c>FakeSshSession</c> (test-only, under <c>OpenWrtApStats.Tests/Polling/</c>)
+/// (lands in Plan 02-03); <c>FakeSshSession</c> (test-only, under <c>ApStatsForOpenWrt.Tests/Polling/</c>)
 /// replays canned strings from golden fixtures (D-09). Implementations MUST NOT inject DbContext —
 /// PER-04 is implicit (the interface has no DB shape). The seam exists so CI never runs live SSH.
-/// Throws <see cref="OpenWrtApStats.Services.Polling.Exceptions.HostKeyMismatchException"/> on
+/// Throws <see cref="ApStatsForOpenWrt.Services.Polling.Exceptions.HostKeyMismatchException"/> on
 /// host-key mismatch (D-03 contract).
 /// </summary>
 public interface ISshSession : IAsyncDisposable

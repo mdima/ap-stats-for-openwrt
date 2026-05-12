@@ -4,7 +4,7 @@ using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Smoke;
+namespace ApStatsForOpenWrt.Tests.Smoke;
 
 /// <summary>
 /// ROADMAP success #4 E2E (D-09): build → up with named volumes → POST AddNode →

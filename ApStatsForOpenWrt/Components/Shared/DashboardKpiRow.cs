@@ -1,6 +1,6 @@
-using OpenWrtApStats.Data.Models;
+using ApStatsForOpenWrt.Data.Models;
 
-namespace OpenWrtApStats.Components.Shared;
+namespace ApStatsForOpenWrt.Components.Shared;
 
 /// <summary>
 /// Public projection consumed by <see cref="KpiTileBar"/> — Plan 08-08 (Dashboard

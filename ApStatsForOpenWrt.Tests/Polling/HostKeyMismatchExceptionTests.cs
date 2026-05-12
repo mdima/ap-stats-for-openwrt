@@ -1,7 +1,7 @@
-using OpenWrtApStats.Services.Polling.Exceptions;
+using ApStatsForOpenWrt.Services.Polling.Exceptions;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Polling;
+namespace ApStatsForOpenWrt.Tests.Polling;
 
 public sealed class HostKeyMismatchExceptionTests
 {

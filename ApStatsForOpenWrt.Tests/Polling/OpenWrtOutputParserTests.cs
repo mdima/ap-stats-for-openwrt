@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenWrtApStats.Services.Polling;
+using ApStatsForOpenWrt.Services.Polling;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Polling;
+namespace ApStatsForOpenWrt.Tests.Polling;
 
 public sealed class OpenWrtOutputParserTests
 {

@@ -1,9 +1,9 @@
-using OpenWrtApStats.Tests.TestSupport;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Serilog;
 using Serilog.Formatting.Compact;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Bootstrap;
+namespace ApStatsForOpenWrt.Tests.Bootstrap;
 
 /// <summary>
 /// Two-pronged Serilog coverage. Source-text invariants (INF-04 console + INF-05 file sink config
@@ -19,15 +19,15 @@ public sealed class SerilogConfigTests(TempDirectoryFixture temp) : IClassFixtur
     {
         // Walk up from the test bin to find the Program.cs source file. The test runner can be
         // launched from various CWDs (repo root, project dir, bin dir) so we anchor on
-        // AppContext.BaseDirectory and walk upwards looking for OpenWrtApStats/Program.cs.
+        // AppContext.BaseDirectory and walk upwards looking for ApStatsForOpenWrt/Program.cs.
         var dir = AppContext.BaseDirectory;
         for (int i = 0; i < 10; i++)
         {
-            var candidate = Path.Combine(dir, "OpenWrtApStats", "Program.cs");
+            var candidate = Path.Combine(dir, "ApStatsForOpenWrt", "Program.cs");
             if (File.Exists(candidate)) return File.ReadAllText(candidate);
             dir = Path.GetFullPath(Path.Combine(dir, ".."));
         }
-        throw new FileNotFoundException("Could not locate OpenWrtApStats/Program.cs from test bin");
+        throw new FileNotFoundException("Could not locate ApStatsForOpenWrt/Program.cs from test bin");
     }
 
     [Fact]

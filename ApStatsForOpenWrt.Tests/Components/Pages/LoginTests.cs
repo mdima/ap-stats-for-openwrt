@@ -2,12 +2,12 @@ using Bunit;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Components.Pages;
-using OpenWrtApStats.Services.Auth;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Components.Pages;
+using ApStatsForOpenWrt.Services.Auth;
+using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Components.Pages;
+namespace ApStatsForOpenWrt.Tests.Components.Pages;
 
 /// <summary>
 /// Login.razor bUnit tests. The actual SignInAsync round-trip is exercised in

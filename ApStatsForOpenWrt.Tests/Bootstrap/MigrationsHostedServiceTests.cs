@@ -1,11 +1,11 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenWrtApStats.Data;
-using OpenWrtApStats.Services.Bootstrap;
-using OpenWrtApStats.Tests.TestSupport;
+using ApStatsForOpenWrt.Data;
+using ApStatsForOpenWrt.Services.Bootstrap;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Bootstrap;
+namespace ApStatsForOpenWrt.Tests.Bootstrap;
 
 /// <summary>
 /// Verifies <see cref="MigrationsHostedService"/> exercises the EF migration pipeline against

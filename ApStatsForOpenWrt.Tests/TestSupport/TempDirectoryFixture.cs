@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace OpenWrtApStats.Tests.TestSupport;
+namespace ApStatsForOpenWrt.Tests.TestSupport;
 
 /// <summary>
 /// Per-test-class temp directory fixture. Creates two children (data/, logs/) under a

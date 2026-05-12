@@ -1,10 +1,10 @@
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Services.Polling;
-using OpenWrtApStats.Services.Polling.Exceptions;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Services.Polling;
+using ApStatsForOpenWrt.Services.Polling.Exceptions;
 
-namespace OpenWrtApStats.Services.Nodes;
+namespace ApStatsForOpenWrt.Services.Nodes;
 
 /// <summary>
 /// D-07 implementation. Encrypts the form-supplied plaintext password through the same

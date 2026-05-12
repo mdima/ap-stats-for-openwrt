@@ -2,16 +2,16 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using OpenWrtApStats.Data;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services.Bootstrap;
-using OpenWrtApStats.Services.Polling;
-using OpenWrtApStats.Services.Polling.Ssh;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Data;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Bootstrap;
+using ApStatsForOpenWrt.Services.Polling;
+using ApStatsForOpenWrt.Services.Polling.Ssh;
+using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Bootstrap;
+namespace ApStatsForOpenWrt.Tests.Bootstrap;
 
 /// <summary>
 /// GAP-02-A regression: the production composition root MUST pass eager service-provider
@@ -68,8 +68,8 @@ public sealed class CompositionRootValidationTests
         services.AddSingleton<PollNotifier>();
         // Phase 10 ORCH-07 — TimeProvider + Phase 9 probes (additive registrations from Program.cs).
         services.AddSingleton(TimeProvider.System);
-        services.AddTransient<OpenWrtApStats.Services.Polling.SubnetSweepProbe>();
-        services.AddTransient<OpenWrtApStats.Services.Polling.ReverseDnsProbe>();
+        services.AddTransient<ApStatsForOpenWrt.Services.Polling.SubnetSweepProbe>();
+        services.AddTransient<ApStatsForOpenWrt.Services.Polling.ReverseDnsProbe>();
         services.AddSingleton<PollOrchestrator>();
         services.AddTransient<ISshSession, RealSshSession>();
         // NOTE: NodePoller is intentionally NOT registered (GAP-02-A). The probe factory below
@@ -82,16 +82,16 @@ public sealed class CompositionRootValidationTests
         });
         // Phase 10 — enrichmentFactory delegate (validation-only stub returning null; the production
         // factory body lives in Program.cs and is exercised by integration tests).
-        services.AddSingleton<Func<WiFiNode, IReadOnlyList<string>, string, CancellationToken, Task<OpenWrtApStats.Services.Polling.EnrichmentDelta?>>>(sp =>
-            (n, ips, peerIp, ct) => Task.FromResult<OpenWrtApStats.Services.Polling.EnrichmentDelta?>(null));
+        services.AddSingleton<Func<WiFiNode, IReadOnlyList<string>, string, CancellationToken, Task<ApStatsForOpenWrt.Services.Polling.EnrichmentDelta?>>>(sp =>
+            (n, ips, peerIp, ct) => Task.FromResult<ApStatsForOpenWrt.Services.Polling.EnrichmentDelta?>(null));
         services.AddSingleton<Func<CancellationToken, Task>>(sp => ct =>
             sp.GetRequiredService<PollOrchestrator>().RunCycleAsync(ct));
 
         // Phase 6 D-01 — PollingHostedService now takes ICircuitGate for the cold-start kick.
         // Use AlwaysLiveGate as the validation-only stub (this test asserts registration shape,
         // not gating semantics). Production registers CircuitTrackerGate (see Program.cs §6).
-        services.AddSingleton<OpenWrtApStats.Services.Gating.ICircuitGate,
-                              OpenWrtApStats.Services.Gating.AlwaysLiveGate>();
+        services.AddSingleton<ApStatsForOpenWrt.Services.Gating.ICircuitGate,
+                              ApStatsForOpenWrt.Services.Gating.AlwaysLiveGate>();
 
         services.AddHostedService<PollingHostedService>();
 

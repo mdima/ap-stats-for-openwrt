@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Components.Server.Circuits;
 
-namespace OpenWrtApStats.Services.Gating;
+namespace ApStatsForOpenWrt.Services.Gating;
 
 /// <summary>
 /// Phase 6 — Blazor CircuitHandler that drives <see cref="CircuitTracker"/> from per-circuit

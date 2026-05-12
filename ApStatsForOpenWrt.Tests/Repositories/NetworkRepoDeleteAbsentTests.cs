@@ -1,10 +1,10 @@
 using Microsoft.EntityFrameworkCore;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Tests.TestSupport;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Repositories;
+namespace ApStatsForOpenWrt.Tests.Repositories;
 
 /// <summary>
 /// Quick-260506-005 / D-XX tests: per-cycle WiFiNetworks absence is hard-DELETE (not Enabled-toggle).

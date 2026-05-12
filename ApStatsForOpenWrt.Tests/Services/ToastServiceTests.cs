@@ -1,9 +1,9 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenWrtApStats.Services;
+using ApStatsForOpenWrt.Services;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Services;
+namespace ApStatsForOpenWrt.Tests.Services;
 
 /// <summary>
 /// Phase 8 Plan 08-06 Task 1 — exercises <see cref="ToastService"/> against the

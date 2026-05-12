@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace OpenWrtApStats.Data.Models;
+namespace ApStatsForOpenWrt.Data.Models;
 
 /// <summary>
 /// A single OpenWRT access point declared by the operator. Phase 1 only owns the schema;

@@ -1,12 +1,12 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using OpenWrtApStats.Data;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Data.Repositories;
-using OpenWrtApStats.Services.Health;
-using OpenWrtApStats.Tests.TestSupport;
+using ApStatsForOpenWrt.Data;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Health;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Health;
+namespace ApStatsForOpenWrt.Tests.Health;
 
 /// <summary>
 /// Phase 6 INF-06 — request-time DB reachability probe coverage. Exercises both arms:

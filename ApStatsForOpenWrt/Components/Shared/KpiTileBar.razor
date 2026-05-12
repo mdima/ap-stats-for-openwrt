@@ -25,8 +25,8 @@
 
 @inject PollNotifier Notifier
 @implements IDisposable
-@using OpenWrtApStats.Services
-@using OpenWrtApStats.Services.Polling
+@using ApStatsForOpenWrt.Services
+@using ApStatsForOpenWrt.Services.Polling
 
 <div class="kpi-bar mb-3" role="group" aria-label="Status filter — KPI tiles">
     <div class="row g-3">
@@ -82,7 +82,7 @@
         _offline = 0;
         foreach (var r in Rows)
         {
-            if (r.StationStatus == OpenWrtApStats.Data.Models.Status.Online)
+            if (r.StationStatus == ApStatsForOpenWrt.Data.Models.Status.Online)
             {
                 _online++;
             }

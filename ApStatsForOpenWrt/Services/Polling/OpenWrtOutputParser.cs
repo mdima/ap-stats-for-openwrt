@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging;
-using OpenWrtApStats.Data.Models;
+using ApStatsForOpenWrt.Data.Models;
 
-namespace OpenWrtApStats.Services.Polling;
+namespace ApStatsForOpenWrt.Services.Polling;
 
 /// <summary>
 /// Static, stateless parsers from raw OpenWRT command output to POCO entities. Pure functions —

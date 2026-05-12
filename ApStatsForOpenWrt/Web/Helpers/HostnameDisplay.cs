@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Web.Helpers;
+namespace ApStatsForOpenWrt.Web.Helpers;
 
 /// <summary>
 /// Phase 10 DASH-18 / DASH-19 display-time suffix-stripping helper. Pure function over

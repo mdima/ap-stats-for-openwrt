@@ -1,8 +1,8 @@
 using Bunit;
-using OpenWrtApStats.Components.Shared;
+using ApStatsForOpenWrt.Components.Shared;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Components.Shared;
+namespace ApStatsForOpenWrt.Tests.Components.Shared;
 
 /// <summary>
 /// Phase 5 D-06 FilterChipGroup — DASH-06 SSID + AP filter chips.

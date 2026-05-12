@@ -1,12 +1,12 @@
 using Bunit;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
-using OpenWrtApStats.Components.Pages.Setup;
-using OpenWrtApStats.Services.Auth;
-using OpenWrtApStats.Services.Settings;
+using ApStatsForOpenWrt.Components.Pages.Setup;
+using ApStatsForOpenWrt.Services.Auth;
+using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Components.Pages.Setup;
+namespace ApStatsForOpenWrt.Tests.Components.Pages.Setup;
 
 /// <summary>
 /// Password.razor bUnit tests. Covers Step 1 form rendering contract:

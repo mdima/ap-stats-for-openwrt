@@ -1,13 +1,13 @@
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Services.Nodes;
-using OpenWrtApStats.Services.Polling;
-using OpenWrtApStats.Services.Polling.Exceptions;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Services.Nodes;
+using ApStatsForOpenWrt.Services.Polling;
+using ApStatsForOpenWrt.Services.Polling.Exceptions;
 using Xunit;
 
-namespace OpenWrtApStats.Tests.Services.Nodes;
+namespace ApStatsForOpenWrt.Tests.Services.Nodes;
 
 /// <summary>
 /// NODE-02 / D-11 catalog mapping. Each [Theory] row asserts: a Failed reason-token
@@ -17,7 +17,7 @@ namespace OpenWrtApStats.Tests.Services.Nodes;
 ///
 /// <para>
 /// Reason-token vocabulary verified at Plan 03-04 execute time against
-/// <c>OpenWrtApStats/Services/Polling/NodePoller.cs</c> + <c>PollOrchestrator.cs</c>:
+/// <c>ApStatsForOpenWrt/Services/Polling/NodePoller.cs</c> + <c>PollOrchestrator.cs</c>:
 /// <c>within-cycle-reentry</c>, <c>decrypt-failed</c>, <c>algo-negotiate-failed</c>,
 /// <c>auth-failed</c>, <c>network-error</c>, <c>timeout</c>, <c>probe-failed</c>,
 /// <c>host-key-mismatch</c>.
@@ -28,7 +28,7 @@ public sealed class TestConnectionServiceTests
     private static IDataProtectionProvider EphemeralDpp()
     {
         var sc = new ServiceCollection();
-        sc.AddDataProtection().SetApplicationName("OpenWrtApStats-Tests-Plan03-04");
+        sc.AddDataProtection().SetApplicationName("ApStatsForOpenWrt-Tests-Plan03-04");
         return sc.BuildServiceProvider().GetRequiredService<IDataProtectionProvider>();
     }
 

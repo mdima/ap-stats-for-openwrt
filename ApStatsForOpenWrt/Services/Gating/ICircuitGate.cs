@@ -1,4 +1,4 @@
-namespace OpenWrtApStats.Services.Gating;
+namespace ApStatsForOpenWrt.Services.Gating;
 
 /// <summary>
 /// D-12 Phase 5 stub seam, Phase 6 wired to <see cref="CircuitTracker"/>. Surfaces the

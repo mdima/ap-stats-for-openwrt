@@ -1,7 +1,7 @@
 using System.Collections.Frozen;
 using Microsoft.Extensions.Logging;
 
-namespace OpenWrtApStats.Services.Vendor;
+namespace ApStatsForOpenWrt.Services.Vendor;
 
 /// <summary>
 /// Singleton OUI loader. Reads the embedded <c>Data/Resources/oui.csv</c> at construction
@@ -18,7 +18,7 @@ public sealed class OuiLookup : IOuiLookup
         try
         {
             var asm = typeof(OuiLookup).Assembly;
-            using var stream = asm.GetManifestResourceStream("OpenWrtApStats.Data.Resources.oui.csv")
+            using var stream = asm.GetManifestResourceStream("ApStatsForOpenWrt.Data.Resources.oui.csv")
                 ?? throw new InvalidOperationException("Embedded oui.csv missing");
             using var reader = new StreamReader(stream);
             var dict = new Dictionary<string, string>(StringComparer.Ordinal);
