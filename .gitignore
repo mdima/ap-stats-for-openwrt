@@ -481,7 +481,7 @@ $RECYCLE.BIN/
 # Vim temporary swap files
 *.swp
 
-# OpenWrtApStats — explicit project-level entries (Plan 01-01 Task 2)
+# ApStatsForOpenWrt — explicit project-level entries (Plan 01-01 Task 2)
 # Build output (case-sensitive aliases — the template's [Bb]in/[Oo]bj patterns also match)
 bin/
 obj/

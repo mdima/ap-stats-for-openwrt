@@ -1,7 +1,7 @@
 <!-- GSD:project-start source:PROJECT.md -->
 ## Project
 
-**OpenWRT-AP-Stats** — A self-hosted Docker dashboard that gives operators of OpenWRT-based access points a live view of who is connected to which WLAN on which AP. The native LuCI UI in AP mode does not surface this information cleanly across multiple APs and WLANs, so this dashboard fills that gap. The application is delivered as a single Docker container that polls each declared AP over SSH and renders the results through a Blazor live UI.
+**AP-Stats-for-OpenWrt** — A self-hosted Docker dashboard that gives operators of OpenWRT-based access points a live view of who is connected to which WLAN on which AP. The native LuCI UI in AP mode does not surface this information cleanly across multiple APs and WLANs, so this dashboard fills that gap. The application is delivered as a single Docker container that polls each declared AP over SSH and renders the results through a Blazor live UI.
 
 **Core value:** A network operator can see, at a glance and in real time, every WiFi station currently associated with every monitored WLAN across every declared OpenWRT access point.
 
@@ -12,11 +12,11 @@ See `.planning/PROJECT.md` for the living project context (requirements, constra
 ## Technology Stack
 
 - **Runtime / framework:** .NET 10 (LTS) + Blazor Server with **InteractiveServer** render mode
-- **Persistence:** SQLite via EF Core 10.0.x — DB at `/data/OpenWRT-AP-Stats.db`, auto-migrated at startup with real migration history
+- **Persistence:** SQLite via EF Core 10.0.x — DB at `/data/AP-Stats-for-OpenWrt.db`, auto-migrated at startup with real migration history
 - **DB access pattern:** `IDbContextFactory<DatabaseContext>` (NOT scoped `DbContext` — captive dependency in `BackgroundService`)
 - **SSH:** SSH.NET 2025.1.x — works with current OpenWRT/Dropbear without manual cipher config
 - **Logging:** Serilog.AspNetCore 10.x — console + daily rolling file under `/logs`, 7-day retention
-- **Encryption:** ASP.NET Data Protection with `SetApplicationName("OpenWrtApStats")` — keys persisted to `/data/keys`
+- **Encryption:** ASP.NET Data Protection with `SetApplicationName("ApStatsForOpenWrt")` — keys persisted to `/data/keys`
 - **UI auth:** PBKDF2 hashed UI password via `PasswordHasher<T>` — NOT Data Protection (one-way)
 - **Frontend template:** AdminLTE 4.0.0-rc7 — vendored to `wwwroot/lib/adminlte/` from the bundled zip in `support/`
 - **Test stack:** xUnit v3 + bUnit + `Microsoft.Testing.Extensions.CodeCoverage` (Cobertura) — **NOT coverlet** (incompatible with .NET 10 MTP)
@@ -48,7 +48,7 @@ See `.planning/research/PITFALLS.md` for the full anti-pattern list with phase m
 Single .NET 10 process, three logical planes inside one container:
 
 1. **SSH polling plane** (background) — `BackgroundService` (`PollingHostedService`) → `PollOrchestrator` → fan-out of `NodePoller` tasks → SSH.NET → parser → returns POCO `NodeProbeResult`s.
-2. **Persistence plane** — `IDbContextFactory<DatabaseContext>` → repository layer (`INodeRepo`, `INetworkRepo`, `IStationRepo`, `IAppSettingsService`) → SQLite at `/data/OpenWRT-AP-Stats.db`.
+2. **Persistence plane** — `IDbContextFactory<DatabaseContext>` → repository layer (`INodeRepo`, `INetworkRepo`, `IStationRepo`, `IAppSettingsService`) → SQLite at `/data/AP-Stats-for-OpenWrt.db`.
 3. **UI plane** — Blazor InteractiveServer (`MainLayout` styled with AdminLTE) → singleton `PollNotifier` (event-based pub/sub) → component subscriptions in `OnInitialized` / unsubscribe in `Dispose`, wrapped in `await InvokeAsync(StateHasChanged)`.
 
 **Polling-policy gate:** singleton `CircuitTracker` (Interlocked counter + re-armable `TaskCompletionSource`); `BackgroundService` awaits `tracker.WaitForVisitorAsync(stoppingToken)` before each cycle. `/health` is a plain MapGet endpoint — structurally cannot increment the gate.
