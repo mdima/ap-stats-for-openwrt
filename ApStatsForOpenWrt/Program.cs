@@ -68,7 +68,7 @@ try
     //    read it. WAL itself is enabled by MigrationsHostedService via PRAGMA journal_mode=WAL
     //    and is persisted on the DB file.
     builder.Services.AddDbContextFactory<DatabaseContext>(options =>
-        options.UseSqlite($"Data Source={dataRoot}/OpenWRT-AP-Stats.db;Pooling=True;Default Timeout=5"));
+        options.UseSqlite($"Data Source={dataRoot}/AP-Stats-for-OpenWrt.db;Pooling=True;Default Timeout=5"));
 
     // 4. ASP.NET Data Protection — file-system key ring + verbatim application name (D-02 / SEC-03).
     //    On Linux/WSL2 keys are NOT encrypted at rest (DPAPI is Windows-only) —

@@ -21,7 +21,7 @@ namespace ApStatsForOpenWrt.Tests.Integration;
 /// </para>
 ///
 /// <para>
-/// The factory swaps the production SQLite <c>/data/OpenWRT-AP-Stats.db</c> connection string
+/// The factory swaps the production SQLite <c>/data/AP-Stats-for-OpenWrt.db</c> connection string
 /// for in-memory SQLite (per-test) so the host can boot without <c>/data</c> being writable in
 /// CI. Hosted services (Migrations, DataProtectionHealth, AppSettingsBootstrap, Polling) still
 /// run; the in-memory shared-cache connection is held open across the fixture lifetime so

@@ -10,7 +10,7 @@ namespace ApStatsForOpenWrt.Tests.Bootstrap;
 /// <summary>
 /// Verifies <see cref="MigrationsHostedService"/> exercises the EF migration pipeline against
 /// a per-test SQLite file. INF-02 is verified here as a PROXY (the production hardcoded path
-/// "/data/OpenWRT-AP-Stats.db" is exercised by a manual one-time WSL2 run, recorded in
+/// "/data/AP-Stats-for-OpenWrt.db" is exercised by a manual one-time WSL2 run, recorded in
 /// <c>01-VALIDATION.md §"Manual-Only Verifications"</c>); the factory-redirect proxy validates
 /// the migration pipeline itself. INF-03 (idempotent re-run) is asserted directly.
 /// </summary>
