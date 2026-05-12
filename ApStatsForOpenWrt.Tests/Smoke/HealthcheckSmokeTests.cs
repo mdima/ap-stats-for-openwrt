@@ -295,13 +295,22 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
             await Task.Delay(500, ct);
             var grep = await container.ExecAsync(
                 new[] { "sh", "-c",
-                        "grep -ic 'openwrt-ap-stats\\|openwrtapstats\\|OpenWRT-AP-Stats\\|OpenWrtApStats' /logs/ap-stats-for-openwrt-*.log 2>/dev/null || echo 0" },
+                        "grep -ich 'openwrt-ap-stats\\|openwrtapstats\\|OpenWRT-AP-Stats\\|OpenWrtApStats' /logs/ap-stats-for-openwrt-*.log 2>/dev/null || echo 0" },
                 ct);
-            // grep exit 1 (no matches) is normalised to '0' by the `|| echo 0`;
-            // assert via stdout. When multiple log files match the glob, grep -c
-            // emits "<file>:<count>" per file; under the AP-Stats-for-OpenWrt
-            // single-file rotation this run reduces to a single bare "0".
-            Assert.Equal("0", grep.Stdout.Trim());
+            // grep -c with multiple matching files emits one count line per file
+            // (and `-h` suppresses any filename prefix). With Serilog's daily
+            // rolling sink the boot-time directory may contain 1-2 files
+            // depending on UTC date boundaries. The `|| echo 0` fallback
+            // covers the zero-match exit-1 case.
+            // Assertion: EVERY non-empty line in stdout must be the literal "0".
+            // If any line is a non-zero count, the old-name grep matched.
+            var perFileCounts = grep.Stdout
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim())
+                .Where(line => line.Length > 0)
+                .ToArray();
+            Assert.NotEmpty(perFileCounts);
+            Assert.All(perFileCounts, line => Assert.Equal("0", line));
         }
         finally
         {
