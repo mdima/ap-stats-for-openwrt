@@ -59,7 +59,7 @@ public sealed class NotificationsGate : INotificationsGate
 /// <summary>
 /// Phase 8 D-12 (post-fix): Scoped wrapper over wwwroot/js/preferences.js.
 /// Strongly-typed methods per preference (NOT generic Get&lt;T&gt;/Set&lt;T&gt;).
-/// Internally prepends 'openwrt-ap-stats:' to every localStorage key.
+/// Internally prepends 'ap-stats-for-openwrt:' to every localStorage key.
 /// IsNotificationsEnabled boolean is cached in memory after first read for
 /// fast hot-path access; the value is mirrored into the Singleton
 /// <see cref="NotificationsGate"/> so cross-circuit consumers (ToastService,
@@ -146,7 +146,7 @@ public sealed class PreferencesService
     // --- Theme: RAW string (anti-FOUC contract — see class doc) ---
     // Theme is persisted as the literal 4-character string 'dark' (or 'light') so
     // the App.razor inline anti-FOUC script can compare via
-    // `localStorage.getItem('openwrt-ap-stats:theme') === 'dark'`. NEVER use
+    // `localStorage.getItem('ap-stats-for-openwrt:theme') === 'dark'`. NEVER use
     // setJson/getJson here — JSON-encoding would store '"dark"' (6 chars with embedded
     // quote characters) and silently break the inline pre-paint compare.
     public Task<string> GetThemeAsync() => GetRawOrDefaultAsync(KeyTheme, "light");

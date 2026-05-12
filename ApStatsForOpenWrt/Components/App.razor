@@ -15,14 +15,14 @@
     @* Phase 8 anti-FOUC blocking script. Runs synchronously before stylesheets
        load to apply data-bs-theme + sidebar-collapse class so the user does NOT
        see a flash of the wrong theme or expanded sidebar at reload. Reads two
-       localStorage keys with the openwrt-ap-stats: prefix; falls back to
+       localStorage keys with the ap-stats-for-openwrt: prefix; falls back to
        prefers-color-scheme for theme; defaults to expanded sidebar.
        Must be inline (no src=) to avoid an extra HTTP roundtrip blocking paint. *@
     <script>
         (function () {
             try {
                 var ls = window.localStorage;
-                var theme = ls && ls.getItem('openwrt-ap-stats:theme');
+                var theme = ls && ls.getItem('ap-stats-for-openwrt:theme');
                 if (!theme) {
                     var mql = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
                     theme = (mql && mql.matches) ? 'dark' : 'light';
@@ -30,7 +30,7 @@
                 if (theme === 'dark') {
                     document.documentElement.setAttribute('data-bs-theme', 'dark');
                 }
-                var collapsed = ls && ls.getItem('openwrt-ap-stats:sidebar-collapsed');
+                var collapsed = ls && ls.getItem('ap-stats-for-openwrt:sidebar-collapsed');
                 if (collapsed === 'true') {
                     document.body.classList.add('sidebar-collapse');
                 }

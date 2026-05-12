@@ -42,7 +42,7 @@
         // Wrapped in try/catch in case CustomEvent constructor is unsupported
         // (very old browsers); UX must continue to work even if dispatch fails.
         try {
-            document.dispatchEvent(new CustomEvent('openwrt-ap-stats:sidebar-toggled', {
+            document.dispatchEvent(new CustomEvent('ap-stats-for-openwrt:sidebar-toggled', {
                 detail: { collapsed: body.classList.contains(COLLAPSED) }
             }));
         } catch (e) { /* CustomEvent constructor unsupported — ignore */ }

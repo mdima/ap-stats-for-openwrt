@@ -1,19 +1,19 @@
 // ApStatsForOpenWrt/wwwroot/js/preferences.js
 // Phase 8 — D-09/D-12 strongly-typed preferences interop.
 // Loaded by Services/PreferencesService.cs via dynamic import('./preferences.js').
-// All keys are prefixed with 'openwrt-ap-stats:' to namespace localStorage.
+// All keys are prefixed with 'ap-stats-for-openwrt:' to namespace localStorage.
 // Wrapped in try/catch so private mode / sandboxed iframes silently no-op.
 //
 // Storage shape contract (closes plan-checker BLOCKER 1 — see PreferencesService.cs):
 //   - 'theme'         is stored RAW via set/get (NOT setJson/getJson) so the
 //                     App.razor anti-FOUC inline script can compare via
-//                     `localStorage.getItem('openwrt-ap-stats:theme') === 'dark'`
+//                     `localStorage.getItem('ap-stats-for-openwrt:theme') === 'dark'`
 //                     synchronously, before any JS module is parsed.
 //   - 'search-text'   is stored RAW (free-form user text — double-encoding
 //                     would lose round-trip parity for needles containing `"`).
 //   - everything else is JSON-encoded via setJson/getJson.
 
-const PREFIX = 'openwrt-ap-stats:';
+const PREFIX = 'ap-stats-for-openwrt:';
 
 function safeGetItem(fullKey) {
     try { return window.localStorage.getItem(fullKey); }
