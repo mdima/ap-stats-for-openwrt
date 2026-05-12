@@ -174,4 +174,139 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
             await container.DisposeAsync();
         }
     }
+
+    // --------------------------------------------------------------------------
+    // Phase 12 Wave D — D-07 Smoke fixture extension (3 new facts).
+    // Each reuses BuildHealthyContainer() so /health=200 is the precondition
+    // (MigrationsHostedService has already applied the regenerated InitialCreate
+    // per Wave B; DataProtection has already initialised the keyring under the
+    // new ApplicationDiscriminator). Per CONTEXT.md D-07 + 12-RESEARCH.md §Q3
+    // canonical shapes, with §Q2 correction to D-07.2 (no XML grep — the
+    // ApplicationDiscriminator is never serialised to disk per Microsoft Learn
+    // "Key storage format"; the in-process companion test
+    // ApStatsForOpenWrt.Tests.Bootstrap.DataProtectionTests
+    //     .SetApplicationName_IsApStatsForOpenWrt_Verbatim
+    // locks the discriminator string; this Smoke fact proves the keyring
+    // initialised against the configured /data volume).
+    // --------------------------------------------------------------------------
+
+    [Fact]
+    [Trait("Category", "Smoke")]
+    [Trait("RequiresDocker", "true")]
+    public async Task Container_FirstBoot_CreatesRenamedDbFile_AndDoesNotCreateOldDbFile()
+    {
+        // D-07.1 / ROADMAP success criterion #2 — /data/AP-Stats-for-OpenWrt.db is
+        // created; /data/OpenWRT-AP-Stats.db is NOT created. Paired positive +
+        // negative assertions per 12-RESEARCH.md §Q3 to catch a developer's
+        // interrupted-cutover regression (one literal flipped, sibling missed).
+        var ct = TestContext.Current.CancellationToken;
+        var container = BuildHealthyContainer();
+        try
+        {
+            await container.StartAsync(ct);
+
+            var positive = await container.ExecAsync(
+                new[] { "test", "-f", "/data/AP-Stats-for-OpenWrt.db" }, ct);
+            Assert.Equal(0, positive.ExitCode);
+
+            var negative = await container.ExecAsync(
+                new[] { "test", "-f", "/data/OpenWRT-AP-Stats.db" }, ct);
+            Assert.NotEqual(0, negative.ExitCode);
+        }
+        finally
+        {
+            await container.StopAsync(CancellationToken.None);
+            await container.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Smoke")]
+    [Trait("RequiresDocker", "true")]
+    public async Task Container_FirstBoot_InitialisesDataProtectionKeyring_OnDataVolume()
+    {
+        // D-07.2 (CORRECTED per 12-RESEARCH.md §Q2) — DataProtection keyring
+        // file-existence assertion. The on-disk XML schema does NOT contain a
+        // literal <ApplicationName> element; SetApplicationName maps to
+        // DataProtectionOptions.ApplicationDiscriminator (in-memory only, never
+        // serialised — Microsoft Learn "Key storage format"). The discriminator
+        // string is locked at the fast-suite tier by
+        // ApStatsForOpenWrt.Tests.Bootstrap.DataProtectionTests
+        //     .SetApplicationName_IsApStatsForOpenWrt_Verbatim
+        // (asserts dpOptions.Value.ApplicationDiscriminator == "ApStatsForOpenWrt").
+        // This Smoke fact transitively proves the keyring initialised against the
+        // configured /data volume by asserting at least one /data/keys/key-*.xml
+        // file exists after first boot. ROADMAP success criterion #3 is satisfied
+        // by the combination of (fast-suite discriminator assertion) + (this
+        // file-existence assertion).
+        var ct = TestContext.Current.CancellationToken;
+        var container = BuildHealthyContainer();
+        try
+        {
+            await container.StartAsync(ct);
+
+            var ls = await container.ExecAsync(
+                new[] { "sh", "-c", "ls -1 /data/keys/key-*.xml 2>/dev/null | head -1" }, ct);
+            Assert.Equal(0, ls.ExitCode);
+            Assert.False(string.IsNullOrWhiteSpace(ls.Stdout),
+                "Expected at least one /data/keys/key-*.xml file after first boot.");
+        }
+        finally
+        {
+            await container.StopAsync(CancellationToken.None);
+            await container.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Smoke")]
+    [Trait("RequiresDocker", "true")]
+    public async Task Container_BootLogs_ContainNoOldNameReferences_AcrossAllFourForms()
+    {
+        // D-07.3 / ROADMAP success criterion #5 — zero references to ANY of the
+        // four locked old-name forms in either docker logs (authoritative
+        // synchronous source via the unwrapped WriteTo.Console() sink per
+        // 12-RESEARCH.md §Q5 + Pitfall 4) OR /logs/ap-stats-for-openwrt-*.log
+        // (Async-wrapped defense-in-depth check after a brief flush wait).
+        //
+        // Four forms locked by CONTEXT.md D-05:
+        //   - PascalCase           "OpenWrtApStats"
+        //   - lowercase no-sep     "openwrtapstats"     (folded by OrdinalIgnoreCase)
+        //   - mixed-dashed display "OpenWRT-AP-Stats"
+        //   - lowercase-dashed     "openwrt-ap-stats"   (the fourth form per D-05)
+        var ct = TestContext.Current.CancellationToken;
+        var container = BuildHealthyContainer();
+        try
+        {
+            await container.StartAsync(ct);
+
+            // Primary: docker logs (synchronous; Console sink is NOT Async-wrapped).
+            var (logsStdout, logsStderr) = await container.GetLogsAsync(ct: ct);
+            var combined = logsStdout + "\n" + logsStderr;
+            Assert.DoesNotContain("OpenWrtApStats",   combined, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("OpenWRT-AP-Stats", combined, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("openwrt-ap-stats", combined, StringComparison.OrdinalIgnoreCase);
+            // The case-insensitive "openwrtapstats" no-separator form is folded
+            // into the OpenWrtApStats check above (StringComparison.OrdinalIgnoreCase
+            // collapses all four case variants of the no-separator token).
+
+            // Defense-in-depth: Serilog file sink (Async-wrapped — Pitfall 4).
+            // Give the Async channel ~500ms to drain before reading the file.
+            await Task.Delay(500, ct);
+            var grep = await container.ExecAsync(
+                new[] { "sh", "-c",
+                        "grep -ic 'openwrt-ap-stats\\|openwrtapstats\\|OpenWRT-AP-Stats\\|OpenWrtApStats' /logs/ap-stats-for-openwrt-*.log 2>/dev/null || echo 0" },
+                ct);
+            // grep exit 1 (no matches) is normalised to '0' by the `|| echo 0`;
+            // assert via stdout. When multiple log files match the glob, grep -c
+            // emits "<file>:<count>" per file; under the AP-Stats-for-OpenWrt
+            // single-file rotation this run reduces to a single bare "0".
+            Assert.Equal("0", grep.Stdout.Trim());
+        }
+        finally
+        {
+            await container.StopAsync(CancellationToken.None);
+            await container.DisposeAsync();
+        }
+    }
 }
