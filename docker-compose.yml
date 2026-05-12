@@ -1,4 +1,4 @@
-# OpenWRT-AP-Stats — sample operator deployment manifest.
+# AP Stats for OpenWrt — sample operator deployment manifest.
 # Brings up the dashboard on port 8080 with named volumes for /data (SQLite +
 # DataProtection keys) and /logs (Serilog daily-rolling files).
 #
@@ -14,22 +14,22 @@
 # the host paths first.
 
 services:
-  openwrtapstats:
+  apstatsforopenwrt:
     build:
       context: .
       dockerfile: Dockerfile
-    image: openwrtapstats:latest
-    container_name: openwrtapstats
+    image: apstatsforopenwrt:latest
+    container_name: apstatsforopenwrt
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
-      - openwrtapstats-data:/data
-      - openwrtapstats-logs:/logs
+      - apstatsforopenwrt-data:/data
+      - apstatsforopenwrt-logs:/logs
     # NOTE: No `healthcheck:` block here — the Dockerfile's HEALTHCHECK directive
     # governs. Adding a Compose healthcheck would OVERRIDE the image directive
     # (Phase 7 RESEARCH Finding #8).
 
 volumes:
-  openwrtapstats-data:
-  openwrtapstats-logs:
+  apstatsforopenwrt-data:
+  apstatsforopenwrt-logs:

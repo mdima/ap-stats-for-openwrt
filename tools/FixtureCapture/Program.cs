@@ -1,8 +1,8 @@
 // Plan 02-04 Task 1 — FixtureCapture tool.
 //
-// Reads OpenWrtApStats.Tests/Fixtures/.live-credentials.local.env (gitignored, D-10 secret hygiene),
+// Reads ApStatsForOpenWrt.Tests/Fixtures/.live-credentials.local.env (gitignored, D-10 secret hygiene),
 // SSHes into a real OpenWRT AP via the production RealSshSession, runs the canonical command set,
-// and writes verbatim outputs to OpenWrtApStats.Tests/Fixtures/ssh-output/openwrt-{detected}/.
+// and writes verbatim outputs to ApStatsForOpenWrt.Tests/Fixtures/ssh-output/openwrt-{detected}/.
 //
 // Filename rule MUST match FakeSshSession.ToFilename exactly (W4 LOCK from Plan 02-02):
 //     command.Trim().Replace(' ', '-').Replace('/', '-') + ".txt"
@@ -13,13 +13,13 @@
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenWrtApStats.Data.Models;
-using OpenWrtApStats.Services.Polling;
-using OpenWrtApStats.Services.Polling.Ssh;
+using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Services.Polling;
+using ApStatsForOpenWrt.Services.Polling.Ssh;
 
 // ---------- locate credentials ----------
 var repoRoot = FindRepoRoot();
-var envPath = Path.Combine(repoRoot, "OpenWrtApStats.Tests", "Fixtures", ".live-credentials.local.env");
+var envPath = Path.Combine(repoRoot, "ApStatsForOpenWrt.Tests", "Fixtures", ".live-credentials.local.env");
 if (!File.Exists(envPath))
 {
     Console.Error.WriteLine($"FATAL: credentials file not found at {envPath}");
@@ -84,7 +84,7 @@ try
         return 1;
     }
 
-    var fixtureDir = Path.Combine(repoRoot, "OpenWrtApStats.Tests", "Fixtures", "ssh-output", $"openwrt-{version}");
+    var fixtureDir = Path.Combine(repoRoot, "ApStatsForOpenWrt.Tests", "Fixtures", "ssh-output", $"openwrt-{version}");
     Directory.CreateDirectory(fixtureDir);
     Console.WriteLine($"Writing to {fixtureDir}");
 
@@ -260,10 +260,10 @@ static string Require(Dictionary<string, string> env, string key)
 static string FindRepoRoot()
 {
     var dir = new DirectoryInfo(AppContext.BaseDirectory);
-    while (dir != null && !File.Exists(Path.Combine(dir.FullName, "OpenWrtApStats.sln")))
+    while (dir != null && !File.Exists(Path.Combine(dir.FullName, "ApStatsForOpenWrt.sln")))
         dir = dir.Parent;
     if (dir == null)
-        throw new InvalidOperationException("Could not locate repo root (no OpenWrtApStats.sln found in any ancestor).");
+        throw new InvalidOperationException("Could not locate repo root (no ApStatsForOpenWrt.sln found in any ancestor).");
     return dir.FullName;
 }
 

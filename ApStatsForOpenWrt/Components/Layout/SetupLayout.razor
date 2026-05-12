@@ -1,0 +1,41 @@
+@inherits LayoutComponentBase
+@using ApStatsForOpenWrt.Components.Shared
+
+@inject NavigationManager Nav
+
+<PageTitle>AP Stats for OpenWrt — Setup</PageTitle>
+
+<div class="login-page bg-body-secondary">
+    <div class="setup-wizard-box mx-auto" style="max-width: 720px; padding: 20px 0;">
+        <div class="login-logo mb-4">
+            <a href="/"><strong>OpenWRT</strong>-AP-Stats</a>
+        </div>
+
+        <WizardBreadcrumb CurrentStep="@CurrentStep" />
+
+        <div class="card">
+            <div class="card-body">
+                @Body
+            </div>
+        </div>
+
+        <div class="text-center mt-3">
+            @* Skip-for-now is rendered as a form POST so it works on both static-SSR (Step 1)
+               and InteractiveServer (Steps 2/3) without a circuit. D-08. *@
+            <form method="post" action="/setup/skip">
+                <AntiforgeryToken />
+                <button type="submit" class="btn btn-link text-body-secondary">Skip for now</button>
+            </form>
+            <small class="text-body-secondary">You can always finish setup later from the dashboard.</small>
+        </div>
+    </div>
+</div>
+
+@code {
+    // Route-detection approach: SetupLayout infers the breadcrumb step from the URI
+    // so InteractiveServer pages (Steps 2+3) don't need to pass a layout parameter.
+    // Step 1 = /setup/password (default), Step 2 = /setup/nodes, Step 3 = /setup/wlans.
+    private int CurrentStep => Nav.Uri.Contains("/setup/nodes", StringComparison.OrdinalIgnoreCase) ? 2
+                              : Nav.Uri.Contains("/setup/wlans", StringComparison.OrdinalIgnoreCase)  ? 3
+                              : 1;
+}

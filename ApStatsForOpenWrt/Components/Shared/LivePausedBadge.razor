@@ -1,0 +1,43 @@
+@using ApStatsForOpenWrt.Services.Gating
+@implements IDisposable
+
+@inject ICircuitGate Gate
+
+@* LivePausedBadge.razor — Phase 5 D-12 / DASH-08. UI-SPEC §LivePausedBadge (lines 576-602).
+   Phase 5 stub: renders "Live" unconditionally because the AlwaysLiveGate impl always
+   reports GateState.Live and never raises Changed. Phase 6 swaps in CircuitTrackerGate
+   (INF-06 / POLL-05 / POLL-06) — no markup change required.
+   Pattern 2: subscribe in OnInitialized, unsubscribe in Dispose; handler is `async Task`
+   (returning Task — NOT a fire-and-forget signature) and wraps mutation in await
+   InvokeAsync (Pitfall 7).
+   Revision-1 W3: ICircuitGate.Changed was declared as Func<GateState, Task>? in Plan 01,
+   so this handler is `async Task OnGateChanged(GateState)` — fully Task-returning. *@
+
+<span class="badge @(_state == GateState.Live ? "text-bg-success" : "text-bg-secondary") d-inline-flex align-items-center">
+    <i class="bi @(_state == GateState.Live ? "bi-circle-fill" : "bi-pause-fill") me-1" aria-hidden="true"></i>
+    @(_state == GateState.Live ? "Live" : "Paused")
+</span>
+
+@code {
+    private GateState _state;
+
+    protected override void OnInitialized()
+    {
+        _state = Gate.Current;
+        Gate.Changed += OnGateChanged;
+    }
+
+    private async Task OnGateChanged(GateState newState)
+    {
+        await InvokeAsync(() =>
+        {
+            _state = newState;
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        Gate.Changed -= OnGateChanged;
+    }
+}

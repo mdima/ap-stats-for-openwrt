@@ -21,7 +21,7 @@
 
 set -euo pipefail
 
-DIR="OpenWrtApStats.Tests/Fixtures/ssh-output/openwrt-23.05-SNAPSHOT"
+DIR="ApStatsForOpenWrt.Tests/Fixtures/ssh-output/openwrt-23.05-SNAPSHOT"
 
 if [[ ! -d "$DIR" ]]; then
   echo "FATAL: $DIR not found. Run from repo root." >&2

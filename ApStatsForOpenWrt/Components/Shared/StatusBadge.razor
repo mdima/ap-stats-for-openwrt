@@ -1,0 +1,30 @@
+@using ApStatsForOpenWrt.Data.Models
+
+@* StatusBadge.razor — UI-SPEC §Status Badges. Phase 3 ships Online/Offline; Phase 5 D-09
+   extends with a UI-only `Stale` variant rendered text-bg-warning. The `IsStale` parameter
+   is a render-time flag — D-08 explicitly does NOT extend the persisted Status enum.
+   Derivation rule (UI-SPEC lines 697-703):
+     - Status.Online or Status.Polling → render Online (Phase 3 lock preserved)
+     - IsStale=true (only meaningful when Status=Offline)        → render Stale (NEW Phase 5)
+     - else (Status.Offline, IsStale=false)                       → render Offline (Phase 3 lock) *@
+
+@if (Status == ApStatsForOpenWrt.Data.Models.Status.Online || Status == ApStatsForOpenWrt.Data.Models.Status.Polling)
+{
+    <span class="badge text-bg-success"><i class="bi bi-circle-fill me-1"></i>Online</span>
+}
+else if (IsStale)
+{
+    <span class="badge text-bg-warning"><i class="bi bi-exclamation-circle-fill me-1"></i>Stale</span>
+}
+else
+{
+    <span class="badge text-bg-secondary"><i class="bi bi-circle me-1"></i>Offline</span>
+}
+
+@code {
+    [Parameter, EditorRequired] public ApStatsForOpenWrt.Data.Models.Status Status { get; set; }
+    /// <summary>D-09 / D-08. UI-only flag — never persisted. Derived in the parent component
+    /// (Dashboard, Stations Detail) from CycleEndUtc + LastPollDate + PollingIntervalSeconds.
+    /// Stale only renders when Status == Offline; Online/Polling always render Online regardless.</summary>
+    [Parameter] public bool IsStale { get; set; }
+}

@@ -1,0 +1,85 @@
+@* App.razor — Blazor root host. D-06: render mode is per-request, conditional on the
+   matched endpoint. Pages with [ExcludeFromInteractiveRouting] (Login, Password) render
+   static SSR; everything else renders InteractiveServer. The unconditional InteractiveServer
+   pattern would let the client-side Router run on excluded pages and replace them with a
+   "Not found" fallback after pre-render. UI-SPEC §Vendoring step 7+8 locks the <link> order
+   (Source Sans 3 → Bootstrap Icons → AdminLTE) and <script> order (AdminLTE first, then
+   blazor.web.js). *@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+
+    @* Phase 8 anti-FOUC blocking script. Runs synchronously before stylesheets
+       load to apply data-bs-theme + sidebar-collapse class so the user does NOT
+       see a flash of the wrong theme or expanded sidebar at reload. Reads two
+       localStorage keys with the ap-stats-for-openwrt: prefix; falls back to
+       prefers-color-scheme for theme; defaults to expanded sidebar.
+       Must be inline (no src=) to avoid an extra HTTP roundtrip blocking paint. *@
+    <script>
+        (function () {
+            try {
+                var ls = window.localStorage;
+                var theme = ls && ls.getItem('ap-stats-for-openwrt:theme');
+                if (!theme) {
+                    var mql = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+                    theme = (mql && mql.matches) ? 'dark' : 'light';
+                }
+                if (theme === 'dark') {
+                    document.documentElement.setAttribute('data-bs-theme', 'dark');
+                }
+                var collapsed = ls && ls.getItem('ap-stats-for-openwrt:sidebar-collapsed');
+                if (collapsed === 'true') {
+                    document.body.classList.add('sidebar-collapse');
+                }
+            } catch (e) {
+                /* localStorage unavailable (private mode, file://, blocked) — silently
+                   fall back to the default theme + expanded sidebar. The Blazor circuit
+                   will re-attempt restoration via PreferencesService.OnAfterRenderAsync. */
+            }
+        })();
+    </script>
+
+    <link rel="stylesheet" href="/lib/source-sans-3/index.css" />
+    <link rel="stylesheet" href="/lib/bootstrap-icons/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="/lib/adminlte/css/adminlte.min.css" />
+    <link rel="stylesheet" href="/css/site.css" />
+    <link rel="stylesheet" href="app.css" />
+
+    @* Phase 8 favicon block — REQ-UI-71 + D-15 *@
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+
+    <HeadOutlet @rendermode="@PageRenderMode" />
+</head>
+<body class="layout-fixed sidebar-expand-lg bg-body-tertiary">
+    <Routes @rendermode="@PageRenderMode" />
+    @* Script load order is load-bearing:
+       1. bootstrap.bundle.min.js — AdminLTE 4 RC7 hard-deps on "bootstrap": "^5.3.8";
+          modals/dropdowns silently no-op without it (closed UAT 3.2 in 6bfdcb8).
+       2. adminlte.min.js — wires its own data-lte-toggle="*" handlers at DOMContentLoaded.
+       3. sidebar-toggle.js — project-owned document-delegated handler for the sidebar
+          collapse, using attribute `data-app-toggle="sidebar"` so AdminLTE doesn't bind
+          to the same node. Survives Blazor InteractiveServer remounts that AdminLTE's
+          one-shot listener does not. Debug: .planning/debug/resolved/sidebar-toggle-no-collapse.md
+       4. blazor.web.js — static-asset behaviour is in place before the Blazor runtime
+          takes over the circuit. *@
+    <script src="/lib/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <script src="/lib/adminlte/js/adminlte.min.js"></script>
+    <script src="/js/sidebar-toggle.js"></script>
+    <script type="module" src="/js/sidebar-state.js"></script>
+    <script src="/js/local-time.js"></script>
+    <script src="_framework/blazor.web.js"></script>
+    <div class="sidebar-overlay"></div>
+</body>
+</html>
+
+@code {
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    private IComponentRenderMode? PageRenderMode
+        => HttpContext.AcceptsInteractiveRouting() ? RenderMode.InteractiveServer : null;
+}
