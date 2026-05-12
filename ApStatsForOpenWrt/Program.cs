@@ -54,7 +54,7 @@ try
         .WriteTo.Console()
         .WriteTo.Async(a => a.File(
             formatter: new CompactJsonFormatter(),
-            path: $"{logsRoot}/openwrt-ap-stats-.log",       // D-13: no appsettings indirection; override via LOGS_ROOT env var
+            path: $"{logsRoot}/ap-stats-for-openwrt-.log",   // D-13: no appsettings indirection; override via LOGS_ROOT env var
             rollingInterval: RollingInterval.Day,
             retainedFileCountLimit: 7,                        // INF-05 — REQUIREMENTS-pinned 7 wins over STACK.md's 14
             shared: false)));
