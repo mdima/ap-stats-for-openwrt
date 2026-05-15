@@ -84,9 +84,13 @@ public sealed class ReverseDnsProbeTests
 
         var cmd = session.CommandsIssued[0];
         Assert.Contains("nslookup -timeout=1 -retry=1", cmd);
-        Assert.Contains("==192.168.1.42==", cmd);
-        Assert.Contains("==192.168.1.43==", cmd);
-        Assert.Contains("==192.168.1.44==", cmd);
+        // Quick task 260515-rds: sentinels are emitted at runtime by the post-wait
+        // `for ... cat` loop in the parent shell, NOT embedded as literals in the command
+        // text. IPs appear as both `nslookup ... <ip>` and `$TMPDIR/<ip>` per-IP redirect
+        // targets — assert the latter (uniquely identifies the new shape).
+        Assert.Contains("$TMPDIR/192.168.1.42", cmd);
+        Assert.Contains("$TMPDIR/192.168.1.43", cmd);
+        Assert.Contains("$TMPDIR/192.168.1.44", cmd);
         Assert.Contains("2>&1", cmd);
         Assert.Contains(" & ", cmd);     // Subshell backgrounding.
         Assert.Contains("wait", cmd);    // Chunk join terminator.
@@ -109,7 +113,9 @@ public sealed class ReverseDnsProbeTests
             "==192.168.1.44==\n;; connection timed out; no servers could be reached\n");
 
         var session = new FakeSshSession(fixtureDir);
-        session.CommandOverrides["==192.168.1.42=="] = "nslookup-batched-sentinel";
+        // Quick task 260515-rds: route by the new shape's per-IP redirect token instead of
+        // the pre-260515 in-command sentinel literal.
+        session.CommandOverrides["$TMPDIR/192.168.1.42"] = "nslookup-batched-sentinel";
 
         var probe = new ReverseDnsProbe(session, NullLogger<ReverseDnsProbe>.Instance);
         var result = await probe.PollAsync(MakeNode(),
@@ -123,11 +129,20 @@ public sealed class ReverseDnsProbeTests
     }
 
     /// <summary>
-    /// Test 3 (260511-lct): Background nslookup processes can interleave — output for IP B
-    /// can appear before output for IP A in stdout. The parenthesised subshell
-    /// <c>(echo ==$ip==; nslookup ... 2>&amp;1) &amp;</c> keeps the sentinel+output pair atomic
-    /// per IP, so sentinel-based attribution remains correct even when block order in
-    /// stdout differs from input-IP order.
+    /// Test 3 (260511-lct, docstring rewritten by 260515-rds): Per-IP sentinel blocks can
+    /// emerge in any order in the parser's input stream. The parser MUST attribute each block
+    /// to its OWN sentinel regardless of block ordering.
+    ///
+    /// Historical note: this test's original xmldoc claimed that the parenthesised subshell
+    /// <c>(echo ==$ip==; nslookup ... 2>&amp;1) &amp;</c> kept the sentinel+output pair atomic
+    /// per IP. That claim was UNSOUND — parens give sequential ordering only within ONE
+    /// subshell; concurrent subshells share the same stdout fd over SSH, and BusyBox
+    /// <c>nslookup</c>'s multi-line writes interleave at line granularity under PIPE_BUF.
+    /// Quick task 260515-rds (2026-05-15) replaced the in-subshell echo shape with per-IP
+    /// temp file redirection plus a sequential post-<c>wait</c> <c>for ... cat</c> emission
+    /// loop — that is the actual atomicity mechanism. See
+    /// <c>ReverseDnsProbe.BuildBatchedNslookupCommand</c> and the new test
+    /// <c>PollAsync_CommandShape_UsesPerIpFileRedirection_NotInlineSentinelEcho</c>.
     /// </summary>
     [Fact]
     public async Task PollAsync_BatchedSentinelParsing_OutOfOrderInterleavedOutput()
@@ -142,7 +157,7 @@ public sealed class ReverseDnsProbeTests
             "==192.168.1.44==\n** server can't find 192.168.1.44: NXDOMAIN\n");
 
         var session = new FakeSshSession(fixtureDir);
-        session.CommandOverrides["==192.168.1.42=="] = "nslookup-batched-outoforder";
+        session.CommandOverrides["$TMPDIR/192.168.1.42"] = "nslookup-batched-outoforder";
 
         var probe = new ReverseDnsProbe(session, NullLogger<ReverseDnsProbe>.Instance);
         var result = await probe.PollAsync(MakeNode(),
@@ -173,7 +188,7 @@ public sealed class ReverseDnsProbeTests
             "==192.168.1.44==\nName:      host44.lan\nAddress 1: 192.168.1.44 host44.lan\n");
 
         var session = new FakeSshSession(fixtureDir);
-        session.CommandOverrides["==192.168.1.42=="] = "nslookup-batched-missing";
+        session.CommandOverrides["$TMPDIR/192.168.1.42"] = "nslookup-batched-missing";
 
         var probe = new ReverseDnsProbe(session, NullLogger<ReverseDnsProbe>.Instance);
         var result = await probe.PollAsync(MakeNode(),
@@ -256,7 +271,7 @@ public sealed class ReverseDnsProbeTests
             "==192.168.1.44==\n** server can't find 192.168.1.44: NXDOMAIN\n");
 
         var session = new FakeSshSession(fixtureDir);
-        session.CommandOverrides["==192.168.1.42=="] = "nslookup-batched-logline";
+        session.CommandOverrides["$TMPDIR/192.168.1.42"] = "nslookup-batched-logline";
 
         var logger = new ListLogger();
         var probe = new ReverseDnsProbe(session, logger);
@@ -292,6 +307,82 @@ public sealed class ReverseDnsProbeTests
         var negative = OpenWrtOutputParser.ParseNslookupOutput(
             "** server can't find 192.168.99.99: NXDOMAIN\n", NullLogger.Instance);
         Assert.Null(negative);
+    }
+
+    /// <summary>
+    /// Test 9 (260515-rds, 2026-05-15): The AP-side batched-nslookup command MUST NOT use the
+    /// pre-260515 in-subshell echo shape <c>(echo "==$ip=="; nslookup ... 2>&amp;1) &amp;</c>.
+    /// That shape produced concurrent multi-line writes to one shared SSH stdout fd; under
+    /// real-world load (~30+ stations per cycle), BusyBox <c>nslookup</c> answers from
+    /// different IPs interleaved at line granularity in the multiplexed pipe and the parser's
+    /// sentinel-slicing attributed each answer block to whichever <c>==&lt;ip&gt;==</c>
+    /// sentinel happened to land just before it — not to the IP that actually produced it.
+    ///
+    /// Locked diagnosis: <c>.planning/debug/resolved/reverse-dns-regression.md</c> §E7 + §E8.
+    ///
+    /// The fix (Option A) replaces the in-subshell echo with per-IP temp file redirection:
+    /// each backgrounded <c>nslookup</c> writes ONLY to its own path under <c>$TMPDIR/&lt;ip&gt;</c>,
+    /// then after all chunks <c>wait</c>, a single sequential <c>for f in $TMPDIR/*; do echo "==..."; cat "$f"; done</c>
+    /// loop emits sentinels + bodies non-interleaved. Atomicity by file path; parser unchanged.
+    ///
+    /// This test pins the structural contract: the captured command (a) does NOT contain the
+    /// old in-subshell sentinel-echo substring, and (b) DOES contain per-IP file redirection
+    /// for each requested IP plus the sequential <c>for</c>/<c>cat</c> emission loop.
+    /// </summary>
+    [Fact]
+    public async Task PollAsync_CommandShape_UsesPerIpFileRedirection_NotInlineSentinelEcho()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var fixtureDir = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT");
+
+        // Any well-shaped batched fixture suffices — this test is about the command shape,
+        // not the parsed result. Reuse the existing 3-IP block-sequential fixture.
+        File.WriteAllText(Path.Combine(fixtureDir, "nslookup-batched-cmdshape.txt"),
+            "==192.168.1.42==\nName:      host42.lan\nAddress 1: 192.168.1.42 host42.lan\n" +
+            "==192.168.1.43==\nName:      host43.lan\nAddress 1: 192.168.1.43 host43.lan\n" +
+            "==192.168.1.44==\nName:      host44.lan\nAddress 1: 192.168.1.44 host44.lan\n");
+
+        var session = new FakeSshSession(fixtureDir);
+        session.CommandOverrides["nslookup -timeout=1 -retry=1"] = "nslookup-batched-cmdshape";
+
+        var probe = new ReverseDnsProbe(session, NullLogger<ReverseDnsProbe>.Instance);
+        var ips = new[] { "192.168.1.42", "192.168.1.43", "192.168.1.44" };
+        var result = await probe.PollAsync(MakeNode(), ips, ct);
+
+        Assert.IsType<ReverseDnsProbeResult.Success>(result);
+        Assert.Single(session.CommandsIssued);
+        var cmd = session.CommandsIssued[0];
+
+        // (a) Negative — the pre-260515 in-subshell sentinel-echo substring is the SIGNATURE
+        //     of the bug: it placed echo + nslookup in the SAME subshell, both writing to the
+        //     shared SSH stdout. Its absence is the load-bearing structural change.
+        Assert.DoesNotContain("(echo \"==", cmd);
+
+        // (b) Positive — each requested IP must appear as a per-IP redirect target. The fix
+        //     places `nslookup ... <ip> > "<somepath/...<ip>...>"` so that subshell stdout
+        //     never enters the shared pipe. We assert each IP's literal appears AFTER a `>`
+        //     redirect in the captured command.
+        foreach (var ip in ips)
+        {
+            Assert.Matches(
+                new System.Text.RegularExpressions.Regex(
+                    @">\s*""?[^""]*?" + System.Text.RegularExpressions.Regex.Escape(ip) + @"""?",
+                    System.Text.RegularExpressions.RegexOptions.CultureInvariant),
+                cmd);
+        }
+
+        // (c) Sequential emission post-wait: the `for ... cat` loop emits sentinels + bodies
+        //     after every backgrounded nslookup has finished writing to its own file. This
+        //     guarantees the parser sees non-interleaved blocks identical in shape to the
+        //     fixtures already covered by Tests 2/3/4/5.
+        Assert.Contains("for ", cmd);
+        Assert.Contains("cat ", cmd);
+
+        // (d) Existing invariants preserved: 32× concurrency (& backgrounding) and `wait` join
+        //     terminator remain in place. Without these, the fix would forfeit the 260511-lct
+        //     batching speedup.
+        Assert.Contains(" & ", cmd);
+        Assert.Contains("wait", cmd);
     }
 
     // ---- Cross-version theory: batched path, fixture-backed ----

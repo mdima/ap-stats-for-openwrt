@@ -215,17 +215,18 @@ public sealed class Phase10AcceptanceSignalTests(SqliteInMemoryFixture fixture, 
 
         public Task<string> RunCommandAsync(string command, CancellationToken ct)
         {
-            // Quick task 260511-lct (2026-05-11): ReverseDnsProbe now issues ONE batched shell
-            // command of the shape `(echo "==<ip>=="; nslookup -timeout=1 -retry=1 <ip> 2>&1) & ...`
-            // per probe invocation. Detect by the literal `nslookup -timeout=1 -retry=1` token
-            // (present once per IP in the batched body), extract IPs from the `==<ip>==`
-            // sentinels in the command body, and synthesize the sentinel-delimited stdout that
-            // ParseBatchedNslookupOutput expects.
+            // Quick task 260511-lct (2026-05-11) introduced the batched shell command. Quick
+            // task 260515-rds (2026-05-15) reshaped it to per-IP file capture
+            // (`( nslookup ... <ip> > "$TMPDIR/<ip>" 2>&1 ) &` + post-wait `for ... cat`
+            // emission) — sentinels are no longer in the command text. Extract IPs from the
+            // per-IP `nslookup -timeout=1 -retry=1 <ip>` invocations and synthesize the
+            // sentinel-delimited stdout that the parent shell's `for ... cat` loop would emit.
+            // The parser's expected input shape is unchanged.
             if (command.Contains("nslookup -timeout=1 -retry=1", StringComparison.Ordinal))
             {
                 var sb = new System.Text.StringBuilder();
                 var matches = System.Text.RegularExpressions.Regex.Matches(
-                    command, @"==(?<ip>[\d.]+)==");
+                    command, @"nslookup -timeout=1 -retry=1 (?<ip>\d{1,3}(?:\.\d{1,3}){3})\b");
                 foreach (System.Text.RegularExpressions.Match m in matches)
                 {
                     var ip = m.Groups["ip"].Value;

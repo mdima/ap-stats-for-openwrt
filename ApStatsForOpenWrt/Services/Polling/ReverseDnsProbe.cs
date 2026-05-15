@@ -127,34 +127,76 @@ public sealed class ReverseDnsProbe(ISshSession session, ILogger<ReverseDnsProbe
     }
 
     /// <summary>
-    /// Quick task 260511-lct: build the AP-side batched-loop shell command. Chunks the IPs
-    /// in groups of <see cref="ChunkSize"/> (32). Each chunk is a sequence of backgrounded
-    /// subshells <c>(echo "==&lt;ip&gt;=="; nslookup -timeout=1 -retry=1 &lt;ip&gt; 2&gt;&amp;1) &amp;</c>
-    /// terminated by <c>wait</c>; chunks are joined by <c>;</c>. ONE SSH command total.
-    /// POSIX BusyBox ash/hush safe — no bash-isms. The parenthesised-subshell shape is REQUIRED
-    /// to keep the sentinel-echo atomic with the nslookup output against background-process
-    /// interleaving. IPs are interpolated verbatim — input is validated upstream (orchestrator
-    /// only passes IPs sourced from station IPAddress strings parsed by the iwinfo/arping flow).
+    /// Build the AP-side batched-loop shell command. Chunks the IPs in groups of
+    /// <see cref="ChunkSize"/> (32). Each chunk is a sequence of backgrounded subshells
+    /// <c>( nslookup -timeout=1 -retry=1 &lt;ip&gt; &gt; "$TMPDIR/&lt;ip&gt;" 2&gt;&amp;1 ) &amp;</c>
+    /// terminated by <c>wait</c>; chunks are joined by <c>;</c>. After ALL chunks, a single
+    /// sequential <c>for f in "$TMPDIR"/*; do echo "==$(basename "$f")=="; cat "$f"; done</c>
+    /// loop emits sentinels + bodies non-interleaved. ONE SSH command total. POSIX BusyBox
+    /// ash/hush safe — no bash-isms. IPs are interpolated verbatim — input is validated
+    /// upstream (orchestrator only passes IPs sourced from station IPAddress strings parsed
+    /// by the iwinfo/arping flow).
+    ///
+    /// History — quick task 260515-rds (2026-05-15) replaced the pre-260515 in-subshell
+    /// echo shape <c>(echo "==&lt;ip&gt;=="; nslookup ... 2>&amp;1) &amp;</c>. That earlier
+    /// shape claimed atomicity-via-parens, but parens give sequential ordering only WITHIN
+    /// one subshell; concurrent subshells inherited a shared stdout fd back over SSH, and
+    /// BusyBox <c>nslookup</c>'s multi-line writes interleaved at line granularity in the
+    /// multiplexed pipe (kernel pipe atomicity is bounded by <c>PIPE_BUF</c> ~4096 B per
+    /// single <c>write(2)</c>; nslookup answers exceed that across multiple writes). The
+    /// parser's sentinel-slicing then attributed each answer block to whichever
+    /// <c>==&lt;ip&gt;==</c> sentinel happened to land just before it — not to the IP that
+    /// produced it. Operator audit on 2026-05-15 exposed 5+ ground-truth mismatches plus
+    /// 9 FQDNs duplicated across 2-4 rows. See
+    /// <c>.planning/debug/resolved/reverse-dns-regression.md</c> §E7 + §E8.
+    ///
+    /// The new shape (Option A in the debug session's §Fix direction): each backgrounded
+    /// <c>nslookup</c> writes ONLY to its own <c>$TMPDIR/&lt;ip&gt;</c> path; isolation is
+    /// by file path, not by stdout ordering. Cross-subshell stdout interleaving is no
+    /// longer possible by construction. The post-<c>wait</c> <c>for ... cat</c> loop runs
+    /// sequentially in the parent shell, so the parser sees clean non-interleaved sentinel
+    /// blocks identical in shape to the test fixtures already covered by Tests 2/3/4/5 in
+    /// <c>ReverseDnsProbeTests</c>. Parser (<c>OpenWrtOutputParser.ParseBatchedNslookupOutput</c>)
+    /// is intentionally unchanged this quick task.
+    ///
+    /// <c>mktemp -d</c> is a BusyBox applet on OpenWRT 23.05+ (CONFIG_MKTEMP default).
+    /// The <c>|| TMPDIR=/tmp/rdns-$$</c> fallback covers images without it; the parent
+    /// shell PID (<c>$$</c>) gives multi-AP / multi-cycle isolation.
     /// </summary>
     private static string BuildBatchedNslookupCommand(IReadOnlyList<string> ipList)
     {
         var sb = new StringBuilder();
+
+        // Per-IP capture root. `mktemp -d` is the canonical BusyBox path; the OR-fallback
+        // handles images without it. Quoting `"$TMPDIR"` everywhere downstream tolerates
+        // any whitespace inserted by the shell into the path.
+        sb.Append("TMPDIR=$(mktemp -d 2>/dev/null) || TMPDIR=/tmp/rdns-$$; mkdir -p \"$TMPDIR\"; ");
+
         for (var i = 0; i < ipList.Count; i += ChunkSize)
         {
-            if (i > 0) sb.Append("; ");
             var end = Math.Min(i + ChunkSize, ipList.Count);
             for (var j = i; j < end; j++)
             {
                 if (j > i) sb.Append(' ');
                 var ip = ipList[j];
-                sb.Append("(echo \"==");
+                // Per-IP file redirect — each backgrounded subshell's stdout never enters
+                // the shared SSH pipe. Atomicity is by path, not by ordering.
+                sb.Append("( nslookup -timeout=1 -retry=1 ");
                 sb.Append(ip);
-                sb.Append("==\"; nslookup -timeout=1 -retry=1 ");
+                sb.Append(" > \"$TMPDIR/");
                 sb.Append(ip);
-                sb.Append(" 2>&1) &");
+                sb.Append("\" 2>&1 ) &");
             }
-            sb.Append(" wait");
+            sb.Append(" wait; ");
         }
+
+        // Sequential post-wait emission — sentinels + bodies are written to the SSH pipe
+        // by ONE shell process (the parent), iteratively, so the parser sees clean blocks.
+        // `basename "$f"` recovers the IP from the path. `rm -rf "$TMPDIR"` is best-effort
+        // (the OS reaps /tmp on reboot anyway).
+        sb.Append("for f in \"$TMPDIR\"/*; do echo \"==$(basename \"$f\")==\"; cat \"$f\"; done; ");
+        sb.Append("rm -rf \"$TMPDIR\"");
+
         return sb.ToString();
     }
 

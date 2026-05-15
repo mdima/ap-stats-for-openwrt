@@ -490,7 +490,11 @@ public sealed class PollOrchestratorEnrichmentTests(SqliteInMemoryFixture fixtur
         // Empty first pass + non-empty second pass → exactly ONE batched-nslookup RunCommandAsync.
         // (PollAsync against empty list early-returns without an SSH call — see ReverseDnsProbe.cs:36-40.)
         Assert.Single(session.CommandsIssued);
-        Assert.Contains("==192.168.42.10==", session.CommandsIssued[0]);
+        // Quick task 260515-rds: assert the new shape's per-IP redirect token. Pre-260515
+        // the in-command sentinel `==192.168.42.10==` was the locator; now sentinels are
+        // emitted at runtime by `for ... cat` and only the per-IP redirect target appears
+        // in the command text.
+        Assert.Contains("$TMPDIR/192.168.42.10", session.CommandsIssued[0]);
     }
 
     [Fact]

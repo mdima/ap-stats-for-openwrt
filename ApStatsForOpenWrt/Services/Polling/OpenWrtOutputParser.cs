@@ -453,10 +453,15 @@ public static class OpenWrtOutputParser
     /// Quick task 260511-lct (2026-05-11): parse the batched <c>nslookup</c> stdout produced by
     /// <see cref="ReverseDnsProbe"/>'s single-SSH-command shell loop → Dictionary&lt;IP, FQDN?&gt;.
     /// Each per-IP block in the stream is delimited by a sentinel line of the form
-    /// <c>==&lt;ipv4&gt;==</c> emitted by the AP-side subshell BEFORE its nslookup invocation
-    /// runs (the parenthesised subshell <c>(echo ==$ip==; nslookup ... 2>&amp;1) &amp;</c> shape
-    /// keeps the sentinel-echo and the nslookup output atomic against background-process
-    /// interleaving — see ReverseDnsProbe.BuildBatchedNslookupCommand).
+    /// <c>==&lt;ipv4&gt;==</c>. As of quick task 260515-rds (2026-05-15), the sentinels are
+    /// emitted by a sequential post-<c>wait</c> <c>for f in $TMPDIR/*; do echo "==..."; cat $f; done</c>
+    /// loop in the parent AP shell — see <c>ReverseDnsProbe.BuildBatchedNslookupCommand</c>.
+    /// That sequential emission, combined with per-IP file redirection of each concurrent
+    /// <c>nslookup</c>, guarantees the parser sees non-interleaved sentinel-delimited blocks.
+    /// Pre-260515 the command shape used an in-subshell echo + nslookup pair that DID NOT
+    /// guarantee atomicity across concurrent subshells — see the resolved debug session at
+    /// <c>.planning/debug/resolved/reverse-dns-regression.md</c> §E7 + §E8 for the locked
+    /// root-cause analysis.
     ///
     /// Composition: delegates each sentinel-delimited block body to the existing single-IP
     /// <see cref="ParseNslookupOutput"/> — that preserves FQDN normalization (lowercase,
@@ -501,10 +506,12 @@ public static class OpenWrtOutputParser
         return result;
     }
 
-    // Quick task 260511-lct: sentinel line matcher used by ParseBatchedNslookupOutput. The
-    // sentinel shape is `==<ipv4>==` on its own line; the parenthesised subshell in the AP-side
-    // command builder guarantees the echo+nslookup output pair is atomic against background
-    // interleaving, so the match-then-substring slicing here is sufficient for attribution.
+    // Sentinel line matcher used by ParseBatchedNslookupOutput. The sentinel shape is
+    // `==<ipv4>==` on its own line. As of quick task 260515-rds (2026-05-15), the sequential
+    // post-wait `for f in $TMPDIR/*; do echo "==..."; cat $f; done` emission loop in the
+    // AP-side command builder guarantees the parser sees non-interleaved blocks, so the
+    // match-then-substring slicing here is sufficient for attribution. See
+    // ReverseDnsProbe.BuildBatchedNslookupCommand for the command-shape contract.
     private static readonly System.Text.RegularExpressions.Regex BatchedNslookupSentinelRegex =
         new(@"^==(?<ip>[\d.]+)==\s*$",
             System.Text.RegularExpressions.RegexOptions.Compiled
