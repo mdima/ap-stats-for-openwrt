@@ -1147,6 +1147,122 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
         Assert.Null(sy.WiFiNetworkId);
     }
 
+    // ── v0.11 Plan 14-01 / POLL-01 — CycleStarted event placement contract (CONTEXT 14 §D-02 / §D-03) ──
+    // The orchestrator MUST raise CycleStarted at the TOP of RunCycleAsync, BEFORE the BeginTransactionAsync
+    // try{} body, so that:
+    //   (a) on the happy path, CycleStarted fires before Cycled (event-order contract); and
+    //   (b) on a failure path that rolls back the coordinator transaction, CycleStarted still fires
+    //       (so PollCountdown holds at "Polling…" until the next successful Cycled — D-03 passive failure
+    //       signal). The orchestrator's existing try/catch/finally is NOT extended (D-03).
+
+    [Fact]
+    public async Task CycleStarted_FiresBefore_Cycled_OnHappyPath()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (nodeId, _, bssid) = await SeedNodeWithOneNetworkAsync(ct);
+
+        var notifier = new PollNotifier();
+        var events = new List<string>();
+        var cycleStartedCount = 0;
+        var cycledCount = 0;
+        notifier.CycleStarted += () =>
+        {
+            events.Add("CycleStarted");
+            cycleStartedCount++;
+            return Task.CompletedTask;
+        };
+        notifier.Cycled += _ =>
+        {
+            events.Add("Cycled");
+            cycledCount++;
+            return Task.CompletedTask;
+        };
+
+        Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync = (n, _) =>
+        {
+            // IClassFixture-shared DB — only this test's node should produce live data.
+            if (n.Id != nodeId)
+                return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Failed(n.Id, "not-this-test"));
+            var net = new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssid, SSID = "Net" };
+            return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Success(
+                NodeId: n.Id,
+                Networks: new[] { net },
+                Stations: Array.Empty<WLANStation>(),
+                NewlyTrustedFingerprint: null));
+        };
+
+        var dpFactory = new TestDbContextFactory(_fixture.Options);
+        var orch = new PollOrchestrator(
+            dpFactory,
+            new NodeRepo(dpFactory),
+            new NetworkRepo(dpFactory),
+            new StationRepo(dpFactory),
+            probeAsync,
+            notifier,
+            NullLogger<PollOrchestrator>.Instance,
+            new StubSettings(30),
+            (_, _, _, _) => Task.FromResult<EnrichmentDelta?>(null),
+            TimeProvider.System);
+
+        await orch.RunCycleAsync(ct);
+
+        // CycleStarted must precede Cycled in the captured order list. The shared-fixture DB
+        // means other tests' nodes also pass through this same orchestrator instance's cycle,
+        // but only THIS orchestrator instance's notifier is wired — and there is exactly ONE
+        // cycle per RunCycleAsync invocation, so the event-count is 1 for each.
+        Assert.Equal(new[] { "CycleStarted", "Cycled" }, events);
+        Assert.Equal(1, cycleStartedCount);
+        Assert.Equal(1, cycledCount);
+    }
+
+    [Fact]
+    public async Task CycleStarted_FiresEvenWhenCycleFails_BeforeRollback_NoCycledRaised()
+    {
+        // D-03 placement contract: CycleStarted fires at the TOP of RunCycleAsync, BEFORE
+        // BeginTransactionAsync. We force a rollback path by injecting a ThrowingNetworkRepo
+        // whose UpsertManyAsync throws — the orchestrator's outer catch then RollbackAsync's
+        // and rethrows. CycleStarted has already fired by the time the exception propagates;
+        // Cycled never fires (the raise sits after tx.CommitAsync, inside the try{} block).
+        var ct = TestContext.Current.CancellationToken;
+        var (nodeId, _, bssid) = await SeedNodeWithOneNetworkAsync(ct);
+
+        var notifier = new PollNotifier();
+        var cycleStartedCount = 0;
+        var cycledCount = 0;
+        notifier.CycleStarted += () => { cycleStartedCount++; return Task.CompletedTask; };
+        notifier.Cycled       += _ => { cycledCount++; return Task.CompletedTask; };
+
+        Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync = (n, _) =>
+        {
+            if (n.Id != nodeId)
+                return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Failed(n.Id, "not-this-test"));
+            var net = new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssid, SSID = "Net" };
+            return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Success(
+                NodeId: n.Id,
+                Networks: new[] { net },
+                Stations: Array.Empty<WLANStation>(),
+                NewlyTrustedFingerprint: null));
+        };
+
+        var dpFactory = new TestDbContextFactory(_fixture.Options);
+        var orch = new PollOrchestrator(
+            dpFactory,
+            new NodeRepo(dpFactory),
+            new ThrowingNetworkRepo(),     // forces InvalidOperationException out of UpsertManyAsync
+            new StationRepo(dpFactory),
+            probeAsync,
+            notifier,
+            NullLogger<PollOrchestrator>.Instance,
+            new StubSettings(30),
+            (_, _, _, _) => Task.FromResult<EnrichmentDelta?>(null),
+            TimeProvider.System);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => orch.RunCycleAsync(ct));
+
+        Assert.Equal(1, cycleStartedCount);
+        Assert.Equal(0, cycledCount);
+    }
+
     /// <summary>Minimal IAppSettingsService stub for orchestrator tests. Only PollingIntervalSeconds is exercised.</summary>
     private sealed class StubSettings(int pollingIntervalSeconds) : IAppSettingsService
     {

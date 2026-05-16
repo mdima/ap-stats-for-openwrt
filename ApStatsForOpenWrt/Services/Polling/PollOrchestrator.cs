@@ -61,6 +61,15 @@ public sealed class PollOrchestrator(
 
     public async Task RunCycleAsync(CancellationToken ct)
     {
+        // 14-01 / CONTEXT 14 §D-02: fire CycleStarted at the TOP of the cycle — BEFORE BeginTransactionAsync
+        // and BEFORE any await that might throw. PollCountdown.razor reads this and holds the badge text at
+        // "Polling…" (D-01) until the next successful tx.CommitAsync raises Cycled (line ~365, UNCHANGED).
+        // CONTEXT 14 §D-03: try/catch/finally is NOT extended; a thrown exception below leaves the badge
+        // held until the next successful Cycled — operator-authorised passive failure signal.
+        // Plan 14-02's "Run now" button disable-state (CONTEXT 14 §D-06) also consumes this event for the
+        // cycle-in-flight OR condition.
+        await notifier.RaiseCycleStartedAsync();
+
         var nodes = await nodeRepo.GetAllAsync(ct);
         if (nodes.Count == 0)
         {
