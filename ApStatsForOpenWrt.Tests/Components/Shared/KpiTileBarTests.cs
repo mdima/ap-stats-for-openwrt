@@ -185,8 +185,8 @@ public sealed class KpiTileBarTests
         using var _disp = ctx;
         var cut = ctx.Render<KpiTileBar>(p => p.Add(b => b.Rows, new List<DashboardKpiRow>()));
 
-        // 4 wrappers (one per tile), each col-md-3 col-sm-6 col-12 per 08-UI-SPEC §Responsive.
-        var wrappers = cut.FindAll("div.col-md-3.col-sm-6.col-12");
+        // 4 wrappers (one per tile), each col-md-3 col-sm-6 col-6 per 08-UI-SPEC §Responsive.
+        var wrappers = cut.FindAll("div.col-md-3.col-sm-6.col-6");
         Assert.Equal(4, wrappers.Count);
 
         // The role/aria-label group anchor for the bar.
