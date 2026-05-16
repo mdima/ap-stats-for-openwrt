@@ -256,6 +256,20 @@ public sealed class NodeAdminServiceTests
             async () => await svc.DisconnectStationAsync(node, "AA:BB:CC:DD:EE:FF", "wlan0", cts.Token));
     }
 
+    [Fact]
+    public async Task DisconnectStationAsync_IwNoSuchDevice_ReturnsNotSupported()
+    {
+        // 260516-iwo — `iw dev <iface> station del <mac>` emits `command failed: No such device (-19)`
+        // (errno ENODEV) when the netdev doesn't exist or isn't in AP mode. The operator-relevant
+        // signal: the iface name stored in WiFiNetwork.IfaceName (Phase 9 / D-10) doesn't match the
+        // kernel netdev on this AP. D-12 case 2 disposition: "Disconnect not supported on this AP
+        // -- wireless interface unavailable" (banner text updated by this quick task to drop the
+        // now-obsolete 'ubus/hostapd missing' suffix).
+        var (node, svc, _) = Setup((252, "", "command failed: No such device (-19)"));
+        var r = await svc.DisconnectStationAsync(node, "AA:BB:CC:DD:EE:FF", "wlan0", CancellationToken.None);
+        Assert.IsType<DisconnectResult.NotSupported>(r);
+    }
+
     // ── 260516-iwf — ubus -> iw fallback cascade (CONTEXT 14 §D-08 amended 2026-05-16) ──
     //
     // Operator's v0.11 / Phase 14 QUAL-02 LIVE-UAT surface (d) walk demonstrated that
