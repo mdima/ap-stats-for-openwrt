@@ -132,6 +132,37 @@ public sealed class NodeAdminServiceTests
     }
 
     [Fact]
+    public async Task DisconnectStationAsync_UbusNotFound_ReturnsNotSupported()
+    {
+        // 260516-ncf — ubus emits the bare UBUS_STATUS_NOT_FOUND textual form
+        // ("Command failed: Not found", capital N, no "Object" prefix) when the
+        // hostapd.<iface> object doesn't exist on the AP. This is what surfaced
+        // verbatim in the v0.11 QUAL-02 LIVE-UAT walk on 2026-05-16:
+        //   [11:57:57 WRN] Disconnect failed (unknown): NodeId=1 Iface=wlan0
+        //   StationMac=C8:2B:96:E5:24:0B Raw=Command failed: Not found
+        // The classifier must map this to NotSupported (D-12 case 2 -- "Disconnect
+        // not supported on this AP -- ubus/hostapd missing"), not the catch-all
+        // UnknownError ("Disconnect failed -- check logs"). Pre-fix code lacked
+        // the "Command failed: Not found" substring so it fell through.
+        var (node, svc, _) = Setup((4, "", "Command failed: Not found"));
+        var r = await svc.DisconnectStationAsync(node, "AA:BB:CC:DD:EE:FF", "wlan0", CancellationToken.None);
+        Assert.IsType<DisconnectResult.NotSupported>(r);
+    }
+
+    [Fact]
+    public async Task DisconnectStationAsync_UbusMethodNotFound_ReturnsNotSupported()
+    {
+        // 260516-ncf — ubus emits UBUS_STATUS_METHOD_NOT_FOUND ("Command failed:
+        // Method not found") when the hostapd.<iface> object IS registered but
+        // the del_client method is missing (older hostapd builds; non-AP modes).
+        // Same operator intent as UBUS_STATUS_NOT_FOUND -- the disconnect path
+        // isn't reachable -- so D-12 case 2 is the correct disposition.
+        var (node, svc, _) = Setup((4, "", "Command failed: Method not found"));
+        var r = await svc.DisconnectStationAsync(node, "AA:BB:CC:DD:EE:FF", "wlan0", CancellationToken.None);
+        Assert.IsType<DisconnectResult.NotSupported>(r);
+    }
+
+    [Fact]
     public async Task DisconnectStationAsync_CommandNotFound_ReturnsNotSupported()
     {
         // /bin/sh emits "ubus: command not found" on systems without ubus installed. D-12 case 2.
