@@ -78,8 +78,17 @@ public sealed class NodeAdminService(
 
             // Exit-code + stderr-pattern mapping (D-12):
             //   - exit 0 -> Success.
-            //   - stderr contains "Command not found" / "Object not found"
-            //     OR ("hostapd." AND "not found") -> NotSupported.
+            //   - stderr matches any of the following -> NotSupported (D-12 case 2):
+            //       * "Command not found"                  -- /bin/sh-emitted: ubus binary absent
+            //       * "Object not found"                   -- older ubus variant: "Command failed: Object not found"
+            //       * "Command failed: Not found"          -- UBUS_STATUS_NOT_FOUND verbatim (the hostapd.<iface>
+            //                                                 object is not registered; surfaced verbatim during
+            //                                                 v0.11 QUAL-02 LIVE-UAT surface (d), 2026-05-16) [260516-ncf]
+            //       * "Command failed: Method not found"   -- UBUS_STATUS_METHOD_NOT_FOUND: hostapd registered but
+            //                                                 del_client method missing (older hostapd builds /
+            //                                                 non-AP modes) [260516-ncf]
+            //       * "hostapd." AND "not found"           -- defensive co-occurrence catch-all for messages that
+            //                                                 explicitly cite the hostapd ubus object by name
             //   - stderr contains "no such station" / "station not found" -> NoSuchStation.
             //   - any other non-zero -> UnknownError(stderr).
             if (result.ExitCode == 0)
@@ -93,6 +102,8 @@ public sealed class NodeAdminService(
 
             if (raw.Contains("Command not found", StringComparison.OrdinalIgnoreCase)
              || raw.Contains("Object not found", StringComparison.OrdinalIgnoreCase)
+             || raw.Contains("Command failed: Not found", StringComparison.OrdinalIgnoreCase)         // 260516-ncf: UBUS_STATUS_NOT_FOUND
+             || raw.Contains("Command failed: Method not found", StringComparison.OrdinalIgnoreCase)  // 260516-ncf: UBUS_STATUS_METHOD_NOT_FOUND
              || (raw.Contains("hostapd.", StringComparison.OrdinalIgnoreCase)
                  && raw.Contains("not found", StringComparison.OrdinalIgnoreCase)))
             {
