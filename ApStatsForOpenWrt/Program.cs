@@ -87,6 +87,15 @@ try
     builder.Services.AddTransient<IAppSettingsRepo, AppSettingsRepo>();
     builder.Services.AddSingleton<IAppSettingsService, AppSettingsService>();
 
+    // v0.11 ENRICH-01 / CONTEXT 14 §D-05 — one-shot force-enrichment flag for the
+    // "Run now" button on Settings/Index.razor. Singleton-lifetime; backed by a single
+    // int + Interlocked CAS (lock-free). Consumed once-per-cycle by PollOrchestrator at
+    // the entry to the Phase 10 enrichment block. PollOrchestrator constructor now takes
+    // IForceEnrichmentService — registered HERE so the DI graph resolves the new ctor param
+    // without per-test boilerplate. Plan 14-02.
+    builder.Services.AddSingleton<ApStatsForOpenWrt.Services.Enrichment.IForceEnrichmentService,
+                                  ApStatsForOpenWrt.Services.Enrichment.ForceEnrichmentService>();
+
     // 5b. Polling subsystem (Phase 2). PollOrchestrator is the PER-04 carve-out #3 — see ArchitectureTests.
     //     ISshSession is transient (one fresh session per poll, per Pitfall 5).
     //     NodePoller is constructed per-cycle via the Func<WiFiNode, CancellationToken, Task<NodeProbeResult>>
