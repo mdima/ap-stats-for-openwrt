@@ -687,7 +687,10 @@ public sealed class DetailTests
     [Fact]
     public void DisconnectModal_Confirm_OnNotSupported_ShowsCapabilityMissingBanner()
     {
-        var (ctx, nodeAdmin) = BuildDisconnectContext(new DisconnectResult.NotSupported("Object not found"));
+        // 260516-iwo — D-08 re-amended to iw-only; NotSupported now fires on iw ENODEV (-19)
+        // "No such device" (kernel netdev missing or not in AP mode). Banner text updated
+        // to drop the now-obsolete "ubus/hostapd missing" phrasing.
+        var (ctx, nodeAdmin) = BuildDisconnectContext(new DisconnectResult.NotSupported("command failed: No such device (-19)"));
 
         using (ctx)
         {
@@ -696,7 +699,7 @@ public sealed class DetailTests
             cut.FindAll(".modal-footer .btn-danger").First(b => b.TextContent.Trim() == "Disconnect").Click();
 
             Assert.Equal(1, nodeAdmin.CallCount);
-            Assert.Contains("Disconnect not supported on this AP — ubus/hostapd missing.", cut.Markup);
+            Assert.Contains("Disconnect not supported on this AP — wireless interface unavailable.", cut.Markup);
             Assert.Contains("alert-danger", cut.Markup);
         }
     }

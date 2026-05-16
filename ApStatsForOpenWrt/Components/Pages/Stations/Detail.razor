@@ -465,7 +465,12 @@ else
                     break;
                 case ApStatsForOpenWrt.Services.Admin.DisconnectResult.NotSupported ns:
                     _disconnectBannerIsError = true;
-                    _disconnectBanner = "Disconnect not supported on this AP — ubus/hostapd missing.";
+                    // 260516-iwo — banner text updated for the iw-only path: NotSupported now
+                    // fires on `iw` ENODEV (-19) "No such device" -- the kernel netdev is gone
+                    // or not in AP mode. The previous 'ubus/hostapd missing' phrasing was
+                    // accurate for the ubus-first design but obsolete after D-08 was re-amended
+                    // to iw-only (quick task 260516-iwo).
+                    _disconnectBanner = "Disconnect not supported on this AP — wireless interface unavailable.";
                     Log.LogWarning(
                         "Disconnect failed (not-supported): NodeId={NodeId} Iface={Iface} StationMac={Mac} Raw={Raw}",
                         node.Id, iface, _station.MacAddress, ns.Raw);
