@@ -5,6 +5,8 @@ using ApStatsForOpenWrt.Data;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
 using ApStatsForOpenWrt.Services.Auth;
+using ApStatsForOpenWrt.Services.Enrichment;
+using ApStatsForOpenWrt.Services.Polling;
 using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
 
@@ -112,7 +114,20 @@ public sealed class IndexTests
         ctx.Services.AddSingleton<INodeRepo>(nodes);
         ctx.Services.AddSingleton<ApStatsForOpenWrt.Services.PreferencesService>(
             new ApStatsForOpenWrt.Services.PreferencesService(ctx.JSInterop.JSRuntime));
+        // v0.11 ENRICH-02 — register PollNotifier + IForceEnrichmentService for the Run-now button.
+        // Existing tests that don't exercise the Run-now path simply don't touch these services.
+        ctx.Services.AddSingleton<PollNotifier>();
+        ctx.Services.AddSingleton<IForceEnrichmentService, ForceEnrichmentService>();
         return (ctx, settings, hasher, nodes);
+    }
+
+    // v0.11 ENRICH-04 — overload returning the new services for the Run-now button tests.
+    private static (BunitContext ctx, StubSettings settings, PollNotifier notifier, IForceEnrichmentService forceEnrichment) BuildWithForceEnrichment(string? initialHash = null, int initialInterval = 30)
+    {
+        var (ctx, settings, _, _) = Build(initialHash, initialInterval);
+        var notifier = ctx.Services.GetRequiredService<PollNotifier>();
+        var forceEnrichment = ctx.Services.GetRequiredService<IForceEnrichmentService>();
+        return (ctx, settings, notifier, forceEnrichment);
     }
 
     // ── Tests ───────────────────────────────────────────────────────────────
@@ -454,6 +469,120 @@ public sealed class IndexTests
             Assert.Equal(1, settings.SetLocalDomainSuffixesCallCount);
             Assert.NotNull(settings.LastSetLocalDomainSuffixes);
             Assert.Empty(settings.LastSetLocalDomainSuffixes!);
+        }
+    }
+
+    // ── v0.11 ENRICH-04 — Run now button state machine (CONTEXT 14 §D-05/D-06) ──
+
+    [Fact]
+    public void RunNowButton_RendersInsideActiveEnrichmentCard_Enabled_OnPageLoad()
+    {
+        var (ctx, _, _, forceEnrichment) = BuildWithForceEnrichment();
+        using (ctx)
+        {
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
+
+            // Button exists, is enabled, and renders the "Run now" label (no spinner yet).
+            var button = cut.Find("#run-now-button");
+            Assert.False(button.HasAttribute("disabled"));
+            Assert.Contains("Run now", button.TextContent);
+            Assert.False(forceEnrichment.IsQueued);
+        }
+    }
+
+    [Fact]
+    public async Task RunNowButton_Click_InvokesForceEnrichmentRequest_AndShowsBanner()
+    {
+        var (ctx, _, _, forceEnrichment) = BuildWithForceEnrichment();
+        using (ctx)
+        {
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
+            Assert.False(forceEnrichment.IsQueued);
+
+            await cut.Find("#run-now-button").ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
+
+            Assert.True(forceEnrichment.IsQueued);
+            Assert.Contains("Enrichment queued", cut.Markup);
+            Assert.Contains("will run on the next polling cycle", cut.Markup);
+        }
+    }
+
+    // D-06 OR-condition arm: (cycleInFlight=true, IsQueued=false) → button disabled.
+    [Fact]
+    public async Task Settings_RunNow_DisabledDuring_CycleInFlight()
+    {
+        var (ctx, _, notifier, forceEnrichment) = BuildWithForceEnrichment();
+        using (ctx)
+        {
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
+            Assert.False(cut.Find("#run-now-button").HasAttribute("disabled"));
+
+            // Simulate CycleStarted (cycle in flight) — button must disable.
+            await notifier.RaiseCycleStartedAsync();
+            cut.WaitForState(() => cut.Find("#run-now-button").HasAttribute("disabled"), TimeSpan.FromSeconds(2));
+            Assert.True(cut.Find("#run-now-button").HasAttribute("disabled"));
+            Assert.False(forceEnrichment.IsQueued);
+            Assert.Contains("Queued…", cut.Markup);
+
+            // After Cycled, button re-enables (since IsQueued was never set in this test).
+            await notifier.RaiseAsync(new PollSnapshot(1, 1, 0, 0, DateTime.UtcNow));
+            cut.WaitForState(() => !cut.Find("#run-now-button").HasAttribute("disabled"), TimeSpan.FromSeconds(2));
+            Assert.False(cut.Find("#run-now-button").HasAttribute("disabled"));
+        }
+    }
+
+    // D-06 OR-condition arm: (cycleInFlight=false, IsQueued=true) → button disabled.
+    [Fact]
+    public async Task Settings_RunNow_DisabledDuring_FlagQueued()
+    {
+        var (ctx, _, _, forceEnrichment) = BuildWithForceEnrichment();
+        using (ctx)
+        {
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
+            Assert.False(cut.Find("#run-now-button").HasAttribute("disabled"));
+
+            // Click the button: ForceEnrichment.Request() sets IsQueued=true. The same click
+            // also runs StateHasChanged via HandleRunNowAsync's flow (banner update), so the
+            // disabled state is re-evaluated.
+            await cut.Find("#run-now-button").ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
+            cut.WaitForState(() => cut.Find("#run-now-button").HasAttribute("disabled"), TimeSpan.FromSeconds(2));
+            Assert.True(cut.Find("#run-now-button").HasAttribute("disabled"));
+            Assert.True(forceEnrichment.IsQueued);
+        }
+    }
+
+    // D-06 OR-condition arm: (cycleInFlight=true, IsQueued=true) → button disabled.
+    [Fact]
+    public async Task Settings_RunNow_DisabledDuring_BothConditions()
+    {
+        var (ctx, _, notifier, forceEnrichment) = BuildWithForceEnrichment();
+        using (ctx)
+        {
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
+
+            // Set both arms.
+            forceEnrichment.Request();
+            await notifier.RaiseCycleStartedAsync();
+
+            cut.WaitForState(() => cut.Find("#run-now-button").HasAttribute("disabled"), TimeSpan.FromSeconds(2));
+            Assert.True(cut.Find("#run-now-button").HasAttribute("disabled"));
+            Assert.True(forceEnrichment.IsQueued);
+        }
+    }
+
+    // D-06 OR-condition arm: (cycleInFlight=false, IsQueued=false) → button enabled.
+    [Fact]
+    public void Settings_RunNow_Enabled_WhenIdleAndUnqueued()
+    {
+        var (ctx, _, _, forceEnrichment) = BuildWithForceEnrichment();
+        using (ctx)
+        {
+            var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
+
+            // Initial state: no cycle in flight, no flag queued.
+            Assert.False(forceEnrichment.IsQueued);
+            Assert.False(cut.Find("#run-now-button").HasAttribute("disabled"));
+            Assert.Contains("Run now", cut.Find("#run-now-button").TextContent);
         }
     }
 }

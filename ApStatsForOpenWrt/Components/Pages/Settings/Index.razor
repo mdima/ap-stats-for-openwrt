@@ -4,17 +4,26 @@
    is verbatim from UI-SPEC §Settings + §Confirmation Modal lines 502-509.
 
    Plan 03-05: SET-01 (interval radio), SET-02 (password set/clear), SET-03 (bulk known-hosts
-   clear), SET-04 (no-restart propagation via IAppSettingsService.Changed event chain). *@
+   clear), SET-04 (no-restart propagation via IAppSettingsService.Changed event chain).
+   Plan 14-02: ENRICH-02 Run-now button on Active enrichment card; D-06 OR-condition
+   disable-state subscribed to PollNotifier.CycleStarted / Cycled. *@
 @using ApStatsForOpenWrt.Data.Repositories
 @using ApStatsForOpenWrt.Services.Auth
+@using ApStatsForOpenWrt.Services.Enrichment
+@using ApStatsForOpenWrt.Services.Polling
 @using ApStatsForOpenWrt.Services.Settings
 
 @inject IAppSettingsService Settings
 @inject IUIPasswordHasher Hasher
 @inject INodeRepo Nodes
+@* v0.11 ENRICH-02 / CONTEXT 14 §D-05/D-06 — Run-now button injects the force-flag service
+   + PollNotifier (cycle-in-flight half of the D-06 OR-condition). *@
+@inject IForceEnrichmentService ForceEnrichment
+@inject PollNotifier Notifier
 @* Phase 8 Plan 08-07 REQ-UI-44 — the new UI preferences card consumes PreferencesService
    ONLY. NEVER IAppSettingsService — per-browser preference, not a DB setting. *@
 @inject ApStatsForOpenWrt.Services.PreferencesService Prefs
+@implements IDisposable
 
 <PageHeader Title="Settings" />
 
@@ -47,7 +56,7 @@
     </div>
 </div>
 
-@* ==== NEW: Active enrichment interval (Phase 10 SET-01 / D-03 / D-05) ==== *@
+@* ==== Active enrichment interval (Phase 10 SET-01 / D-03 / D-05) + v0.11 ENRICH-02 Run now ==== *@
 <div class="card mb-4">
     <div class="card-header"><h5 class="card-title mb-0">Active enrichment interval</h5></div>
     <div class="card-body">
@@ -56,6 +65,10 @@
         @if (!string.IsNullOrEmpty(_refreshBanner))
         {
             <div class="alert alert-success" role="alert">@_refreshBanner</div>
+        }
+        @if (!string.IsNullOrEmpty(_runNowBanner))
+        {
+            <div class="alert alert-success" role="alert">@_runNowBanner</div>
         }
 
         <EditForm Model="_refreshForm" OnValidSubmit="HandleSaveRefreshAsync" FormName="refresh-form">
@@ -73,6 +86,27 @@
                 <button type="submit" class="btn btn-primary">Save changes</button>
             </div>
         </EditForm>
+
+        @* v0.11 ENRICH-02 (CONTEXT 14 §D-05/D-06/D-07) — "Run now" button + OR-condition disable-state. *@
+        <hr class="my-3" />
+        <div class="d-flex align-items-center">
+            <button type="button"
+                    id="run-now-button"
+                    class="btn btn-outline-primary"
+                    @onclick="HandleRunNowAsync"
+                    disabled="@(_cycleInFlight || ForceEnrichment.IsQueued)">
+                @if (_cycleInFlight || ForceEnrichment.IsQueued)
+                {
+                    <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                    <span>Queued…</span>
+                }
+                else
+                {
+                    <span>Run now</span>
+                }
+            </button>
+            <small class="text-body-secondary ms-3">Forces an immediate enrichment pass on the next polling cycle.</small>
+        </div>
     </div>
 </div>
 
@@ -242,6 +276,12 @@
     private string? _passwordError;
     private string? _hostsBanner;
 
+    // ── v0.11 ENRICH-02 (CONTEXT 14 §D-05/D-06) — Run-now button state ────────
+    private string? _runNowBanner;
+    // tracks CycleStarted received without subsequent Cycled; volatile because the
+    // PollNotifier event handlers run on a different thread than the Blazor render context.
+    private volatile bool _cycleInFlight;
+
     // D-03 verbatim — five preset values for the Active enrichment interval radio group.
     // Stored as int seconds to match AppSetting.RefreshIntervalSeconds.IntValue persistence.
     private static readonly IReadOnlyList<(int Seconds, string Label)> RefreshPresets = new[]
@@ -261,12 +301,44 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // v0.11 ENRICH-02 / CONTEXT 14 §D-06 — subscribe BEFORE the await so a Cycled
+        // event firing during WarmAsync still reaches the handler (Phase 5 D-12 pattern).
+        Notifier.CycleStarted += OnCycleStartedAsync;
+        Notifier.Cycled       += OnCycledAsync;
+
         // Defensive — Settings should already be warm via AppSettingsBootstrapHostedService;
         // re-warm idempotently to handle edge cases like a fresh in-memory test DB.
         await Settings.WarmAsync();
         _intervalForm.Seconds = Settings.PollingIntervalSeconds;
         _refreshForm.Seconds = Settings.RefreshIntervalSeconds;
         _suffixesForm.CommaSeparated = string.Join(", ", Settings.LocalDomainSuffixes);
+    }
+
+    // ── v0.11 ENRICH-02 (CONTEXT 14 §D-05/D-06) — Run-now handlers + disposal ──
+    private Task OnCycleStartedAsync()
+    {
+        _cycleInFlight = true;
+        return InvokeAsync(StateHasChanged);   // re-render to flip disabled state to true
+    }
+
+    private Task OnCycledAsync(PollSnapshot _)
+    {
+        _cycleInFlight = false;
+        return InvokeAsync(StateHasChanged);   // re-render to flip disabled state back to false
+    }
+
+    private Task HandleRunNowAsync()
+    {
+        ForceEnrichment.Request();
+        _runNowBanner = "Enrichment queued — will run on the next polling cycle.";
+        _ = AutoDismissAsync(() => _runNowBanner = null);
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        Notifier.CycleStarted -= OnCycleStartedAsync;
+        Notifier.Cycled       -= OnCycledAsync;
     }
 
     // ── Card 4 (Phase 8 Plan 08-07 REQ-UI-44) — UI preferences state ────────
