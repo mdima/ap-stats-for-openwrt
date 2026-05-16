@@ -8,21 +8,45 @@
 @inject ICircuitGate Gate
 
 @* PollCountdown.razor — Phase 5 D-12 paired adjacency (post-discussion Pi.Alert lift
-   2026-05-02). UI-SPEC §PollCountdown (lines 619-665). 1-second client-side tick
-   re-renders the displayed seconds-to-next-cycle. CycleEndUtc anchor refreshes on each
-   PollNotifier.Cycled (D-03 Func<PollSnapshot, Task>?). When Gate.Current == Paused
-   (Phase 6 forward-compat), display is "—" (no poll pending).
+   2026-05-02) + v0.11 Plan 14-01 / POLL-02 three-arm state machine (CONTEXT 14 §D-01,
+   §D-04). UI-SPEC §PollCountdown (lines 619-665). 1-second client-side tick re-renders
+   the displayed seconds-to-next-cycle on the IDLE arm only.
+
+   v0.11 / Plan 14-01 / POLL-02 — THREE ARMS (CONTEXT 14 §D-04):
+     (a) idle-ticking      — _inCycle == false; render "{N}s" ticking down via 1Hz Timer
+                              (UNCHANGED from Phase 5).
+     (b) cycle-started-held — _inCycle == true; CycleStarted handler set _displayText to
+                              literal "Polling…" (U+2026 HORIZONTAL ELLIPSIS — single
+                              codepoint, NOT three ASCII dots). aria-label = "Polling in
+                              progress" per CONTEXT 14 §D-01. Tick() early-returns on
+                              _inCycle and does NOT mutate _displayText for the entire
+                              cycle duration — THIS is the operator-visible fix
+                              (CONTEXT 14 §Specifics #1: the countdown HOLDING during the
+                              cycle is the fix, not "reset at the end").
+     (c) cycle-ended-reset  — Cycled handler sets _inCycle=false + _lastCycleEndUtc=now;
+                              next Tick renders "{N}s" from full PollingIntervalSeconds.
+
+   CONTEXT 14 §D-03 — do-nothing-on-failure: a cycle that throws inside PollOrchestrator's
+   coordinator transaction omits the trailing Cycled raise (its try/catch/finally was NOT
+   extended per D-03). PollCountdown therefore stays on "Polling…" until the NEXT
+   successful Cycled. Operator-authorised passive failure signal.
+
+   CycleStarted event subscription is paired with Cycled (Phase 5 D-12 paired adjacency):
+   subscribe BOTH in OnInitializedAsync, unsubscribe BOTH in Dispose. Same threading
+   discipline (Pitfall 7 async-void avoidance — both handlers return Task).
 
    `System.Threading.Timer` is permitted here (UI-SPEC line 668): the CLAUDE.md
    PeriodicTimer rule applies to *polling work* (SSH I/O, DB writes); this is a 1Hz UI
    tick with no I/O, no DB — analogous to Nodes/Detail.razor:202-208 Task.Delay flash
    idiom that ships in Phase 3.
 
-   Revision-1 W4 (race with Dispose): the Timer callback can fire concurrently with
-   Dispose(). If we hand a disposed renderer to InvokeAsync(StateHasChanged) we get
-   ObjectDisposedException. Guard with both a volatile `_disposed` flag (fast-path skip)
-   and a try/catch around InvokeAsync (belt + braces — covers the small window between
-   the flag-check and the InvokeAsync call). *@
+   Revision-1 W4 (race with Dispose) — PRESERVED VERBATIM ACROSS THE 14-01 REFACTOR:
+   the Timer callback can fire concurrently with Dispose(). If we hand a disposed renderer
+   to InvokeAsync(StateHasChanged) we get ObjectDisposedException. Guard with both a
+   volatile `_disposed` flag (fast-path skip) AND a try/catch around InvokeAsync in
+   OnCycleAsync, OnCycleStartedAsync, and Tick (belt + braces — covers the small window
+   between the flag-check and the InvokeAsync call). _disposed is set FIRST in Dispose
+   BEFORE detaching subscriptions and disposing the Timer. *@
 
 <span class="badge text-bg-secondary" aria-label="@_ariaLabel">
     <span style="font-variant-numeric: tabular-nums;">@_displayText</span>
@@ -34,17 +58,41 @@
     private string _displayText = "—";
     private string _ariaLabel = "Next poll: pending";
     private volatile bool _disposed;     // W4 race guard
+    private volatile bool _inCycle;      // 14-01 / POLL-02 — three-arm state anchor (D-04)
 
     protected override Task OnInitializedAsync()
     {
-        Notifier.Cycled += OnCycleAsync;
+        Notifier.Cycled       += OnCycleAsync;
+        Notifier.CycleStarted += OnCycleStartedAsync;     // 14-01 / POLL-01 — held-state entry signal
         _tick = new System.Threading.Timer(_ => Tick(), state: null, dueTime: 1000, period: 1000);
         return Task.CompletedTask;
+    }
+
+    // 14-01 / POLL-02 — held-state entry (D-04 #2). PollOrchestrator raises CycleStarted at
+    // the TOP of RunCycleAsync (BEFORE BeginTransactionAsync per D-02 placement), so this
+    // handler runs as soon as a cycle begins regardless of whether the cycle later succeeds
+    // or fails. The aria-label and badge text reflect the held state for the entire cycle
+    // duration (Tick() early-returns on _inCycle).
+    private async Task OnCycleStartedAsync()
+    {
+        if (_disposed) return;     // W4: skip if dispose already happened
+        _inCycle     = true;
+        _displayText = "Polling…";
+        _ariaLabel   = "Polling in progress";
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+            // W4: race between CycleStarted and Dispose — renderer is gone, swallow.
+        }
     }
 
     private async Task OnCycleAsync(PollSnapshot s)
     {
         if (_disposed) return;     // W4: skip if dispose already happened
+        _inCycle = false;          // 14-01 / POLL-02 — exit held state (D-04 #3)
         _lastCycleEndUtc = s.CycleEndUtc;
         // Pitfall 7: handler arrives off the orchestrator's stack frame.
         try
@@ -60,6 +108,13 @@
     private void Tick()
     {
         if (_disposed) return;     // W4 fast path
+
+        // 14-01 / POLL-02 / D-04 #2 — while held, Tick() does NOT re-render the {N}s value:
+        // the badge stays on "Polling…" for the entire cycle duration regardless of how many
+        // 1Hz ticks elapse. THIS IS THE OPERATOR-VISIBLE FIX (CONTEXT 14 §Specifics #1: the
+        // countdown HOLDING during the cycle is the fix — that's why POLL-03 bUnit asserts
+        // the badge text does NOT change second-by-second during the held window).
+        if (_inCycle) return;
 
         if (Gate.Current == GateState.Paused)
         {
@@ -101,7 +156,8 @@
     public void Dispose()
     {
         _disposed = true;     // W4: set BEFORE detaching subscriptions and disposing timer
-        Notifier.Cycled -= OnCycleAsync;
+        Notifier.Cycled       -= OnCycleAsync;
+        Notifier.CycleStarted -= OnCycleStartedAsync;     // 14-01 — unsubscribe NEW handler too (Phase 5 D-12 paired adjacency)
         _tick?.Dispose();
     }
 }
