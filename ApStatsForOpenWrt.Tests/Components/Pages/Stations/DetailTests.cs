@@ -33,11 +33,13 @@ public sealed class DetailTests
         public int    SetIsRandomMacCallCount { get; private set; }
         public bool?  LastSetIsRandomMacValue { get; private set; }
         public string? LastSetIsRandomMacForMac { get; private set; }
+        public int    GetByMacCallCount { get; private set; }   // 260516-dlu: pin live-update + post-dispose unsubscribe contracts.
 
         public Task<IReadOnlyList<WLANStation>> GetAllAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<WLANStation>>(Existing is null ? Array.Empty<WLANStation>() : new[] { Existing });
         public Task<WLANStation?> GetByMacAsync(string macAddress, CancellationToken ct = default)
         {
+            GetByMacCallCount++;
             RequestedMac = macAddress;
             return Task.FromResult(Existing?.MacAddress == macAddress ? Existing : null);
         }
@@ -731,6 +733,160 @@ public sealed class DetailTests
             Assert.Equal(1, nodeAdmin.CallCount);
             Assert.Contains("Disconnect failed — check logs.", cut.Markup);
             Assert.Contains("alert-danger", cut.Markup);
+        }
+    }
+
+    // ── 260516-dlu — Detail.razor lives on PollNotifier.Cycled + optimistic Offline flip on Disconnect Success ──
+    //
+    // Operator's v0.11 QUAL-02 LIVE-UAT request (2026-05-16): "after the disconnection I expect that
+    // the station data will be updated as reported offline." The backend already does this via the
+    // mark-offline-then-upsert cycle invariant; the UI gap is that Detail.razor was deliberately a
+    // *snapshot* page (per Phase 5 UI-SPEC line 947) and did not subscribe to PollNotifier. This
+    // quick task amends that: Detail.razor now subscribes to PollNotifier.Cycled with W4 double-guard
+    // disposal discipline mirroring PollCountdown.razor, AND optimistically flips the local station
+    // status to Offline on DisconnectResult.Success for instant operator feedback (bounded by the
+    // next ≤ PollingIntervalSeconds cycle, which is authoritative).
+
+    [Fact]
+    public async Task OnPollCycled_RefreshesStationData_FromRepo()
+    {
+        // Pin the live-update contract: when PollNotifier.Cycled fires, Detail.razor re-loads the
+        // station from the repo so any DB-side status flip (e.g., the station leaving the WLAN
+        // association table after a Disconnect) becomes visible without manual navigation/F5.
+        // Bug shape (pre-260516-dlu): no subscription exists, so raising Cycled is a no-op for
+        // the page; the badge stays on whatever it loaded at OnParametersSetAsync time.
+        var (ctx, stations, nets, nodes, _, _, _) = Build();
+        var initial = MakeStation();
+        initial.Status = Status.Online;
+        // LastPollDate well outside the 2× stale window so a flip to Offline renders as
+        // Offline (text-bg-secondary) rather than Stale.
+        initial.LastPollDate = DateTime.UtcNow.AddHours(-1);
+        stations.Existing = initial;
+        nets.Existing = new WiFiNetwork { Id = 10, WiFiNodeId = 1, MacAddress = "00:11:22:33:44:55", SSID = "g", IfaceName = "wlan0" };
+        nodes.Nodes.Add(new WiFiNode { Id = 1, Hostname = "ap-A", Username = "root", Password = "x" });
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            // Initial render observed Online.
+            Assert.Contains("text-bg-success", cut.Markup);
+            var initialLoadCount = stations.GetByMacCallCount;
+
+            // Simulate a DB-side change between cycles: the next cycle should observe Offline.
+            stations.Existing!.Status = Status.Offline;
+
+            // Raise a cycle event via the renderer's dispatcher so the handler runs on the
+            // correct sync context (matches Pitfall 7 + Phase 5 D-12 paired-adjacency pattern).
+            var notifier = ctx.Services.GetRequiredService<PollNotifier>();
+            await cut.InvokeAsync(async () =>
+                await notifier.RaiseAsync(new PollSnapshot(
+                    TotalNodes: 1, OnlineNodes: 1, FailedNodes: 0, StationCount: 1, CycleEndUtc: DateTime.UtcNow)));
+
+            // The page must have re-loaded -- repo call count strictly greater than the initial load.
+            Assert.True(stations.GetByMacCallCount > initialLoadCount,
+                $"GetByMacCallCount stayed at {stations.GetByMacCallCount} after Cycled raise; expected > {initialLoadCount} (live subscription missing).");
+
+            // And the badge must now reflect the new state (Offline, not Online).
+            Assert.Contains("text-bg-secondary", cut.Markup);
+            Assert.DoesNotContain("text-bg-success", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public async Task OnDispose_UnsubscribesFromCycled_NoRefreshAfterDispose()
+    {
+        // Pattern 2 -- captured `this` leak guard. After the component is disposed, raising Cycled
+        // on the still-live notifier singleton must NOT call back into LoadAsync. The unsubscribe
+        // in Dispose() removes the handler; the W4 _disposed flag is a belt-and-braces guard if
+        // the handler is somehow still invoked in flight.
+        var (ctx, stations, nets, nodes, _, _, _) = Build();
+        stations.Existing = MakeStation();
+        nets.Existing = new WiFiNetwork { Id = 10, WiFiNodeId = 1, MacAddress = "00:11:22:33:44:55", SSID = "g", IfaceName = "wlan0" };
+        nodes.Nodes.Add(new WiFiNode { Id = 1, Hostname = "ap-A", Username = "root", Password = "x" });
+
+        var notifier = ctx.Services.GetRequiredService<PollNotifier>();
+        int countAtDispose;
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            countAtDispose = stations.GetByMacCallCount;
+        }   // bUnit disposes the rendered component here (BunitContext.Dispose -> renderer dispose).
+
+        // Raise Cycled AFTER dispose. With unsubscribe-in-Dispose in place, this must NOT cause
+        // a further LoadAsync call. Must also not throw (W4 double-guard belt-and-braces).
+        await notifier.RaiseAsync(new PollSnapshot(1, 1, 0, 1, DateTime.UtcNow));
+
+        Assert.Equal(countAtDispose, stations.GetByMacCallCount);
+    }
+
+    [Fact]
+    public void OnDisconnect_Success_OptimisticallyFlipsStatusToOffline_BeforeAnyCycledEvent()
+    {
+        // 260516-dlu — operator's verbatim expectation 2026-05-16: "after the disconnection I
+        // expect that the station data will be updated as reported offline." On a successful
+        // Disconnect, the local _station.Status is flipped to Offline IMMEDIATELY (no Cycled
+        // event raised in this test), so the StatusBadge in the rendered DOM reflects Offline
+        // before the next poll cycle arrives. The next real Cycled is authoritative (it either
+        // confirms Offline if the station truly left, or corrects to Online if it re-associated).
+        var (ctx, nodeAdmin) = BuildDisconnectContext(new DisconnectResult.Success());
+        // Override Existing's LastPollDate to keep _isStale = false (well outside 2× window),
+        // so the Offline flip renders as Offline (text-bg-secondary), not Stale.
+        var stations = (StubStationRepo)ctx.Services.GetRequiredService<IStationRepo>();
+        stations.Existing!.Status = Status.Online;
+        stations.Existing.LastPollDate = DateTime.UtcNow.AddHours(-1);
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            // Pre-click: badge shows Online.
+            Assert.Contains("text-bg-success", cut.Markup);
+
+            cut.Find("#disconnect-station-button").Click();
+            cut.FindAll(".modal-footer .btn-danger").First(b => b.TextContent.Trim() == "Disconnect").Click();
+
+            // Success banner present AND status immediately flipped to Offline -- no Cycled raised.
+            Assert.Equal(1, nodeAdmin.CallCount);
+            Assert.Contains("Disconnect issued — station should leave the WLAN on the next poll cycle.", cut.Markup);
+            Assert.Contains("text-bg-secondary", cut.Markup);
+            Assert.DoesNotContain("text-bg-success", cut.Markup);
+        }
+    }
+
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("not-supported")]
+    [InlineData("no-such-station")]
+    [InlineData("unknown")]
+    public void OnDisconnect_NonSuccess_DoesNotFlipStatus_BadgeStaysOnline(string kind)
+    {
+        // 260516-dlu forward guard: the optimistic flip MUST be gated on DisconnectResult.Success.
+        // Any non-Success branch (Timeout / NotSupported / NoSuchStation / UnknownError) must
+        // leave the local status untouched -- a failed SSH command means the station was NOT
+        // (verifiably) disconnected, and flipping the badge to Offline would mislead the operator.
+        DisconnectResult canned = kind switch
+        {
+            "timeout"         => new DisconnectResult.Timeout(),
+            "not-supported"   => new DisconnectResult.NotSupported("Command failed: Not found"),
+            "no-such-station" => new DisconnectResult.NoSuchStation("no such station"),
+            "unknown"         => new DisconnectResult.UnknownError("kaboom"),
+            _ => throw new ArgumentException("invalid kind", nameof(kind)),
+        };
+        var (ctx, _) = BuildDisconnectContext(canned);
+        var stations = (StubStationRepo)ctx.Services.GetRequiredService<IStationRepo>();
+        stations.Existing!.Status = Status.Online;
+        stations.Existing.LastPollDate = DateTime.UtcNow.AddHours(-1);
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            Assert.Contains("text-bg-success", cut.Markup);   // pre: Online
+
+            cut.Find("#disconnect-station-button").Click();
+            cut.FindAll(".modal-footer .btn-danger").First(b => b.TextContent.Trim() == "Disconnect").Click();
+
+            // Status badge unchanged (NoSuchStation may render an informational banner but
+            // MUST NOT flip the status -- the station could legitimately still be there).
+            Assert.Contains("text-bg-success", cut.Markup);
         }
     }
 }
