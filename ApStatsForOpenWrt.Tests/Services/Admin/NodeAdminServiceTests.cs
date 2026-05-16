@@ -15,13 +15,20 @@ namespace ApStatsForOpenWrt.Tests.Services.Admin;
 /// </summary>
 public sealed class NodeAdminServiceTests
 {
-    // Test-only fake session that records the issued command + returns a canned response.
+    // Test-only fake session that records every issued command + returns a canned response.
+    // Two modes:
+    //   (1) Single-canned (legacy): every command returns the same (ExitCode, StdOut, StdErr) tuple.
+    //       Preserved verbatim for the 9 pre-existing tests (Plan 14-04 Task 2).
+    //   (2) Per-prefix (260516-iwf): map command-prefix -> canned response, with an optional default.
+    //       Used by the cascade tests (ubus call hostapd. -> response A; iw dev -> response B).
     private sealed class CannedSshSession : ISshSession
     {
         private readonly (int ExitCode, string StdOut, string StdErr) _canned;
+        private readonly IReadOnlyList<(string Prefix, (int ExitCode, string StdOut, string StdErr) Response)>? _prefixMap;
         private readonly bool _connectThrows;
         private readonly Exception? _connectException;
         public string? LastCommand { get; private set; }
+        public List<string> Commands { get; } = new();    // 260516-iwf: every command, in order of invocation.
         public int DisposeCount { get; private set; }
 
         public CannedSshSession(
@@ -30,8 +37,23 @@ public sealed class NodeAdminServiceTests
             Exception? connectException = null)
         {
             _canned = canned;
+            _prefixMap = null;
             _connectThrows = connectThrows;
             _connectException = connectException;
+        }
+
+        // 260516-iwf: per-prefix mode. The first matching prefix wins (longest-prefix match isn't
+        // needed here — the cascade only ever issues two distinct command shapes per call).
+        // `defaultResponse` fires for unmatched commands; if omitted, an unmatched command throws
+        // InvalidOperationException so the test surfaces unexpected command shapes immediately.
+        public CannedSshSession(
+            IReadOnlyList<(string Prefix, (int ExitCode, string StdOut, string StdErr) Response)> prefixMap,
+            (int ExitCode, string StdOut, string StdErr)? defaultResponse = null)
+        {
+            _prefixMap = prefixMap;
+            _canned = defaultResponse ?? (-1, "", "TEST: unmatched command (no default response configured)");
+            _connectThrows = false;
+            _connectException = null;
         }
 
         public Task ConnectAsync(WiFiNode node, string plaintextPassword, string? expectedFingerprint,
@@ -48,14 +70,26 @@ public sealed class NodeAdminServiceTests
         {
             ct.ThrowIfCancellationRequested();
             LastCommand = command;
-            return Task.FromResult(_canned.StdOut);
+            Commands.Add(command);
+            return Task.FromResult(ResolveResponse(command).StdOut);
         }
 
         public Task<(int ExitCode, string StdOut, string StdErr)> RunCommandWithExitCodeAsync(string command, CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
             LastCommand = command;
-            return Task.FromResult(_canned);
+            Commands.Add(command);
+            return Task.FromResult(ResolveResponse(command));
+        }
+
+        private (int ExitCode, string StdOut, string StdErr) ResolveResponse(string command)
+        {
+            if (_prefixMap is null) return _canned;
+            foreach (var (prefix, response) in _prefixMap)
+            {
+                if (command.StartsWith(prefix, StringComparison.Ordinal)) return response;
+            }
+            return _canned;     // default / "unmatched" sentinel
         }
 
         public ValueTask DisposeAsync()
@@ -220,5 +254,108 @@ public sealed class NodeAdminServiceTests
         cts.Cancel();
         await Assert.ThrowsAsync<OperationCanceledException>(
             async () => await svc.DisconnectStationAsync(node, "AA:BB:CC:DD:EE:FF", "wlan0", cts.Token));
+    }
+
+    // ── 260516-iwf — ubus -> iw fallback cascade (CONTEXT 14 §D-08 amended 2026-05-16) ──
+    //
+    // Operator's v0.11 / Phase 14 QUAL-02 LIVE-UAT surface (d) walk demonstrated that
+    // `ubus call hostapd.<iface> del_client {...}` returns "Command failed: Not found" on AP
+    // classes where the hostapd ubus object isn't registered under exactly `hostapd.<iface>`.
+    // Bug A (260516-ncf) fixed the classification; Bug B (this task) makes the disconnect
+    // actually succeed by falling back to `iw dev <iface> station del <mac>` (universal
+    // cfg80211 path, present on every supported OpenWRT release; Phase 9 already uses
+    // `iw dev <iface> station dump` on the same iface for station enumeration).
+
+    // Helper: build a per-prefix CannedSshSession-backed service. ubus_prefix matches the
+    // primary D-08 path; iw_prefix matches the new 260516-iwf fallback.
+    private static (WiFiNode node, NodeAdminService svc, CannedSshSession ssh) SetupCascade(
+        (int ExitCode, string StdOut, string StdErr) ubusResponse,
+        (int ExitCode, string StdOut, string StdErr) iwResponse)
+    {
+        var dpp = new EphemeralDataProtectionProvider();
+        var protectedPwd = dpp.CreateProtector("node-creds").Protect("test-password-plain");
+        var prefixMap = new (string, (int, string, string))[]
+        {
+            ("ubus call hostapd.", ubusResponse),
+            ("iw dev",             iwResponse),
+        };
+        var ssh = new CannedSshSession(prefixMap);
+        var svc = new NodeAdminService(() => ssh, dpp, NullLogger<NodeAdminService>.Instance);
+        var node = new WiFiNode
+        {
+            Id = 1,
+            Hostname = "ap1.local",
+            Username = "root",
+            Password = protectedPwd,
+            HostKeyFingerprint = null,
+        };
+        return (node, svc, ssh);
+    }
+
+    [Fact]
+    public async Task DisconnectStationAsync_UbusNotFound_FallsBackToIw_ReturnsSuccess()
+    {
+        // 260516-iwf — verbatim operator-side scenario (2026-05-16T11:57:57Z LIVE-UAT log):
+        // ubus reports `Command failed: Not found` (UBUS_STATUS_NOT_FOUND) because the
+        // hostapd.<iface> object isn't registered on this AP class. The cascade falls back
+        // to `iw dev <iface> station del <mac>` which kicks the station at the cfg80211 layer.
+        // iw exits 0 on success -> overall Success.
+        var (node, svc, ssh) = SetupCascade(
+            ubusResponse: (4, "", "Command failed: Not found"),
+            iwResponse:   (0, "", ""));
+
+        var r = await svc.DisconnectStationAsync(node, "C8:2B:96:E5:24:0B", "wlan0", CancellationToken.None);
+
+        Assert.IsType<DisconnectResult.Success>(r);
+
+        // Both commands must have been issued, in the order ubus -> iw.
+        Assert.Equal(2, ssh.Commands.Count);
+        Assert.StartsWith("ubus call hostapd.wlan0 del_client", ssh.Commands[0]);
+        Assert.Equal("iw dev wlan0 station del C8:2B:96:E5:24:0B", ssh.Commands[1]);
+        // Pitfall 5 — dispose still exactly once.
+        Assert.Equal(1, ssh.DisposeCount);
+    }
+
+    [Fact]
+    public async Task DisconnectStationAsync_UbusNotFound_FallbackIwAlsoFails_ReturnsNotSupported()
+    {
+        // 260516-iwf — both paths fail. iw emits its standard failure shape when the netdev
+        // is missing (which would also be the case if the iface name itself is wrong in the DB
+        // -- the deeper Phase-9 / D-10 path). The cascade carries BOTH stderrs in the raw so
+        // the operator's Serilog audit captures both failure modes in one log line.
+        var (node, svc, ssh) = SetupCascade(
+            ubusResponse: (4, "", "Command failed: Not found"),
+            iwResponse:   (252, "", "command failed: No such device (-19)"));
+
+        var r = await svc.DisconnectStationAsync(node, "C8:2B:96:E5:24:0B", "wlan0", CancellationToken.None);
+
+        var ns = Assert.IsType<DisconnectResult.NotSupported>(r);
+        // Combined raw includes both branches with a clear separator.
+        Assert.Contains("ubus:", ns.Raw);
+        Assert.Contains("Command failed: Not found", ns.Raw);
+        Assert.Contains("iw:", ns.Raw);
+        Assert.Contains("No such device", ns.Raw);
+        // Both commands were issued.
+        Assert.Equal(2, ssh.Commands.Count);
+    }
+
+    [Fact]
+    public async Task DisconnectStationAsync_UbusSuccess_DoesNotInvokeFallback()
+    {
+        // 260516-iwf forward guard: the fallback fires ONLY when the ubus path is classified
+        // as NotSupported. A successful primary path must NOT invoke the iw command -- this
+        // protects against a future regression where the cascade fires unconditionally.
+        // (The iwResponse is canned to a failure on purpose: if the fallback DID fire, the
+        // overall result would flip to NotSupported, and this test would fail loudly.)
+        var (node, svc, ssh) = SetupCascade(
+            ubusResponse: (0, "", ""),
+            iwResponse:   (252, "", "command failed: No such device (-19)"));
+
+        var r = await svc.DisconnectStationAsync(node, "AA:BB:CC:DD:EE:FF", "wlan0", CancellationToken.None);
+
+        Assert.IsType<DisconnectResult.Success>(r);
+        // Exactly ONE command was issued, and it was the ubus call.
+        Assert.Single(ssh.Commands);
+        Assert.StartsWith("ubus call hostapd.wlan0 del_client", ssh.Commands[0]);
     }
 }
