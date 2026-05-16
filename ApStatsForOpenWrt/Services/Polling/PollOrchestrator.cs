@@ -467,7 +467,25 @@ public sealed class PollOrchestrator(
                     .SetProperty(s => s.RxBitrate, 0.0), ct);
 
             await tx.CommitAsync(ct);
-            Interlocked.Exchange(ref _ticks, now.Ticks);     // D-09 — only after successful commit (write-after-commit invariant; rolled-back cycles do NOT advance _ticks).
+
+            // 260516-pce — Unified post-commit end-of-cycle wall clock. Consumed by:
+            //   (1) _ticks (LastSuccessfulCycleUtc — feeds /health 'lastPollAge' and
+            //       Dashboard last-poll timestamps), and
+            //   (2) PollSnapshot.CycleEndUtc (consumed by PollCountdown.razor:131 as
+            //       the countdown anchor and by Dashboard.razor:318-319 +
+            //       StatusBadge staleness derivation).
+            // Operator's clarification 2026-05-16: the countdown must restore "after
+            // the polling AND the enrichment operation." This capture is strictly
+            // downstream of both the SSH fan-out (Task.WhenAll(pollTasks) at line
+            // ~107) AND the per-node enrichmentFactory awaits (Phase 10 ORCH-01..08
+            // block, line ~308). The previous code reused the 'now' captured at
+            // line ~125 (right after the SSH fan-out, BEFORE enrichment + the final
+            // SaveChanges + commit) — making PollCountdown restart at
+            // PollingIntervalSeconds − cycleDuration (e.g. 25s instead of 30s for a
+            // ~5s cycle), the v0.11 QUAL-02 LIVE-UAT surface-(a) blocker. CONTEXT 14
+            // §D-04 #3 literal: "Cycled received; _lastCycleEndUtc = now".
+            var cycleEndUtc = DateTime.UtcNow;
+            Interlocked.Exchange(ref _ticks, cycleEndUtc.Ticks);     // D-09 — only after successful commit (write-after-commit invariant; rolled-back cycles do NOT advance _ticks).
 
             // 7.6 B10 LOCK -- post-commit TOFU audit log. Only emitted when the trust persisted.
             foreach (var t in newlyTrusted)
@@ -483,7 +501,7 @@ public sealed class PollOrchestrator(
                 OnlineNodes: results.Count(r => r is NodeProbeResult.Success),
                 FailedNodes: results.Count(r => r is NodeProbeResult.Failed),
                 StationCount: deduped.Count,
-                CycleEndUtc: now);
+                CycleEndUtc: cycleEndUtc);
             await notifier.RaiseAsync(snapshot);
 
             log.LogInformation(
