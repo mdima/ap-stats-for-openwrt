@@ -96,6 +96,18 @@ try
     builder.Services.AddSingleton<ApStatsForOpenWrt.Services.Enrichment.IForceEnrichmentService,
                                   ApStatsForOpenWrt.Services.Enrichment.ForceEnrichmentService>();
 
+    // v0.11 DISC-01 / CONTEXT 14 §D-09 — write-side SSH responsibility, dedicated from
+    // NodePoller. Stateless service; lifetime = Transient. Constructor takes a
+    // Func<ISshSession> factory so each call gets a fresh session (matches NodePoller's
+    // per-call lifecycle). The ISshSession factory resolves the existing Transient
+    // ISshSession registration. Plan 14-04.
+    builder.Services.AddTransient<ApStatsForOpenWrt.Services.Admin.INodeAdminService,
+                                  ApStatsForOpenWrt.Services.Admin.NodeAdminService>(sp =>
+        new ApStatsForOpenWrt.Services.Admin.NodeAdminService(
+            sessionFactory: () => sp.GetRequiredService<ApStatsForOpenWrt.Services.Polling.Ssh.ISshSession>(),
+            dpp: sp.GetRequiredService<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>(),
+            log: sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ApStatsForOpenWrt.Services.Admin.NodeAdminService>>()));
+
     // 5b. Polling subsystem (Phase 2). PollOrchestrator is the PER-04 carve-out #3 — see ArchitectureTests.
     //     ISshSession is transient (one fresh session per poll, per Pitfall 5).
     //     NodePoller is constructed per-cycle via the Func<WiFiNode, CancellationToken, Task<NodeProbeResult>>

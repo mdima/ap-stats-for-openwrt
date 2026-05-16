@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
 using ApStatsForOpenWrt.Services;
+using ApStatsForOpenWrt.Services.Admin;
 using ApStatsForOpenWrt.Services.Polling;
 using ApStatsForOpenWrt.Services.Settings;
 using ApStatsForOpenWrt.Services.Vendor;
@@ -133,18 +134,40 @@ public sealed class DetailTests
         public bool IsEnabled { get; set; } = true;
     }
 
-    private static (BunitContext ctx, StubStationRepo stations, StubNetworkRepo nets, StubNodeRepo nodes, StubOuiLookup oui, EventDetectionService events) Build()
+    // v0.11 Plan 14-04 -- programmable stub for INodeAdminService. Returns a canned
+    // DisconnectResult so each Disconnect-button test pins one variant of the D-12
+    // result-mapping matrix.
+    private sealed class StubNodeAdminService : INodeAdminService
+    {
+        public DisconnectResult Result { get; set; } = new DisconnectResult.Success();
+        public int CallCount { get; private set; }
+        public string? LastMac { get; private set; }
+        public string? LastIface { get; private set; }
+
+        public Task<DisconnectResult> DisconnectStationAsync(WiFiNode node, string mac, string iface, CancellationToken ct)
+        {
+            CallCount++;
+            LastMac = mac;
+            LastIface = iface;
+            return Task.FromResult(Result);
+        }
+    }
+
+    private static (BunitContext ctx, StubStationRepo stations, StubNetworkRepo nets, StubNodeRepo nodes, StubOuiLookup oui, EventDetectionService events, StubNodeAdminService nodeAdmin) Build()
     {
         var ctx = new BunitContext();
         var stations = new StubStationRepo();
         var nets = new StubNetworkRepo();
         var nodes = new StubNodeRepo();
         var oui = new StubOuiLookup();
+        var nodeAdmin = new StubNodeAdminService();
         ctx.Services.AddSingleton<IStationRepo>(stations);
         ctx.Services.AddSingleton<INetworkRepo>(nets);
         ctx.Services.AddSingleton<INodeRepo>(nodes);
         ctx.Services.AddSingleton<IOuiLookup>(oui);
         ctx.Services.AddSingleton<IAppSettingsService>(new StubSettings());
+        // v0.11 Plan 14-04 DISC-01..07 -- Detail.razor now injects INodeAdminService.
+        ctx.Services.AddSingleton<INodeAdminService>(nodeAdmin);
 
         // Quick task 260511-cmi — Detail.razor injects EventDetectionService for the
         // ForgetMac call in HandleDeleteAsync. Register a real service with stub deps; the
@@ -162,7 +185,7 @@ public sealed class DetailTests
         ctx.Services.AddSingleton(toasts);
         ctx.Services.AddSingleton(events);
 
-        return (ctx, stations, nets, nodes, oui, events);
+        return (ctx, stations, nets, nodes, oui, events, nodeAdmin);
     }
 
     private static WLANStation MakeStation(string mac = "AA:BB:CC:00:00:01") => new()
@@ -178,7 +201,7 @@ public sealed class DetailTests
     [Fact]
     public void Renders_AllFields_ForExistingStation()
     {
-        var (ctx, stations, nets, nodes, oui, _) = Build();
+        var (ctx, stations, nets, nodes, oui, _, _) = Build();
         stations.Existing = MakeStation();
         nets.Existing     = new WiFiNetwork { Id = 10, WiFiNodeId = 1, MacAddress = "00:11:22:33:44:55", SSID = "guest", Enabled = true };
         nodes.Nodes.Add(new WiFiNode { Id = 1, Hostname = "ap-A", Username = "root", Password = "x", Status = Status.Online, LastPollDate = DateTime.UtcNow });
@@ -218,7 +241,7 @@ public sealed class DetailTests
     [Fact]
     public void Renders_404_WhenStationNotFound()
     {
-        var (ctx, stations, _, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _, _) = Build();
         stations.Existing = null;
 
         using (ctx)
@@ -234,7 +257,7 @@ public sealed class DetailTests
     [Fact]
     public void MacRouteParam_IsUrlDecoded_AndUppercased()
     {
-        var (ctx, stations, _, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _, _) = Build();
         stations.Existing = MakeStation();
 
         using (ctx)
@@ -249,7 +272,7 @@ public sealed class DetailTests
     [Fact]
     public void SaveNameButton_CallsSetNameAsync_WithTrimmedValue()
     {
-        var (ctx, stations, _, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _, _) = Build();
         stations.Existing = MakeStation();
 
         using (ctx)
@@ -267,7 +290,7 @@ public sealed class DetailTests
     [Fact]
     public void SaveNameButton_EmptyValue_CallsSetNameAsyncWithNull()
     {
-        var (ctx, stations, _, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _, _) = Build();
         stations.Existing = MakeStation();
 
         using (ctx)
@@ -285,7 +308,7 @@ public sealed class DetailTests
     [Fact]
     public void DeleteButton_OpensModal_NotYetCallingRepo()
     {
-        var (ctx, stations, _, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _, _) = Build();
         stations.Existing = MakeStation();
 
         using (ctx)
@@ -311,7 +334,7 @@ public sealed class DetailTests
     [Fact]
     public void DeleteModal_Confirm_InvalidatesEventDetectionKnownMacs()
     {
-        var (ctx, stations, _, _, _, events) = Build();
+        var (ctx, stations, _, _, _, events, _) = Build();
         stations.Existing = MakeStation();
 
         // Seed _knownMacs directly so we test the cache-invalidation path without
@@ -345,7 +368,7 @@ public sealed class DetailTests
     [Fact]
     public void DeleteModal_Confirm_CallsDeleteByMacAsync()
     {
-        var (ctx, stations, _, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _, _) = Build();
         stations.Existing = MakeStation();
 
         using (ctx)
@@ -373,7 +396,7 @@ public sealed class DetailTests
     [Fact]
     public void DeleteModal_Cancel_DoesNotCallDeleteByMacAsync()
     {
-        var (ctx, stations, _, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _, _) = Build();
         stations.Existing = MakeStation();
 
         using (ctx)
@@ -391,7 +414,7 @@ public sealed class DetailTests
     [Fact]
     public void SignalCell_RendersRssiBar_ForKnownSignal()
     {
-        var (ctx, stations, _, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _, _) = Build();
         stations.Existing = MakeStation();
 
         using (ctx)
@@ -407,7 +430,7 @@ public sealed class DetailTests
     [Fact]
     public void SignalCell_RendersEmDash_WhenRssNull()
     {
-        var (ctx, stations, _, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _, _) = Build();
         var stn = MakeStation();
         stn.RSS = null;
         stations.Existing = stn;
@@ -425,7 +448,7 @@ public sealed class DetailTests
     [Fact]
     public void RandomMacToggle_Prefills_FromIsRandomMac_True()
     {
-        var (ctx, stations, _, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _, _) = Build();
         var s = MakeStation();
         s.IsRandomMac = true;
         stations.Existing = s;
@@ -441,7 +464,7 @@ public sealed class DetailTests
     [Fact]
     public void RandomMacToggle_Prefills_FromIsRandomMac_False()
     {
-        var (ctx, stations, _, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _, _) = Build();
         var s = MakeStation();
         s.IsRandomMac = false;
         stations.Existing = s;
@@ -457,7 +480,7 @@ public sealed class DetailTests
     [Fact]
     public void RandomMacToggle_Change_InvokesSetIsRandomMacAsync_WithNewValue()
     {
-        var (ctx, stations, _, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _, _) = Build();
         var s = MakeStation();
         s.IsRandomMac = false;
         stations.Existing = s;
@@ -477,7 +500,7 @@ public sealed class DetailTests
     [Fact]
     public void RandomMacToggle_Change_ShowsSavedFlash()
     {
-        var (ctx, stations, _, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _, _) = Build();
         var s = MakeStation();
         s.IsRandomMac = false;
         stations.Existing = s;
@@ -501,7 +524,7 @@ public sealed class DetailTests
     [Fact]
     public void Render_Surfaces_FirstSeen_Above_LastSeen()
     {
-        var (ctx, stations, _, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _, _) = Build();
         var firstSeen = new DateTime(2026, 1, 15, 12, 0, 0, DateTimeKind.Utc);
         var lastSeen  = new DateTime(2026, 5, 11,  9, 0, 0, DateTimeKind.Utc);
         var stn = MakeStation();
@@ -538,7 +561,7 @@ public sealed class DetailTests
     [Fact]
     public void DeleteModal_Title_ContainsStationName()
     {
-        var (ctx, stations, _, _, _, _) = Build();
+        var (ctx, stations, _, _, _, _, _) = Build();
         var stn = MakeStation();
         stn.Name = "Alice's phone";
         stations.Existing = stn;
@@ -550,6 +573,164 @@ public sealed class DetailTests
 
             Assert.Contains("Delete station", cut.Markup);
             Assert.Contains("Alice's phone", cut.Markup);
+        }
+    }
+
+    // ── v0.11 Plan 14-04 DISC-03/DISC-04/DISC-05/DISC-07 — Disconnect button + ConfirmationModal + result mapping ──
+
+    // Helper: seed station + network (with IfaceName populated, D-10) + node so HandleDisconnectAsync
+    // has all the data it needs to invoke INodeAdminService. Set the stub's canned result via
+    // nodeAdmin.Result before clicking confirm.
+    private static (BunitContext ctx, StubNodeAdminService nodeAdmin) BuildDisconnectContext(DisconnectResult cannedResult)
+    {
+        var (ctx, stations, nets, nodes, _, _, nodeAdmin) = Build();
+        stations.Existing = MakeStation();
+        nets.Existing = new WiFiNetwork
+        {
+            Id = 10,
+            WiFiNodeId = 1,
+            MacAddress = "00:11:22:33:44:55",
+            SSID = "guest",
+            Enabled = true,
+            IfaceName = "wlan0",   // D-10 — IfaceName now persisted; required for HandleDisconnectAsync.
+        };
+        nodes.Nodes.Add(new WiFiNode
+        {
+            Id = 1,
+            Hostname = "ap-A",
+            Username = "root",
+            Password = "x",
+            Status = Status.Online,
+            LastPollDate = DateTime.UtcNow,
+        });
+        nodeAdmin.Result = cannedResult;
+        return (ctx, nodeAdmin);
+    }
+
+    [Fact]
+    public void DisconnectButton_IsAlwaysVisible_NoCapabilityGating()
+    {
+        // D-11 + D-14: button is rendered unconditionally on a station page that has a resolvable
+        // network + node. No capability probe, no role check.
+        var (ctx, _) = BuildDisconnectContext(new DisconnectResult.Success());
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            var btn = cut.Find("#disconnect-station-button");
+            Assert.NotNull(btn);
+            // Initial render: not disabled (no disconnect in flight).
+            Assert.False(btn.HasAttribute("disabled"));
+            Assert.Contains("Disconnect station", btn.TextContent);
+        }
+    }
+
+    [Fact]
+    public void DisconnectButton_Click_OpensConfirmationModal()
+    {
+        var (ctx, _) = BuildDisconnectContext(new DisconnectResult.Success());
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            cut.Find("#disconnect-station-button").Click();
+            // Modal class includes "show" when open.
+            var modals = cut.FindAll(".modal.show");
+            Assert.True(modals.Any(), "Expected at least one .modal.show after Disconnect click.");
+            // The disconnect modal body copy:
+            Assert.Contains("Issues a ubus deauth", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public void DisconnectModal_Confirm_OnSuccess_ShowsSuccessBanner()
+    {
+        var (ctx, nodeAdmin) = BuildDisconnectContext(new DisconnectResult.Success());
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            cut.Find("#disconnect-station-button").Click();
+            // The Disconnect modal is the SECOND .modal-footer .btn-danger on the page (the first
+            // is the Delete modal's Confirm). Find the one whose textContent reads "Disconnect".
+            var confirmBtns = cut.FindAll(".modal-footer .btn-danger");
+            var disconnectConfirm = confirmBtns.First(b => b.TextContent.Trim() == "Disconnect");
+            disconnectConfirm.Click();
+
+            Assert.Equal(1, nodeAdmin.CallCount);
+            Assert.Equal("AA:BB:CC:00:00:01", nodeAdmin.LastMac);
+            Assert.Equal("wlan0", nodeAdmin.LastIface);
+            Assert.Contains("Disconnect issued — station should leave the WLAN on the next poll cycle.", cut.Markup);
+            Assert.Contains("alert-success", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public void DisconnectModal_Confirm_OnTimeout_ShowsTimeoutErrorBanner()
+    {
+        var (ctx, nodeAdmin) = BuildDisconnectContext(new DisconnectResult.Timeout());
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            cut.Find("#disconnect-station-button").Click();
+            cut.FindAll(".modal-footer .btn-danger").First(b => b.TextContent.Trim() == "Disconnect").Click();
+
+            Assert.Equal(1, nodeAdmin.CallCount);
+            Assert.Contains("Disconnect failed — AP unreachable within 5s.", cut.Markup);
+            Assert.Contains("alert-danger", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public void DisconnectModal_Confirm_OnNotSupported_ShowsCapabilityMissingBanner()
+    {
+        var (ctx, nodeAdmin) = BuildDisconnectContext(new DisconnectResult.NotSupported("Object not found"));
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            cut.Find("#disconnect-station-button").Click();
+            cut.FindAll(".modal-footer .btn-danger").First(b => b.TextContent.Trim() == "Disconnect").Click();
+
+            Assert.Equal(1, nodeAdmin.CallCount);
+            Assert.Contains("Disconnect not supported on this AP — ubus/hostapd missing.", cut.Markup);
+            Assert.Contains("alert-danger", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public void DisconnectModal_Confirm_OnNoSuchStation_ShowsInformationalBanner()
+    {
+        var (ctx, nodeAdmin) = BuildDisconnectContext(new DisconnectResult.NoSuchStation("no such station"));
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            cut.Find("#disconnect-station-button").Click();
+            cut.FindAll(".modal-footer .btn-danger").First(b => b.TextContent.Trim() == "Disconnect").Click();
+
+            Assert.Equal(1, nodeAdmin.CallCount);
+            Assert.Contains("Station is no longer associated with this AP.", cut.Markup);
+            // D-12 case 3 — informational tone, not error.
+            Assert.Contains("alert-success", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public void DisconnectModal_Confirm_OnUnknownError_ShowsCheckLogsBanner()
+    {
+        var (ctx, nodeAdmin) = BuildDisconnectContext(new DisconnectResult.UnknownError("kaboom"));
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            cut.Find("#disconnect-station-button").Click();
+            cut.FindAll(".modal-footer .btn-danger").First(b => b.TextContent.Trim() == "Disconnect").Click();
+
+            Assert.Equal(1, nodeAdmin.CallCount);
+            Assert.Contains("Disconnect failed — check logs.", cut.Markup);
+            Assert.Contains("alert-danger", cut.Markup);
         }
     }
 }

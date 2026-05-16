@@ -12,6 +12,9 @@
 @inject IAppSettingsService Settings
 @inject NavigationManager Nav
 @inject ApStatsForOpenWrt.Services.EventDetectionService Events
+@* v0.11 Plan 14-04 DISC-01..07 -- write-side SSH disconnect path. *@
+@inject ApStatsForOpenWrt.Services.Admin.INodeAdminService NodeAdmin
+@inject ILogger<ApStatsForOpenWrt.Components.Pages.Stations.Detail> Log
 
 @* Stations/Detail.razor — Phase 5 D-13 / DASH-15 / DASH-14 / DASH-16. UI-SPEC §Layout
    Contracts §/Stations/{mac} (lines 244-316), §Component Contracts §Detail Page (lines
@@ -154,6 +157,37 @@ else
                         </small>
                         @if (_randomMacFlash) { <small class="text-success">Saved</small> }
                     </div>
+
+                    @* v0.11 DISC-03 + DISC-04 + DISC-05 + DISC-07 (CONTEXT 14 §D-08/D-09/D-11/D-12/D-13/D-14)
+                       -- Disconnect station write-side SSH action. ALWAYS visible (D-11 + D-14 single-password
+                       model -- no capability gating, no role gating). Failure modes surface via _disconnectBanner. *@
+                    <hr class="my-3" />
+
+                    @if (!string.IsNullOrEmpty(_disconnectBanner))
+                    {
+                        <div class="alert @(_disconnectBannerIsError ? "alert-danger" : "alert-success")" role="alert">@_disconnectBanner</div>
+                    }
+
+                    <div>
+                        <button type="button"
+                                id="disconnect-station-button"
+                                class="btn btn-outline-warning"
+                                @onclick="@(() => _disconnectOpen = true)"
+                                disabled="@_disconnectInFlight">
+                            @if (_disconnectInFlight)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                <span>Disconnecting…</span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-x-octagon me-2"></i><span>Disconnect station</span>
+                            }
+                        </button>
+                        <small class="form-text d-block text-body-secondary mt-2">
+                            Issues a ubus deauth on the access point. The station may re-associate immediately.
+                        </small>
+                    </div>
                 </div>
                 <div class="card-footer bg-body">
                     <button type="button" class="btn btn-outline-danger" @onclick="@(() => _deleteOpen = true)">
@@ -175,6 +209,17 @@ else
             This removes it from the dashboard. If it reconnects to a monitored WLAN it will reappear on the next poll.
         </Body>
     </ConfirmationModal>
+
+    @* v0.11 DISC-03 — disconnect confirm modal. Reuses Phase 3 ConfirmationModal verbatim. *@
+    <ConfirmationModal IsOpen="_disconnectOpen"
+                       IsOpenChanged="@((bool v) => _disconnectOpen = v)"
+                       Title="@($"Disconnect station \"{(_station.Name ?? _station.MacAddress)}\" from this WLAN?")"
+                       ConfirmLabel="Disconnect"
+                       OnConfirm="HandleDisconnectAsync">
+        <Body>
+            Issues a ubus deauth so the station drops the association. It may re-associate immediately to a closer AP (this is the intended behaviour).
+        </Body>
+    </ConfirmationModal>
 }
 
 @code {
@@ -192,6 +237,13 @@ else
     private bool _saving;
     private bool _savedFlash;
     private bool _deleteOpen;
+
+    // v0.11 DISC-03 / DISC-04 / DISC-05 -- disconnect state. Kept distinct from the
+    // delete/save fields so the existing tests don't observe a collision (checker Warning 9).
+    private bool _disconnectOpen;
+    private bool _disconnectInFlight;
+    private string? _disconnectBanner;
+    private bool _disconnectBannerIsError;
 
     // Phase 10 DASH-22 / DASH-23 — random-MAC override toggle state.
     private bool _isRandomMac;
@@ -293,6 +345,93 @@ else
         Events.ForgetMac(_station.MacAddress);
         await Stations.DeleteByMacAsync(_station.MacAddress);
         Nav.NavigateTo("/");
+    }
+
+    // v0.11 DISC-03/DISC-04/DISC-05/DISC-07 — Disconnect station write-side SSH action.
+    // CONTEXT 14 §D-11 (always-try-and-handle-error) + §D-12 (four failure cases verbatim)
+    // + §D-13 (success message + Serilog audit format) + §D-14 (single-password model:
+    // no role gating).
+    private async Task HandleDisconnectAsync()
+    {
+        if (_station is null || _network is null) return;
+
+        var iface = _network.IfaceName;        // D-10 — IfaceName now persisted (Plan 14-04 Task 1).
+        if (string.IsNullOrEmpty(iface))
+        {
+            // Defensive: if a fresh DB row hasn't yet been re-polled post-migration, IfaceName
+            // can be null. Surface a clear error and ask the operator to wait one cycle.
+            _disconnectBannerIsError = true;
+            _disconnectBanner = "Disconnect failed — AP iface name not yet known. Wait one polling cycle and retry.";
+            _ = AutoDismissDisconnectBanner();
+            return;
+        }
+
+        var node = await Nodes.GetByIdAsync(_network.WiFiNodeId);
+        if (node is null)
+        {
+            _disconnectBannerIsError = true;
+            _disconnectBanner = "Disconnect failed — AP not found.";
+            _ = AutoDismissDisconnectBanner();
+            return;
+        }
+
+        _disconnectInFlight = true;
+        _disconnectBanner = null;
+        try
+        {
+            var result = await NodeAdmin.DisconnectStationAsync(node, _station.MacAddress, iface, CancellationToken.None);
+            switch (result)
+            {
+                case ApStatsForOpenWrt.Services.Admin.DisconnectResult.Success:
+                    _disconnectBannerIsError = false;
+                    _disconnectBanner = "Disconnect issued — station should leave the WLAN on the next poll cycle.";
+                    Log.LogInformation(
+                        "Disconnect issued: NodeId={NodeId} Iface={Iface} StationMac={Mac}",
+                        node.Id, iface, _station.MacAddress);
+                    break;
+                case ApStatsForOpenWrt.Services.Admin.DisconnectResult.Timeout:
+                    _disconnectBannerIsError = true;
+                    _disconnectBanner = "Disconnect failed — AP unreachable within 5s.";
+                    Log.LogWarning(
+                        "Disconnect failed (timeout): NodeId={NodeId} Iface={Iface} StationMac={Mac}",
+                        node.Id, iface, _station.MacAddress);
+                    break;
+                case ApStatsForOpenWrt.Services.Admin.DisconnectResult.NotSupported ns:
+                    _disconnectBannerIsError = true;
+                    _disconnectBanner = "Disconnect not supported on this AP — ubus/hostapd missing.";
+                    Log.LogWarning(
+                        "Disconnect failed (not-supported): NodeId={NodeId} Iface={Iface} StationMac={Mac} Raw={Raw}",
+                        node.Id, iface, _station.MacAddress, ns.Raw);
+                    break;
+                case ApStatsForOpenWrt.Services.Admin.DisconnectResult.NoSuchStation nss:
+                    _disconnectBannerIsError = false;       // D-12 case 3 — informational tone.
+                    _disconnectBanner = "Station is no longer associated with this AP.";
+                    Log.LogInformation(
+                        "Disconnect: station already absent: NodeId={NodeId} Iface={Iface} StationMac={Mac} Raw={Raw}",
+                        node.Id, iface, _station.MacAddress, nss.Raw);
+                    break;
+                case ApStatsForOpenWrt.Services.Admin.DisconnectResult.UnknownError ue:
+                    _disconnectBannerIsError = true;
+                    _disconnectBanner = "Disconnect failed — check logs.";
+                    Log.LogWarning(
+                        "Disconnect failed (unknown): NodeId={NodeId} Iface={Iface} StationMac={Mac} Raw={Raw}",
+                        node.Id, iface, _station.MacAddress, ue.Raw);
+                    break;
+            }
+        }
+        finally
+        {
+            _disconnectInFlight = false;
+            _ = AutoDismissDisconnectBanner();
+        }
+    }
+
+    private async Task AutoDismissDisconnectBanner()
+    {
+        // Mirrors Settings.razor:296-301 5-second auto-dismiss pattern (operator legibility).
+        await Task.Delay(5000);
+        _disconnectBanner = null;
+        await InvokeAsync(StateHasChanged);
     }
 
     private static string RelativeTime(DateTime t)
