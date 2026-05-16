@@ -768,8 +768,10 @@ public sealed class DetailTests
         using (ctx)
         {
             var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
-            // Initial render observed Online.
-            Assert.Contains("text-bg-success", cut.Markup);
+            // Initial render: StatusBadge shows Online. (Use the badge's text-content +
+            // closing tag as the specific marker -- `text-bg-success` also appears on
+            // the RSSI signal bar segments so it's not a precise enough discriminator.)
+            Assert.Contains(">Online</span>", cut.Markup);
             var initialLoadCount = stations.GetByMacCallCount;
 
             // Simulate a DB-side change between cycles: the next cycle should observe Offline.
@@ -787,8 +789,8 @@ public sealed class DetailTests
                 $"GetByMacCallCount stayed at {stations.GetByMacCallCount} after Cycled raise; expected > {initialLoadCount} (live subscription missing).");
 
             // And the badge must now reflect the new state (Offline, not Online).
-            Assert.Contains("text-bg-secondary", cut.Markup);
-            Assert.DoesNotContain("text-bg-success", cut.Markup);
+            Assert.Contains(">Offline</span>", cut.Markup);
+            Assert.DoesNotContain(">Online</span>", cut.Markup);
         }
     }
 
@@ -838,8 +840,9 @@ public sealed class DetailTests
         using (ctx)
         {
             var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
-            // Pre-click: badge shows Online.
-            Assert.Contains("text-bg-success", cut.Markup);
+            // Pre-click: StatusBadge shows Online. (Targeting `>Online</span>` rather than
+            // `text-bg-success` because the latter also matches the RSSI signal bar.)
+            Assert.Contains(">Online</span>", cut.Markup);
 
             cut.Find("#disconnect-station-button").Click();
             cut.FindAll(".modal-footer .btn-danger").First(b => b.TextContent.Trim() == "Disconnect").Click();
@@ -847,8 +850,8 @@ public sealed class DetailTests
             // Success banner present AND status immediately flipped to Offline -- no Cycled raised.
             Assert.Equal(1, nodeAdmin.CallCount);
             Assert.Contains("Disconnect issued — station should leave the WLAN on the next poll cycle.", cut.Markup);
-            Assert.Contains("text-bg-secondary", cut.Markup);
-            Assert.DoesNotContain("text-bg-success", cut.Markup);
+            Assert.Contains(">Offline</span>", cut.Markup);
+            Assert.DoesNotContain(">Online</span>", cut.Markup);
         }
     }
 
@@ -879,14 +882,14 @@ public sealed class DetailTests
         using (ctx)
         {
             var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
-            Assert.Contains("text-bg-success", cut.Markup);   // pre: Online
+            Assert.Contains(">Online</span>", cut.Markup);   // pre: Online
 
             cut.Find("#disconnect-station-button").Click();
             cut.FindAll(".modal-footer .btn-danger").First(b => b.TextContent.Trim() == "Disconnect").Click();
 
-            // Status badge unchanged (NoSuchStation may render an informational banner but
+            // StatusBadge unchanged (NoSuchStation may render an informational banner but
             // MUST NOT flip the status -- the station could legitimately still be there).
-            Assert.Contains("text-bg-success", cut.Markup);
+            Assert.Contains(">Online</span>", cut.Markup);
         }
     }
 }

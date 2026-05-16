@@ -1,7 +1,9 @@
 @page "/Stations/{Mac}"
+@implements IDisposable
 @using System.ComponentModel.DataAnnotations
 @using ApStatsForOpenWrt.Data.Models
 @using ApStatsForOpenWrt.Data.Repositories
+@using ApStatsForOpenWrt.Services.Polling
 @using ApStatsForOpenWrt.Services.Settings
 @using ApStatsForOpenWrt.Services.Vendor
 
@@ -15,13 +17,25 @@
 @* v0.11 Plan 14-04 DISC-01..07 -- write-side SSH disconnect path. *@
 @inject ApStatsForOpenWrt.Services.Admin.INodeAdminService NodeAdmin
 @inject ILogger<ApStatsForOpenWrt.Components.Pages.Stations.Detail> Log
+@* 260516-dlu — live-update subscription so the page reflects DB-side changes
+   (notably post-Disconnect Offline transitions) without manual navigation/F5. *@
+@inject PollNotifier Notifier
 
 @* Stations/Detail.razor — Phase 5 D-13 / DASH-15 / DASH-14 / DASH-16. UI-SPEC §Layout
    Contracts §/Stations/{mac} (lines 244-316), §Component Contracts §Detail Page (lines
    764-823). Two-column responsive AdminLTE card layout. Read-only fields left, edit
    Name + Delete trigger right. Reuses Phase 3 ConfirmationModal verbatim for D-14
-   (PATTERNS.md "Decision: prefer direct reuse over wrapper"). Detail page does NOT
-   subscribe to PollNotifier (UI-SPEC line 947). *@
+   (PATTERNS.md "Decision: prefer direct reuse over wrapper").
+
+   v0.11 / Quick task 260516-dlu (amends Phase 5 UI-SPEC line 947 'snapshot' framing):
+   the page subscribes to PollNotifier.Cycled in OnInitializedAsync and re-runs
+   LoadAsync on every successful cycle, then unsubscribes in Dispose with W4 double-
+   guard (volatile _disposed flag + try/catch around InvokeAsync) mirroring
+   PollCountdown.razor's disposal discipline verbatim. Triggered by the v0.11 QUAL-02
+   LIVE-UAT operator-side request 2026-05-16 ('after the disconnection I expect that
+   the station data will be updated as reported offline'). The optimistic Offline flip
+   on DisconnectResult.Success below complements the subscription -- instant feedback,
+   then the next real Cycled converges authoritatively against the DB. *@
 
 <PageHeader Title="@DisplayName" />
 
@@ -249,12 +263,56 @@ else
     private bool _isRandomMac;
     private bool _randomMacFlash;
 
+    // 260516-dlu — W4 race-with-Dispose guard for the PollNotifier.Cycled subscription
+    // (mirrors PollCountdown.razor:60 verbatim). Set to true FIRST in Dispose(), BEFORE
+    // detaching the subscription, so a concurrent Cycled handler invocation short-circuits
+    // before touching the (already torn-down) renderer.
+    private volatile bool _disposed;
+
     private string DisplayName => _station?.Name ?? _station?.Hostname ?? _station?.MacAddress ?? "Station";
+
+    // 260516-dlu — subscribe to PollNotifier.Cycled on the FIRST render only. OnInitializedAsync
+    // runs once per component lifetime (NOT once per parameter change, which is OnParametersSetAsync).
+    // Pattern: subscribe-in-Init / unsubscribe-in-Dispose with W4 double-guard (Phase 5 D-12 paired
+    // adjacency; PollCountdown.razor reference).
+    protected override Task OnInitializedAsync()
+    {
+        Notifier.Cycled += OnCycleAsync;
+        return Task.CompletedTask;
+    }
 
     protected override async Task OnParametersSetAsync()
     {
         _mac = Uri.UnescapeDataString(Mac).ToUpperInvariant();   // Phase 2 D-07 MAC casing rule
         await LoadAsync();
+    }
+
+    // 260516-dlu — Cycled handler. The post-tx.CommitAsync raise from PollOrchestrator means a fresh
+    // DB read will reflect any state flipped by the most recent cycle (notably stations marked
+    // Offline because they were not observed in `iw dev <iface> station dump`). Re-run LoadAsync
+    // to refresh _station / _network / _vendor / _isStale, then trigger a re-render. Pitfall 7:
+    // the handler returns Task (NOT async void) to keep exceptions observable.
+    private async Task OnCycleAsync(PollSnapshot s)
+    {
+        if (_disposed) return;     // W4: skip if dispose already happened
+        await LoadAsync();
+        // Pitfall 7 + W4 belt-and-braces: a race between this handler and Dispose() may catch
+        // the renderer in a torn-down state -- swallow the ObjectDisposedException so we don't
+        // crash the SignalR circuit during a navigation transition.
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+            // W4: race between Cycled raise and Dispose() -- renderer is gone, swallow.
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;     // W4: set BEFORE detaching subscription (paired adjacency invariant)
+        Notifier.Cycled -= OnCycleAsync;
     }
 
     private async Task LoadAsync()
@@ -388,6 +446,15 @@ else
                     Log.LogInformation(
                         "Disconnect issued: NodeId={NodeId} Iface={Iface} StationMac={Mac}",
                         node.Id, iface, _station.MacAddress);
+                    // 260516-dlu — optimistic UI update: flip the local Status to Offline immediately
+                    // so the StatusBadge reflects the operator's intent without waiting for the next
+                    // poll cycle. The Cycled subscription wired in OnInitializedAsync converges
+                    // authoritatively on the next ≤ PollingIntervalSeconds tick -- either confirms
+                    // Offline (station no longer associated) or corrects to Online (station re-
+                    // associated within the cycle window). Bounded optimism is acceptable here:
+                    // the operator's mental model after clicking Disconnect is "the station IS now
+                    // disconnected" and the badge should match that intent immediately.
+                    _station.Status = Status.Offline;
                     break;
                 case ApStatsForOpenWrt.Services.Admin.DisconnectResult.Timeout:
                     _disconnectBannerIsError = true;
