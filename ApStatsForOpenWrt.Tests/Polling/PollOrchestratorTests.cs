@@ -1268,6 +1268,124 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
         Assert.Equal(0, cycledCount);
     }
 
+    // ── Quick task 260516-pce — PollSnapshot.CycleEndUtc producer-side contract ──
+    // Operator-visible symptom (v0.11 QUAL-02 LIVE-UAT surface (a), 2026-05-16): the
+    // PollCountdown badge restarts at 25s after Cycled instead of the full 30s
+    // PollingIntervalSeconds. Root cause: PollOrchestrator.RunCycleAsync captured
+    // `var now = DateTime.UtcNow` early in the cycle (just after the SSH fan-out,
+    // before enrichment + station upserts + tx.CommitAsync) and reused the same
+    // stale `now` for BOTH `_ticks` (LastSuccessfulCycleUtc) AND
+    // `PollSnapshot.CycleEndUtc`. Operator's clarification: "the timer should
+    // restore after the polling AND the enrichment operation" — i.e., the
+    // end-of-cycle wall clock must be captured downstream of the per-node
+    // `enrichmentFactory` awaits, NOT upstream.
+    //
+    // This test pins the producer-side contract by injecting a deliberate post-line-125
+    // delay via a slow enrichmentFactory. With the bug shape, CycleEndUtc ≈ run-start;
+    // with the fix, CycleEndUtc lags run-start by at least the injected delay.
+
+    [Fact]
+    public async Task CycleEndUtc_ReflectsActualCycleEnd_NotStartOfCycleSnapshot()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (nodeId, _, bssid) = await SeedNodeWithOneNetworkAsync(ct);
+
+        var notifier = new PollNotifier();
+        DateTime? capturedCycleEndUtc = null;
+        notifier.Cycled += s =>
+        {
+            capturedCycleEndUtc = s.CycleEndUtc;
+            return Task.CompletedTask;
+        };
+
+        Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync = (n, _) =>
+        {
+            // Shared-fixture DB: only this test's node should produce live data.
+            // Other tests' nodes return Failed so they skip the enrichment loop and
+            // do NOT trigger the slow factory below.
+            if (n.Id != nodeId)
+                return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Failed(n.Id, "not-this-test"));
+            var net = new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssid, SSID = "Net" };
+            return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Success(
+                NodeId: n.Id,
+                Networks: new[] { net },
+                Stations: Array.Empty<WLANStation>(),
+                NewlyTrustedFingerprint: null));
+        };
+
+        // Inject a deliberate delay strictly between the line-125 'now' capture and
+        // the post-commit snapshot construction. The enrichmentFactory is awaited
+        // inside the Phase 10 ORCH-01..08 block (PollOrchestrator.cs line ~308),
+        // which runs after step 4's per-node network upsert flush AND before
+        // tx.CommitAsync. Fresh seeded WiFiNode has SubnetScanEnabled=true and
+        // LastEnrichmentRefreshAt=null, so EnrichmentRefreshTrigger.ShouldRefresh
+        // returns true on first cycle and the factory IS invoked for this node.
+        const int delayMs = 200;
+        Func<WiFiNode, IReadOnlyList<string>, string, CancellationToken, Task<EnrichmentDelta?>> slowEnrich =
+            async (_, _, _, innerCt) =>
+            {
+                await Task.Delay(delayMs, innerCt);
+                return null;
+            };
+
+        var dpFactory = new TestDbContextFactory(_fixture.Options);
+        var orch = new PollOrchestrator(
+            dpFactory,
+            new NodeRepo(dpFactory),
+            new NetworkRepo(dpFactory),
+            new StationRepo(dpFactory),
+            probeAsync,
+            notifier,
+            NullLogger<PollOrchestrator>.Instance,
+            new StubSettings(30),
+            slowEnrich,
+            TimeProvider.System,
+            new ForceEnrichmentService());
+
+        var lastSuccessBefore = orch.LastSuccessfulCycleUtc;
+        await orch.RunCycleAsync(ct);
+        var afterRun = DateTime.UtcNow;
+        var lastSuccessAfter = orch.LastSuccessfulCycleUtc;
+
+        Assert.NotNull(capturedCycleEndUtc);
+        var cycleEndUtc = capturedCycleEndUtc!.Value;
+
+        // PRODUCER CONTRACT #1 (260516-pce / PollSnapshot.CycleEndUtc):
+        // CycleEndUtc must be captured AT THE END of the cycle (after enrichment +
+        // commit), not at the start. The cleanest discriminator is the gap between
+        // the snapshot timestamp and the moment RunCycleAsync returns:
+        //
+        //   - Fixed code: cycleEndUtc captured at line ~487 (post-tx.CommitAsync),
+        //     snapshot raised at line ~505, RunCycleAsync returns shortly after.
+        //     Gap is tens of milliseconds at most.
+        //   - Bug shape: cycleEndUtc was the stale `now` from line ~125 — captured
+        //     BEFORE the 200ms enrichment await on line ~308. So afterRun - cycleEndUtc
+        //     is at least delayMs (≈ 200ms) plus the post-enrichment work.
+        //
+        // We assert the gap is below half the injected delay — strictly within the
+        // band achievable only when CycleEndUtc is sampled at end-of-cycle.
+        var gapToAfterRun = (afterRun - cycleEndUtc).TotalMilliseconds;
+        Assert.True(
+            gapToAfterRun < delayMs / 2,
+            $"afterRun - PollSnapshot.CycleEndUtc = {gapToAfterRun:F0}ms — " +
+            $"expected < {delayMs / 2}ms (a larger gap means CycleEndUtc was captured before the {delayMs}ms enrichment delay, " +
+            $"i.e. at start-of-cycle line ~125 instead of end-of-cycle line ~487 — the v0.11 LIVE-UAT surface-(a) bug shape).");
+
+        // CycleEndUtc must not come from the future relative to RunCycleAsync's return.
+        Assert.True(
+            cycleEndUtc <= afterRun,
+            $"PollSnapshot.CycleEndUtc {cycleEndUtc:O} is after RunCycleAsync returned ({afterRun:O}).");
+
+        // PRODUCER CONTRACT #2 (260516-pce / _ticks LastSuccessfulCycleUtc):
+        // The unified post-commit timestamp must also be reflected in the
+        // /health-facing LastSuccessfulCycleUtc. After the fix the two values are
+        // written from the same `cycleEndUtc` capture, so they must agree exactly —
+        // this pins the "single source of truth for end-of-cycle wall clock"
+        // contract across both consumer surfaces.
+        Assert.NotEqual(lastSuccessBefore, lastSuccessAfter);
+        Assert.Equal(cycleEndUtc, lastSuccessAfter);
+    }
+
     /// <summary>Minimal IAppSettingsService stub for orchestrator tests. Only PollingIntervalSeconds is exercised.</summary>
     private sealed class StubSettings(int pollingIntervalSeconds) : IAppSettingsService
     {
