@@ -59,15 +59,18 @@ public sealed class NetworkRepo(IDbContextFactory<DatabaseContext> factory) : IN
             if (existingByMac.TryGetValue(probe.MacAddress, out var existingRow))
             {
                 // Update fields in place; preserve `Enabled` toggle across re-discoveries (WLAN-03).
-                existingRow.SSID    = probe.SSID;
-                existingRow.Channel = probe.Channel;
-                existingRow.Width   = probe.Width;
-                existingRow.TxPower = probe.TxPower;
+                existingRow.SSID      = probe.SSID;
+                existingRow.Channel   = probe.Channel;
+                existingRow.Width     = probe.Width;
+                existingRow.TxPower   = probe.TxPower;
+                existingRow.IfaceName = probe.IfaceName;   // v0.11 D-10 — IfaceName persisted; parser-populated.
                 // existingRow.Enabled is intentionally NOT overwritten — operator toggles persist.
             }
             else
             {
                 probe.WiFiNodeId = wiFiNodeId;
+                // probe.IfaceName already populated by parser (OpenWrtOutputParser line 119 / 224);
+                // it now lands on the INSERT via EF's tracker. v0.11 D-10.
                 db.WiFiNetworks.Add(probe);
             }
         }

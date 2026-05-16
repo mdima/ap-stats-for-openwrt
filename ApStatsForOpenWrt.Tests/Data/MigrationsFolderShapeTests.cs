@@ -29,17 +29,23 @@ public class MigrationsFolderShapeTests
     public void MigrationsFolder_ContainsExactlyOneInitialCreate_RegeneratedAgainstNewAssemblyName()
     {
         // Per CONTEXT.md D-09.2 + ROADMAP success criterion #4 — Migrations/ MUST contain
-        // exactly one migration named InitialCreate. The regenerated triplet is:
-        //   {timestamp}_InitialCreate.cs
-        //   {timestamp}_InitialCreate.Designer.cs
+        // exactly one migration named InitialCreate. v0.11 Phase 14 Plan 14-04 D-10
+        // conditional yield adds a SECOND migration AddWiFiNetworkIfaceName (single-column
+        // add for the DISC-01 disconnect path).
+        //
+        // Expected shape from v0.11 onwards:
+        //   {ts1}_InitialCreate.cs                            (Phase 1)
+        //   {ts1}_InitialCreate.Designer.cs                   (Phase 1)
+        //   {ts2}_AddWiFiNetworkIfaceName.cs                  (Plan 14-04 D-10)
+        //   {ts2}_AddWiFiNetworkIfaceName.Designer.cs         (Plan 14-04 D-10)
         //   DatabaseContextModelSnapshot.cs
-        // = 3 .cs files total, of which exactly 1 is a non-Designer *_InitialCreate.cs.
+        // = 5 .cs files. The InitialCreate uniqueness assertion is preserved.
 
         var dir = ResolveMigrationsDir();
         Assert.True(Directory.Exists(dir), $"Migrations folder not found at {dir}");
 
         var allCs = Directory.EnumerateFiles(dir, "*.cs", SearchOption.TopDirectoryOnly).ToList();
-        Assert.Equal(3, allCs.Count);
+        Assert.Equal(5, allCs.Count);
 
         var initialCreate = allCs
             .Where(p => Path.GetFileName(p).EndsWith("_InitialCreate.cs", StringComparison.Ordinal))
@@ -51,6 +57,18 @@ public class MigrationsFolderShapeTests
             .Where(p => Path.GetFileName(p).EndsWith("_InitialCreate.Designer.cs", StringComparison.Ordinal))
             .ToList();
         Assert.Single(designer);
+
+        // v0.11 D-10 — the AddWiFiNetworkIfaceName migration sister pair (.cs + .Designer.cs).
+        var addIface = allCs
+            .Where(p => Path.GetFileName(p).EndsWith("_AddWiFiNetworkIfaceName.cs", StringComparison.Ordinal))
+            .Where(p => !Path.GetFileName(p).EndsWith(".Designer.cs", StringComparison.Ordinal))
+            .ToList();
+        Assert.Single(addIface);
+
+        var addIfaceDesigner = allCs
+            .Where(p => Path.GetFileName(p).EndsWith("_AddWiFiNetworkIfaceName.Designer.cs", StringComparison.Ordinal))
+            .ToList();
+        Assert.Single(addIfaceDesigner);
 
         var snapshot = allCs
             .Where(p => Path.GetFileName(p).Equals("DatabaseContextModelSnapshot.cs", StringComparison.Ordinal))
