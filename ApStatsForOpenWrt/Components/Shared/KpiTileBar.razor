@@ -30,24 +30,24 @@
 
 <div class="kpi-bar mb-3" role="group" aria-label="Status filter — KPI tiles">
     <div class="row g-3">
-        <div class="col-md-3 col-sm-6 col-12">
+        <div class="col-md-3 col-sm-6 col-6">
             <KpiTile Label="All devices" Count="@_total" IconClass="bi-collection-fill"
                      IsActive="@(Active is null)"
                      OnSelected="@(() => SelectAsync(null))" />
         </div>
-        <div class="col-md-3 col-sm-6 col-12">
+        <div class="col-md-3 col-sm-6 col-6">
             <KpiTile Label="Online" Count="@_online" IconClass="bi-wifi"
                      IsActive="@(Active == StatusFilter.Online)"
                      BackgroundClass="KpiOnline"
                      OnSelected="@(() => SelectAsync(StatusFilter.Online))" />
         </div>
-        <div class="col-md-3 col-sm-6 col-12">
+        <div class="col-md-3 col-sm-6 col-6">
             <KpiTile Label="Stale" Count="@_stale" IconClass="bi-exclamation-triangle-fill"
                      IsActive="@(Active == StatusFilter.Stale)"
                      BackgroundClass="KpiStale"
                      OnSelected="@(() => SelectAsync(StatusFilter.Stale))" />
         </div>
-        <div class="col-md-3 col-sm-6 col-12">
+        <div class="col-md-3 col-sm-6 col-6">
             <KpiTile Label="Offline" Count="@_offline" IconClass="bi-wifi-off"
                      IsActive="@(Active == StatusFilter.Offline)"
                      BackgroundClass="KpiOffline"

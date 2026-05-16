@@ -17,7 +17,7 @@
   --bs-warning:   #f39c12;
   --bs-danger:    #dd4b39;
   --bs-info:      #00c0ef;
-  --bs-secondary: #8c8c8c;
+  --bs-secondary: #7c7c7c;
 }
 
 /* WCAG AA contrast for first-column hyperlinks (Dashboard table → /Stations/{mac}).
@@ -136,7 +136,7 @@
     background-color: rgba(var(--bs-warning-rgb), 0.2) !important;
 }
 .KpiOffline {
-    background-color: rgba(var(--bs-secondary-rgb), 0.2) !important;
+    background-color: rgba(var(--bs-secondary-rgb), 0.3) !important;
 }
 
 .KpiOnline:hover, .KpiStale:hover, .KpiOffline:hover {

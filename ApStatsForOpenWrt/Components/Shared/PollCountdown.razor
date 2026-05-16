@@ -75,8 +75,16 @@
         {
             var nextAt    = _lastCycleEndUtc.Value.AddSeconds(Settings.PollingIntervalSeconds);
             var remaining = (int)Math.Max(0, Math.Round((nextAt - DateTime.UtcNow).TotalSeconds));
-            _displayText = $"{remaining}s";
-            _ariaLabel   = $"Next poll in {remaining} seconds";
+            if (remaining == 0)
+            {
+                _displayText = "Working";
+                _ariaLabel = "Pulling APs";
+            }
+            else
+            {
+                _displayText = $"{remaining}s";
+                _ariaLabel = $"Next poll in {remaining} seconds";
+            }
         }
         // The Timer callback is OUTSIDE the Blazor circuit's sync context.
         // W4: belt + braces — Dispose() may have run between the _disposed check and here.
