@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using ApStatsForOpenWrt.Data;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Enrichment;
 using ApStatsForOpenWrt.Services.Polling.Exceptions;
 using ApStatsForOpenWrt.Services.Settings;
 
@@ -37,7 +38,8 @@ public sealed class PollOrchestrator(
     ILogger<PollOrchestrator> log,
     IAppSettingsService settings,
     Func<WiFiNode, IReadOnlyList<string>, string, CancellationToken, Task<EnrichmentDelta?>> enrichmentFactory,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IForceEnrichmentService forceEnrichment)
 {
     // D-09 — lock-free LastSuccessfulCycleUtc exposure for /health (plan 06-03 reads this).
     // Volatile.Read<T> requires primitive/reference type; DateTime (struct) is NOT eligible —
@@ -179,6 +181,21 @@ public sealed class PollOrchestrator(
                 if (!existingStationsByNode.ContainsKey(nid)) existingStationsByNode[nid] = new List<(int, string, string?, string?)>();
             }
 
+            // 14-02 / ENRICH-01 (CONTEXT 14 §D-05) — force-enrichment flag capture-and-clear.
+            // Done ONCE per cycle at the block entry so the CAS happens exactly once even if a
+            // Request() races with a same-cycle consumption. Scope (D-05): bypass the time-based
+            // gate for ALL online nodes. SubnetScanEnabled (per-node operator opt-out) is still
+            // honored — D-05's "all online nodes" reads as "all online nodes the operator has not
+            // opted out of" (CONTEXT.md D-05 §"Force-flag scope", updated 2026-05-16 in response
+            // to plan-checker Blocker 4). An operator who set SubnetScanEnabled=false on a node
+            // explicitly excluded it from active enrichment regardless of cadence, consistent
+            // with EnrichmentRefreshTrigger.cs line 20 early-return.
+            var forceConsumed = forceEnrichment.ConsumeIfSet();
+            if (forceConsumed)
+            {
+                log.LogInformation("Force-enrichment flag consumed; bypassing time-based gate for all SubnetScan-enabled online nodes this cycle.");
+            }
+
             foreach (var r in results.OfType<NodeProbeResult.Success>())
             {
                 var node = nodes.First(n => n.Id == r.NodeId);
@@ -186,7 +203,13 @@ public sealed class PollOrchestrator(
                 var existingMacs = existingMacsByNode[r.NodeId];
                 var newMacDetected = observedMacs.Any(m => !existingMacs.Contains(m));
 
-                if (!EnrichmentRefreshTrigger.ShouldRefresh(node, enrichmentNow, refreshIntervalSeconds, newMacDetected))
+                // 14-02 / D-05 — combined gate: (force AND opted-in) OR time-based trigger.
+                // D-07 cadence-from-completion is preserved unchanged: UpdateLastEnrichmentRefreshAtAsync
+                // at line ~284 below bumps LastEnrichmentRefreshAt per-node in BOTH the natural and
+                // forced paths, so the post-force time-based gate resumes counting from completion.
+                var shouldRefresh = (forceConsumed && node.SubnetScanEnabled)
+                                 || EnrichmentRefreshTrigger.ShouldRefresh(node, enrichmentNow, refreshIntervalSeconds, newMacDetected);
+                if (!shouldRefresh)
                 {
                     continue;
                 }

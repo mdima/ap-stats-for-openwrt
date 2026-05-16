@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using ApStatsForOpenWrt.Data;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Enrichment;
 using ApStatsForOpenWrt.Services.Polling;
 using ApStatsForOpenWrt.Services.Polling.Ssh;
 using ApStatsForOpenWrt.Services.Settings;
@@ -149,7 +150,8 @@ public sealed class Phase10AcceptanceSignalTests(SqliteInMemoryFixture fixture, 
 
         var orchestrator = new PollOrchestrator(
             dpFactory, nodeRepo, networkRepo, stationRepo, probeFactory, notifier,
-            NullLogger<PollOrchestrator>.Instance, settings, enrichmentFactory, TimeProvider.System);
+            NullLogger<PollOrchestrator>.Instance, settings, enrichmentFactory, TimeProvider.System,
+            new ForceEnrichmentService());
 
         // First cycle: probe emits 20 stations with null IPAddress; orchestrator's enrichmentFactory
         // populates IPs via the sweep; ipsForDns is empty on this cycle (all probe stations had null

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using ApStatsForOpenWrt.Data;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Enrichment;
 using ApStatsForOpenWrt.Services.Polling;
 using ApStatsForOpenWrt.Services.Polling.Exceptions;
 using ApStatsForOpenWrt.Services.Settings;
@@ -56,7 +57,8 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
             logger ?? NullLogger<PollOrchestrator>.Instance,
             new StubSettings(pollingIntervalSeconds),
             (_, _, _, _) => Task.FromResult<EnrichmentDelta?>(null),     // Phase 10 default: no enrichment this cycle
-            TimeProvider.System);
+            TimeProvider.System,
+            new ForceEnrichmentService());                                // 14-02 ENRICH-01: no force-flag in default test path
     }
 
     private async Task<(int nodeId, int netId, string netBssid)> SeedNodeWithOneNetworkAsync(CancellationToken ct, string? hostKeyFingerprint = null)
@@ -704,7 +706,8 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
             NullLogger<PollOrchestrator>.Instance,
             new StubSettings(30),
             (_, _, _, _) => Task.FromResult<EnrichmentDelta?>(null),
-            TimeProvider.System);
+            TimeProvider.System,
+            new ForceEnrichmentService());
 
         var before = orch.LastSuccessfulCycleUtc;
 
@@ -1202,7 +1205,8 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
             NullLogger<PollOrchestrator>.Instance,
             new StubSettings(30),
             (_, _, _, _) => Task.FromResult<EnrichmentDelta?>(null),
-            TimeProvider.System);
+            TimeProvider.System,
+            new ForceEnrichmentService());
 
         await orch.RunCycleAsync(ct);
 
@@ -1255,7 +1259,8 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
             NullLogger<PollOrchestrator>.Instance,
             new StubSettings(30),
             (_, _, _, _) => Task.FromResult<EnrichmentDelta?>(null),
-            TimeProvider.System);
+            TimeProvider.System,
+            new ForceEnrichmentService());
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => orch.RunCycleAsync(ct));
 
