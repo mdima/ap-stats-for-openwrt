@@ -60,15 +60,20 @@ try
             shared: false)));
 
     // 3. EF Core — factory only, NEVER scoped DbContext (PER-05; PITFALL: captive dependency).
-    //    Pooling=True for connection reuse; Default Timeout=5 -> PRAGMA busy_timeout=5000
-    //    so transient SQLITE_BUSY (file-lock) is retried instead of erroring.
+    //    Pooling=True for connection reuse; Default Timeout=30 -> PRAGMA busy_timeout=30000
+    //    so transient SQLITE_BUSY (file-lock) is retried instead of erroring. 260517-stp
+    //    bumped from 5 -> 30: the cold-start poll cycle takes ~5-10s on the operator's fleet
+    //    (SSH ALG-negotiation + AP iwinfo warm-up + DHCP-table population), and 5s wasn't
+    //    enough headroom for the Setup/Wlans.razor auto-discovery write to wait out the
+    //    orchestrator's tx -- the discovery's BeginTransaction would exhaust the 5s and
+    //    surface SQLITE_BUSY (Error 5), killing the Blazor circuit (see 260517-stp PLAN).
     //    NO Cache=Shared on a file DB: shared cache forces table-level cache locks that
     //    bypass WAL's file-level reader/writer concurrency, producing SQLITE_LOCKED (error 6)
     //    when the orchestrator transaction holds WiFiNodes while the dashboard / health checks
     //    read it. WAL itself is enabled by MigrationsHostedService via PRAGMA journal_mode=WAL
     //    and is persisted on the DB file.
     builder.Services.AddDbContextFactory<DatabaseContext>(options =>
-        options.UseSqlite($"Data Source={dataRoot}/AP-Stats-for-OpenWrt.db;Pooling=True;Default Timeout=5"));
+        options.UseSqlite($"Data Source={dataRoot}/AP-Stats-for-OpenWrt.db;Pooling=True;Default Timeout=30"));
 
     // 4. ASP.NET Data Protection — file-system key ring + verbatim application name (D-02 / SEC-03).
     //    On Linux/WSL2 keys are NOT encrypted at rest (DPAPI is Windows-only) —
@@ -86,6 +91,27 @@ try
     builder.Services.AddTransient<IStationRepo,     StationRepo>();
     builder.Services.AddTransient<IAppSettingsRepo, AppSettingsRepo>();
     builder.Services.AddSingleton<IAppSettingsService, AppSettingsService>();
+
+    // v0.11 ENRICH-01 / CONTEXT 14 §D-05 — one-shot force-enrichment flag for the
+    // "Run now" button on Settings/Index.razor. Singleton-lifetime; backed by a single
+    // int + Interlocked CAS (lock-free). Consumed once-per-cycle by PollOrchestrator at
+    // the entry to the Phase 10 enrichment block. PollOrchestrator constructor now takes
+    // IForceEnrichmentService — registered HERE so the DI graph resolves the new ctor param
+    // without per-test boilerplate. Plan 14-02.
+    builder.Services.AddSingleton<ApStatsForOpenWrt.Services.Enrichment.IForceEnrichmentService,
+                                  ApStatsForOpenWrt.Services.Enrichment.ForceEnrichmentService>();
+
+    // v0.11 DISC-01 / CONTEXT 14 §D-09 — write-side SSH responsibility, dedicated from
+    // NodePoller. Stateless service; lifetime = Transient. Constructor takes a
+    // Func<ISshSession> factory so each call gets a fresh session (matches NodePoller's
+    // per-call lifecycle). The ISshSession factory resolves the existing Transient
+    // ISshSession registration. Plan 14-04.
+    builder.Services.AddTransient<ApStatsForOpenWrt.Services.Admin.INodeAdminService,
+                                  ApStatsForOpenWrt.Services.Admin.NodeAdminService>(sp =>
+        new ApStatsForOpenWrt.Services.Admin.NodeAdminService(
+            sessionFactory: () => sp.GetRequiredService<ApStatsForOpenWrt.Services.Polling.Ssh.ISshSession>(),
+            dpp: sp.GetRequiredService<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>(),
+            log: sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ApStatsForOpenWrt.Services.Admin.NodeAdminService>>()));
 
     // 5b. Polling subsystem (Phase 2). PollOrchestrator is the PER-04 carve-out #3 — see ArchitectureTests.
     //     ISshSession is transient (one fresh session per poll, per Pitfall 5).

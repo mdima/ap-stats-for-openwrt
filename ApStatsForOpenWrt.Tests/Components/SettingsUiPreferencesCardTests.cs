@@ -5,6 +5,8 @@ using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
 using ApStatsForOpenWrt.Services;
 using ApStatsForOpenWrt.Services.Auth;
+using ApStatsForOpenWrt.Services.Enrichment;
+using ApStatsForOpenWrt.Services.Polling;
 using ApStatsForOpenWrt.Services.Settings;
 using Xunit;
 
@@ -85,6 +87,13 @@ public sealed class SettingsUiPreferencesCardTests
         ctx.Services.AddSingleton<IAppSettingsService>(new StubAppSettingsService());
         ctx.Services.AddSingleton<IUIPasswordHasher>(new StubUIPasswordHasher());
         ctx.Services.AddSingleton<INodeRepo>(new StubNodeRepo());
+
+        // v0.11 ENRICH-02 (Plan 14-02) — Settings/Index.razor now injects IForceEnrichmentService
+        // + PollNotifier for the "Run now" button. This test focuses on the UI preferences card,
+        // but the page render fails fast if either dep is missing. Real services with no-op subscribers
+        // are sufficient — these tests do not exercise the Run-now button path.
+        ctx.Services.AddSingleton<PollNotifier>();
+        ctx.Services.AddSingleton<IForceEnrichmentService, ForceEnrichmentService>();
 
         // The card under test — real PreferencesService over the bUnit-faked JS module.
         var prefs = new PreferencesService(ctx.JSInterop.JSRuntime);

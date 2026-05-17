@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using ApStatsForOpenWrt.Data;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Enrichment;
 using ApStatsForOpenWrt.Services.Polling;
 using ApStatsForOpenWrt.Services.Settings;
 using ApStatsForOpenWrt.Tests.TestSupport;
@@ -123,7 +124,8 @@ public sealed class PollOrchestratorDeletionRebidTests(SqliteInMemoryFixture fix
             NullLogger<PollOrchestrator>.Instance,
             new StubSettings(),
             factory,
-            fakeClock);
+            fakeClock,
+            new ForceEnrichmentService());
 
         // ── Cycle 1 (steady-state, no change): trigger should NOT fire ──
         await BuildOrch().RunCycleAsync(ct);

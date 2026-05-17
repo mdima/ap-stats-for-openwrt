@@ -164,4 +164,26 @@ public sealed class ArchitectureTests
         var expected = typeof(Func<ApStatsForOpenWrt.Services.Gating.GateState, Task>);
         Assert.Equal(expected, ev!.EventHandlerType);
     }
+
+    /// <summary>
+    /// v0.11 Phase 14 Plan 14-04 / CONTEXT 14 §D-09 — <c>NodeAdminService</c> is a write-side
+    /// SSH responsibility; it does NOT touch the DB (disconnect is out-of-band; effects appear
+    /// via the next normal poll cycle observing the station's absence). Receiving the WiFiNode +
+    /// iface from the Detail page (which already loaded them via INodeRepo + INetworkRepo) is
+    /// the architectural contract; injecting <c>IDbContextFactory&lt;DatabaseContext&gt;</c>
+    /// directly would conflate the write-side SSH responsibility with the polling/persistence
+    /// plane and re-open the captive-dep risk that <c>DbContext_IsOnlyUsedByRepositories</c>
+    /// guards against. This test makes any future drift provably loud.
+    /// </summary>
+    [Fact]
+    public void NodeAdminService_DoesNotInject_IDbContextFactory()
+    {
+        var ctorParams = typeof(ApStatsForOpenWrt.Services.Admin.NodeAdminService)
+            .GetConstructors()
+            .Single()
+            .GetParameters()
+            .Select(p => p.ParameterType.FullName ?? "")
+            .ToList();
+        Assert.DoesNotContain(ctorParams, t => t.Contains("IDbContextFactory", StringComparison.Ordinal));
+    }
 }

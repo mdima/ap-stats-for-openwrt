@@ -12,7 +12,7 @@ namespace ApStatsForOpenWrt.Web.Helpers;
 /// - empty fqdn → empty
 /// - null/empty suffix list → fqdn unchanged
 /// - whitespace suffix tokens → skipped
-/// - leading-dot suffix → normalized (".michelecasa" treated as "michelecasa")
+/// - leading-dot suffix → normalized (".localnetwork" treated as "localnetwork")
 /// - host-only label that equals a suffix → pass-through (don't produce empty string)
 /// </para>
 /// </summary>
@@ -26,7 +26,7 @@ public static class HostnameDisplay
         foreach (var suffix in suffixes)
         {
             if (string.IsNullOrWhiteSpace(suffix)) continue;
-            // Normalize the suffix to ".michelecasa" form so the EndsWith check is unambiguous.
+            // Normalize the suffix to ".localnetwork" form so the EndsWith check is unambiguous.
             var sfx = suffix.StartsWith('.') ? suffix : "." + suffix;
             if (fqdn.EndsWith(sfx, StringComparison.OrdinalIgnoreCase))
             {

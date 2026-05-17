@@ -66,6 +66,11 @@ public sealed class CompositionRootValidationTests
         // 5b — the exact registrations from Program.cs (sans dead AddTransient<NodePoller>).
         services.AddSingleton<OpenWrtAdapterCache>();
         services.AddSingleton<PollNotifier>();
+        // v0.11 ENRICH-01 / CONTEXT 14 §D-05 — force-enrichment singleton (Plan 14-02). PollOrchestrator
+        // primary-ctor takes IForceEnrichmentService, so its DI graph requires this registration to
+        // pass ValidateOnBuild=true.
+        services.AddSingleton<ApStatsForOpenWrt.Services.Enrichment.IForceEnrichmentService,
+                              ApStatsForOpenWrt.Services.Enrichment.ForceEnrichmentService>();
         // Phase 10 ORCH-07 — TimeProvider + Phase 9 probes (additive registrations from Program.cs).
         services.AddSingleton(TimeProvider.System);
         services.AddTransient<ApStatsForOpenWrt.Services.Polling.SubnetSweepProbe>();

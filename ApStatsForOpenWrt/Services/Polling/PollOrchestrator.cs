@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using ApStatsForOpenWrt.Data;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Enrichment;
 using ApStatsForOpenWrt.Services.Polling.Exceptions;
 using ApStatsForOpenWrt.Services.Settings;
 
@@ -37,7 +38,8 @@ public sealed class PollOrchestrator(
     ILogger<PollOrchestrator> log,
     IAppSettingsService settings,
     Func<WiFiNode, IReadOnlyList<string>, string, CancellationToken, Task<EnrichmentDelta?>> enrichmentFactory,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IForceEnrichmentService forceEnrichment)
 {
     // D-09 — lock-free LastSuccessfulCycleUtc exposure for /health (plan 06-03 reads this).
     // Volatile.Read<T> requires primitive/reference type; DateTime (struct) is NOT eligible —
@@ -59,8 +61,30 @@ public sealed class PollOrchestrator(
     public DateTime LastSuccessfulCycleUtc
         => new(Volatile.Read(ref _ticks), DateTimeKind.Utc);
 
+    // 14-03 / AUDIT-01 (CONTEXT 14 §D-15 + §D-16): monotonic cycle sequence counter — used as a
+    // Serilog scoped property so a first-cycle skip pattern is legible against subsequent-cycle
+    // behaviour in the rolling log file. Process-lifetime only; reset on host restart.
+    // Interlocked-incremented at the top of RunCycleAsync. First-cycle == 1.
+    private static long _cycleSequenceCounter;
+
     public async Task RunCycleAsync(CancellationToken ct)
     {
+        // 14-03 / AUDIT-01 — cycle-scoped instrumentation. The Serilog scope captures CycleSequence
+        // (1, 2, 3, ...) on every log line emitted inside this method. First-cycle == 1; legible in
+        // /logs/log-*.txt as `... CycleSequence=1 ...`. Per-station Debug skip-reason logs + the
+        // cycle-level Information summary line below feed the AUDIT-02 memo (D-15).
+        var cycleSeq = Interlocked.Increment(ref _cycleSequenceCounter);
+        using var logScope = log.BeginScope(new Dictionary<string, object> { ["CycleSequence"] = cycleSeq });
+
+        // 14-01 / CONTEXT 14 §D-02: fire CycleStarted at the TOP of the cycle — BEFORE BeginTransactionAsync
+        // and BEFORE any await that might throw. PollCountdown.razor reads this and holds the badge text at
+        // "Polling…" (D-01) until the next successful tx.CommitAsync raises Cycled (line ~365, UNCHANGED).
+        // CONTEXT 14 §D-03: try/catch/finally is NOT extended; a thrown exception below leaves the badge
+        // held until the next successful Cycled — operator-authorised passive failure signal.
+        // Plan 14-02's "Run now" button disable-state (CONTEXT 14 §D-06) also consumes this event for the
+        // cycle-in-flight OR condition.
+        await notifier.RaiseCycleStartedAsync();
+
         var nodes = await nodeRepo.GetAllAsync(ct);
         if (nodes.Count == 0)
         {
@@ -170,6 +194,32 @@ public sealed class PollOrchestrator(
                 if (!existingStationsByNode.ContainsKey(nid)) existingStationsByNode[nid] = new List<(int, string, string?, string?)>();
             }
 
+            // 14-02 / ENRICH-01 (CONTEXT 14 §D-05) — force-enrichment flag capture-and-clear.
+            // Done ONCE per cycle at the block entry so the CAS happens exactly once even if a
+            // Request() races with a same-cycle consumption. Scope (D-05): bypass the time-based
+            // gate for ALL online nodes. SubnetScanEnabled (per-node operator opt-out) is still
+            // honored — D-05's "all online nodes" reads as "all online nodes the operator has not
+            // opted out of" (CONTEXT.md D-05 §"Force-flag scope", updated 2026-05-16 in response
+            // to plan-checker Blocker 4). An operator who set SubnetScanEnabled=false on a node
+            // explicitly excluded it from active enrichment regardless of cadence, consistent
+            // with EnrichmentRefreshTrigger.cs line 20 early-return.
+            var forceConsumed = forceEnrichment.ConsumeIfSet();
+            if (forceConsumed)
+            {
+                log.LogInformation("Force-enrichment flag consumed; bypassing time-based gate for all SubnetScan-enabled online nodes this cycle.");
+            }
+
+            // 14-03 / AUDIT-01 (CONTEXT 14 §D-15) — per-cycle enrichment counters. Aggregated at the
+            // end of the enrichment loop and emitted as a single Information-level summary line so
+            // operator-deployed rolling logs surface the skip pattern without per-station spew at
+            // default log level. Per-station Debug entries below distinguish four named skip reasons.
+            int enrichmentObserved = 0;
+            int enrichmentEnriched = 0;
+            int enrichmentSkippedSubnetOptOut = 0;
+            int enrichmentSkippedTimeGate = 0;
+            int enrichmentNullDelta = 0;
+            int enrichmentFactoryThrew = 0;
+
             foreach (var r in results.OfType<NodeProbeResult.Success>())
             {
                 var node = nodes.First(n => n.Id == r.NodeId);
@@ -177,8 +227,37 @@ public sealed class PollOrchestrator(
                 var existingMacs = existingMacsByNode[r.NodeId];
                 var newMacDetected = observedMacs.Any(m => !existingMacs.Contains(m));
 
-                if (!EnrichmentRefreshTrigger.ShouldRefresh(node, enrichmentNow, refreshIntervalSeconds, newMacDetected))
+                // 14-03 / AUDIT-01 — observed station count for this node (basis for the
+                // first-cycle coverage ratio in the AUDIT-04 reference fixture).
+                enrichmentObserved += r.Stations.Count;
+
+                // 14-02 / D-05 — combined gate: (force AND opted-in) OR time-based trigger.
+                // D-07 cadence-from-completion is preserved unchanged: UpdateLastEnrichmentRefreshAtAsync
+                // at line ~284 below bumps LastEnrichmentRefreshAt per-node in BOTH the natural and
+                // forced paths, so the post-force time-based gate resumes counting from completion.
+                var shouldRefresh = (forceConsumed && node.SubnetScanEnabled)
+                                 || EnrichmentRefreshTrigger.ShouldRefresh(node, enrichmentNow, refreshIntervalSeconds, newMacDetected);
+                if (!shouldRefresh)
                 {
+                    // 14-03 / AUDIT-01 — distinguish the two skip reasons. SubnetScanEnabled=false is
+                    // the per-node operator opt-out (EnrichmentRefreshTrigger.cs:20 early-return); the
+                    // alternative "time-gate not eligible" arm is the LastEnrichmentRefreshAt + interval
+                    // gate. Different operator-actionable signals — collapsing them under one reason
+                    // would hide the opt-out class in the AUDIT-02 memo evidence.
+                    if (!node.SubnetScanEnabled)
+                    {
+                        enrichmentSkippedSubnetOptOut += r.Stations.Count;
+                        log.LogDebug(
+                            "AUDIT-01: skip enrichment for node {NodeId} ({Hostname}); reason=subnet-scan-disabled; stations={StationCount}",
+                            node.Id, node.Hostname, r.Stations.Count);
+                    }
+                    else
+                    {
+                        enrichmentSkippedTimeGate += r.Stations.Count;
+                        log.LogDebug(
+                            "AUDIT-01: skip enrichment for node {NodeId} ({Hostname}); reason=time-gate-not-eligible; LastEnrichmentRefreshAt={LastRefresh}; refreshIntervalSeconds={Interval}; newMacDetected={NewMac}; stations={StationCount}",
+                            node.Id, node.Hostname, node.LastEnrichmentRefreshAt, refreshIntervalSeconds, newMacDetected, r.Stations.Count);
+                    }
                     continue;
                 }
 
@@ -234,10 +313,26 @@ public sealed class PollOrchestrator(
                 }
                 catch (Exception ex)
                 {
-                    log.LogWarning(ex, "Node {Hostname} (Id={NodeId}): enrichmentFactory threw; persisted IPs/Hostnames preserved (DB-as-cache).", node.Hostname, node.Id);
+                    // 14-03 / AUDIT-01 — factory-threw skip reason. Logs at Warning (the original
+                    // shape) so production deployments default to surfacing this; the AUDIT-01
+                    // tagged message is the structured form for the audit memo.
+                    enrichmentFactoryThrew++;
+                    log.LogWarning(ex,
+                        "AUDIT-01: enrichment-factory threw for node {NodeId} ({Hostname}); stations on this node skipped this cycle; reason=factory-threw; stations={StationCount}",
+                        node.Id, node.Hostname, r.Stations.Count);
                     continue;
                 }
-                if (delta is null) continue;
+                if (delta is null)
+                {
+                    // 14-03 / AUDIT-01 — null-delta skip reason. The factory returned null
+                    // (intentional no-op) rather than throwing; stations on this node still get
+                    // skipped this cycle.
+                    enrichmentNullDelta++;
+                    log.LogDebug(
+                        "AUDIT-01: enrichment-factory returned null delta for node {NodeId} ({Hostname}); stations on this node skipped this cycle; reason=null-delta; stations={StationCount}",
+                        node.Id, node.Hostname, r.Stations.Count);
+                    continue;
+                }
 
                 // Merge delta into r.Stations BEFORE the dedup pass below:
                 //   - Fill missing IP from delta.SweepMacToIp[mac] (ORCH-04 DB-as-cache cascade).
@@ -246,6 +341,14 @@ public sealed class PollOrchestrator(
                 //     coalesce preserves any existing Hostname).
                 foreach (var s in r.Stations)
                 {
+                    // 14-03 / AUDIT-01 — capture pre-merge state for the per-station enrichment
+                    // count. A station "got enriched this cycle" iff it gained an IP or Hostname
+                    // it did not previously have. The DB-as-cache reload from existingByMacForNode
+                    // counts as enrichment for AUDIT-04 coverage purposes (the operator's UI sees
+                    // a populated value either way).
+                    var hadIpBefore = !string.IsNullOrEmpty(s.IPAddress);
+                    var hadHostnameBefore = !string.IsNullOrEmpty(s.Hostname);
+
                     if (string.IsNullOrEmpty(s.IPAddress) && delta.SweepMacToIp.TryGetValue(s.MacAddress, out var sweepIp))
                     {
                         s.IPAddress = sweepIp;
@@ -269,11 +372,30 @@ public sealed class PollOrchestrator(
                     {
                         s.Hostname = fqdn; // null = negative DNS; UpsertCycleAsync coalesces with existing.
                     }
+
+                    // 14-03 / AUDIT-01 — count this station as "enriched this cycle" if its IP or
+                    // Hostname transitioned null/empty -> populated through this loop body. Fields
+                    // that were already populated before the merge are NOT recounted.
+                    var hasIpAfter = !string.IsNullOrEmpty(s.IPAddress);
+                    var hasHostnameAfter = !string.IsNullOrEmpty(s.Hostname);
+                    if ((!hadIpBefore && hasIpAfter) || (!hadHostnameBefore && hasHostnameAfter))
+                    {
+                        enrichmentEnriched++;
+                    }
                 }
 
                 // ORCH-07 — persist the refresh timestamp INSIDE this transaction.
                 await nodeRepo.UpdateLastEnrichmentRefreshAtAsync(db, r.NodeId, enrichmentNow, ct);
             }
+            // 14-03 / AUDIT-01 (CONTEXT 14 §D-15) — cycle-level enrichment summary. Emits at
+            // Information level so the operator's production deployment surfaces the per-cycle
+            // coverage ratio without enabling Debug. The AUDIT-02 memo reads these summary lines
+            // from the operator's /logs/log-*.txt rolling file to extract the first-cycle skip
+            // pattern. Coverage is the (enriched / observed) ratio; zero stations observed -> 0.0.
+            log.LogInformation(
+                "AUDIT-01: cycle {CycleSequence} enrichment summary: observed={Observed} enriched={Enriched} skipped-subnet-opt-out={SkippedOptOut} skipped-time-gate={SkippedTimeGate} null-delta={NullDelta} factory-threw={FactoryThrew} coverage={Coverage:P1}",
+                cycleSeq, enrichmentObserved, enrichmentEnriched, enrichmentSkippedSubnetOptOut, enrichmentSkippedTimeGate, enrichmentNullDelta, enrichmentFactoryThrew,
+                enrichmentObserved == 0 ? 0.0 : (double)enrichmentEnriched / enrichmentObserved);
             // ─── End Phase 10 enrichment loop ──────────────────────────────────────────────────────
 
             // Build a station -> owning NodeId map (reference-keyed; avoids O(N²) Contains scans).
@@ -345,7 +467,25 @@ public sealed class PollOrchestrator(
                     .SetProperty(s => s.RxBitrate, 0.0), ct);
 
             await tx.CommitAsync(ct);
-            Interlocked.Exchange(ref _ticks, now.Ticks);     // D-09 — only after successful commit (write-after-commit invariant; rolled-back cycles do NOT advance _ticks).
+
+            // 260516-pce — Unified post-commit end-of-cycle wall clock. Consumed by:
+            //   (1) _ticks (LastSuccessfulCycleUtc — feeds /health 'lastPollAge' and
+            //       Dashboard last-poll timestamps), and
+            //   (2) PollSnapshot.CycleEndUtc (consumed by PollCountdown.razor:131 as
+            //       the countdown anchor and by Dashboard.razor:318-319 +
+            //       StatusBadge staleness derivation).
+            // Operator's clarification 2026-05-16: the countdown must restore "after
+            // the polling AND the enrichment operation." This capture is strictly
+            // downstream of both the SSH fan-out (Task.WhenAll(pollTasks) at line
+            // ~107) AND the per-node enrichmentFactory awaits (Phase 10 ORCH-01..08
+            // block, line ~308). The previous code reused the 'now' captured at
+            // line ~125 (right after the SSH fan-out, BEFORE enrichment + the final
+            // SaveChanges + commit) — making PollCountdown restart at
+            // PollingIntervalSeconds − cycleDuration (e.g. 25s instead of 30s for a
+            // ~5s cycle), the v0.11 QUAL-02 LIVE-UAT surface-(a) blocker. CONTEXT 14
+            // §D-04 #3 literal: "Cycled received; _lastCycleEndUtc = now".
+            var cycleEndUtc = DateTime.UtcNow;
+            Interlocked.Exchange(ref _ticks, cycleEndUtc.Ticks);     // D-09 — only after successful commit (write-after-commit invariant; rolled-back cycles do NOT advance _ticks).
 
             // 7.6 B10 LOCK -- post-commit TOFU audit log. Only emitted when the trust persisted.
             foreach (var t in newlyTrusted)
@@ -361,7 +501,7 @@ public sealed class PollOrchestrator(
                 OnlineNodes: results.Count(r => r is NodeProbeResult.Success),
                 FailedNodes: results.Count(r => r is NodeProbeResult.Failed),
                 StationCount: deduped.Count,
-                CycleEndUtc: now);
+                CycleEndUtc: cycleEndUtc);
             await notifier.RaiseAsync(snapshot);
 
             log.LogInformation(

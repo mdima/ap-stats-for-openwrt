@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using ApStatsForOpenWrt.Data;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Enrichment;
 using ApStatsForOpenWrt.Services.Polling;
 using ApStatsForOpenWrt.Services.Polling.Ssh;
 using ApStatsForOpenWrt.Services.Settings;
@@ -113,7 +114,8 @@ public sealed class PollOrchestratorPhase9IsolationTests(SqliteInMemoryFixture f
             NullLogger<PollOrchestrator>.Instance,
             settings,
             (_, _, _, _) => Task.FromResult<EnrichmentDelta?>(null),     // Phase 10 default: no enrichment this cycle (preserves the existing v0.9 command-set assertions)
-            TimeProvider.System);
+            TimeProvider.System,
+            new ForceEnrichmentService());
 
         // Run one cycle. Failures are acceptable: the assertion is on the COMMAND SET,
         // not on the cycle's success outcome.
@@ -204,7 +206,8 @@ public sealed class PollOrchestratorPhase9IsolationTests(SqliteInMemoryFixture f
 
         var orchestrator = new PollOrchestrator(
             dpFactory, nodeRepo, networkRepo, stationRepo, probeFactory, notifier,
-            NullLogger<PollOrchestrator>.Instance, settings, enrichmentFactory, TimeProvider.System);
+            NullLogger<PollOrchestrator>.Instance, settings, enrichmentFactory, TimeProvider.System,
+            new ForceEnrichmentService());
 
         await orchestrator.RunCycleAsync(ct);
 
@@ -272,7 +275,8 @@ public sealed class PollOrchestratorPhase9IsolationTests(SqliteInMemoryFixture f
 
         var orchestrator = new PollOrchestrator(
             dpFactory, nodeRepo, networkRepo, stationRepo, probeFactory, notifier,
-            NullLogger<PollOrchestrator>.Instance, settings, enrichmentFactory, TimeProvider.System);
+            NullLogger<PollOrchestrator>.Instance, settings, enrichmentFactory, TimeProvider.System,
+            new ForceEnrichmentService());
 
         await orchestrator.RunCycleAsync(ct);
 

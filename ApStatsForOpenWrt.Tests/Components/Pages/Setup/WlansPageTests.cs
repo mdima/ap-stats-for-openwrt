@@ -121,11 +121,17 @@ public sealed class WlansPageTests
     private sealed class StubDiscovery : IWlanDiscoveryService
     {
         public DiscoveryOutcome NextOutcome { get; set; } = new DiscoveryOutcome.Success(0, null);
+        // 260517-stp — allow the stub to throw on DiscoverAsync so we can cover the
+        // cold-start race-condition path where WlanDiscoveryService.PersistAsync's
+        // SaveChangesAsync hits a DbUpdateException (UNIQUE or busy-lock) and the
+        // exception escapes the service back to Setup/Wlans.razor.
+        public Exception? NextException { get; set; }
         public int CallCount;
 
         public Task<DiscoveryOutcome> DiscoverAsync(int nodeId, CancellationToken ct)
         {
             CallCount++;
+            if (NextException is not null) throw NextException;
             return Task.FromResult(NextOutcome);
         }
     }
@@ -302,6 +308,61 @@ public sealed class WlansPageTests
 
             // Assert: WizardDismissed set to true
             Assert.True(settings.WizardDismissed);
+        }
+    }
+
+    // ── 260517-stp — Setup/Wlans cold-start race tolerance ──────────────────
+    //
+    // Operator-reproduced 2026-05-17 17:39 mid-LIVE-UAT: on a fresh-DB cold-start,
+    // PollOrchestrator's first cycle holds the SQLite write lock while Setup/Wlans's
+    // auto-discovery on OnInitializedAsync also tries to write WiFiNetworks. Two
+    // failure modes surface depending on timing:
+    //   - Discovery's existing-rows snapshot reads empty just before orchestrator's
+    //     INSERT lands -> Discovery.SaveChanges hits UNIQUE constraint (Error 19).
+    //   - Discovery's BeginTransaction times out waiting for orchestrator's tx
+    //     to release the write lock -> SQLITE_BUSY (Error 5).
+    //
+    // Pre-260517-stp: WlanDiscoveryService propagates the DbUpdateException, the
+    // try/catch in Setup/Wlans.razor.DiscoverNodeAsync catches NOTHING (only the
+    // finally block runs), the exception bubbles up to OnInitializedAsync ->
+    // ComponentBase.RunInitAndSetParametersAsync -> Blazor circuit dies. The
+    // operator sees an unrecoverable "An unhandled error has occurred" page and
+    // cannot complete the Setup wizard. Reloading just hits the same race.
+    //
+    // Post-260517-stp: the page catches the exception, maps it to
+    // DiscoveryOutcome.Generic, and renders the inline error banner. The circuit
+    // stays alive; the operator can click "Finish setup" and the orchestrator's
+    // next cycle (already committed) provides the WiFiNetworks rows. The DB
+    // state is correct after the orchestrator's cycle 1; the UI just needs to
+    // not crash.
+
+    [Fact]
+    public async Task DiscoveryThrows_RendersErrorBanner_DoesNotKillCircuit()
+    {
+        var (ctx, nodeRepo, _, discovery, _) = Build();
+        using (ctx)
+        {
+            // Arrange: 1 node, discovery throws a DbUpdateException simulating the
+            // cold-start UNIQUE-constraint race (Error 19).
+            nodeRepo.Nodes.Add(new WiFiNode { Id = 1, Hostname = "ap1.local", Username = "root", Status = Status.Offline });
+            discovery.NextException = new Microsoft.EntityFrameworkCore.DbUpdateException(
+                "SQLite Error 19: 'UNIQUE constraint failed: WiFiNetworks.WiFiNodeId, WiFiNetworks.MacAddress'");
+
+            // Act: render the page. Pre-260517-stp this would throw out of bUnit
+            // (the unhandled exception escapes ComponentBase.RunInitAndSetParametersAsync).
+            // Post-260517-stp the page catches the exception, maps to Generic outcome,
+            // and renders the inline error banner.
+            var cut = ctx.Render<WlansPage>();
+            await cut.InvokeAsync(() => Task.CompletedTask);
+
+            // Assert: page rendered successfully (no exception escaped Render).
+            // The error banner is shown (same alert-danger marker as the existing
+            // DiscoveryFailure_RendersErrorBanner test uses).
+            Assert.Contains("alert-danger", cut.Markup);
+            // Forward guard: the page is in a usable state -- the Finish button
+            // is still rendered (operator can complete setup even when discovery failed).
+            var finishBtn = cut.FindAll("button").FirstOrDefault(b => b.TextContent.Contains("Finish"));
+            Assert.NotNull(finishBtn);
         }
     }
 }

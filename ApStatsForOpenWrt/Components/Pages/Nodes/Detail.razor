@@ -1,13 +1,26 @@
 @page "/Nodes/{Id:int}"
+@implements IDisposable
 @using ApStatsForOpenWrt.Services.Nodes
+@using ApStatsForOpenWrt.Services.Polling
 
 @inject INodeRepo Nodes
 @inject INetworkRepo Networks
 @inject IWlanDiscoveryService Discovery
 @inject NavigationManager Nav
+@* 260517-ndr — live-update subscription so the page reflects DB-side changes
+   (notably node Online/Offline transitions and refreshed LastPollDate) without
+   manual navigation/F5. Mirrors the 260516-dlu pattern that was applied to
+   Stations/Detail.razor; closes the parallel gap on the Nodes detail page. *@
+@inject PollNotifier Notifier
 
 @* /Nodes/{id} — NODE-05 (status + last polled) + WLAN-01..04 + per-node SET-03
-   Re-trust UI. UI-SPEC §Node Detail lines 378-395. *@
+   Re-trust UI. UI-SPEC §Node Detail lines 378-395.
+
+   v0.11 / Quick task 260517-ndr: the page subscribes to PollNotifier.Cycled in
+   OnInitializedAsync and re-runs LoadAsync on every successful cycle, then
+   unsubscribes in Dispose with W4 double-guard (volatile _disposed flag +
+   try/catch around InvokeAsync) mirroring PollCountdown.razor's disposal
+   discipline and 260516-dlu's Stations/Detail.razor wire-up verbatim. *@
 
 @if (_node is null)
 {
@@ -154,9 +167,45 @@ else
     private bool _retrustOpen;
     private int? _savedFlashId;
 
+    // 260517-ndr — W4 race-with-Dispose guard for the PollNotifier.Cycled subscription
+    // (mirrors PollCountdown.razor:60 and Stations/Detail.razor:270 verbatim). Set to true
+    // FIRST in Dispose(), BEFORE detaching the subscription, so a concurrent Cycled handler
+    // invocation short-circuits before touching the (already torn-down) renderer.
+    private volatile bool _disposed;
+
     protected override async Task OnInitializedAsync()
     {
+        // 260517-ndr — subscribe BEFORE the first LoadAsync so we cannot miss a Cycled event
+        // raised in the gap between mount and first render. OnInitializedAsync runs once per
+        // component lifetime; subscribe-in-Init / unsubscribe-in-Dispose paired adjacency
+        // (Phase 5 D-12 / 260516-dlu pattern).
+        Notifier.Cycled += OnCycleAsync;
         await LoadAsync();
+    }
+
+    // 260517-ndr — Cycled handler. The post-tx.CommitAsync raise from PollOrchestrator means a fresh
+    // DB read will reflect any state flipped by the most recent cycle (notably nodes marked Offline
+    // because their SSH probe failed). Re-run LoadAsync to refresh _node + _networks, then trigger
+    // a re-render. Pitfall 7: the handler returns Task (NOT async void) so exceptions stay
+    // observable; W4 belt-and-braces try/catch around InvokeAsync swallows the disposal race.
+    private async Task OnCycleAsync(PollSnapshot s)
+    {
+        if (_disposed) return;     // W4: skip if dispose already happened
+        await LoadAsync();
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+            // W4: race between Cycled raise and Dispose() -- renderer is gone, swallow.
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;     // W4: set BEFORE detaching subscription (paired adjacency invariant)
+        Notifier.Cycled -= OnCycleAsync;
     }
 
     private async Task LoadAsync()

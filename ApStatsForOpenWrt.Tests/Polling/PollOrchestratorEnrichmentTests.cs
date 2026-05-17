@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using ApStatsForOpenWrt.Data;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Enrichment;
 using ApStatsForOpenWrt.Services.Polling;
 using ApStatsForOpenWrt.Services.Settings;
 using ApStatsForOpenWrt.Tests.TestSupport;
@@ -58,7 +59,8 @@ public sealed class PollOrchestratorEnrichmentTests(SqliteInMemoryFixture fixtur
     private PollOrchestrator BuildOrchestrator(
         Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync,
         Func<WiFiNode, IReadOnlyList<string>, string, CancellationToken, Task<EnrichmentDelta?>>? enrichmentFactory = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IForceEnrichmentService? forceEnrichment = null)
     {
         var dpFactory = new TestDbContextFactory(_fixture.Options);
         return new PollOrchestrator(
@@ -71,7 +73,8 @@ public sealed class PollOrchestratorEnrichmentTests(SqliteInMemoryFixture fixtur
             NullLogger<PollOrchestrator>.Instance,
             new StubSettings(),
             enrichmentFactory ?? ((_, _, _, _) => Task.FromResult<EnrichmentDelta?>(null)),
-            timeProvider ?? TimeProvider.System);
+            timeProvider ?? TimeProvider.System,
+            forceEnrichment ?? new ForceEnrichmentService());
     }
 
     private static Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> ProbeForNode(int nodeId, string bssid, params WLANStation[] stations) =>
@@ -544,6 +547,150 @@ public sealed class PollOrchestratorEnrichmentTests(SqliteInMemoryFixture fixtur
         }
         // Two RunCommandAsync calls issued: first succeeded, second threw.
         Assert.Equal(2, session.CommandsIssued.Count);
+    }
+
+    // ── v0.11 ENRICH-01 (CONTEXT 14 §D-05/D-07) — Force-enrichment integration tests ──
+
+    [Fact]
+    public async Task ForceEnrichment_BypassesTimeBasedGate_AndEnrichesAllOnlineNodes()
+    {
+        // Seed two nodes; both have a recent LastEnrichmentRefreshAt so the time-based gate
+        // would NOT fire naturally this cycle. With ForceEnrichment.Request() called BEFORE
+        // RunCycleAsync, both nodes MUST have enrichmentFactory invoked.
+        var ct = TestContext.Current.CancellationToken;
+        var recent = DateTimeOffset.UtcNow;
+        var (n1Id, _, n1Bssid) = await SeedNodeWithOneNetworkAsync(ct, lastEnrichmentRefreshAt: recent);
+        var (n2Id, _, n2Bssid) = await SeedNodeWithOneNetworkAsync(ct, lastEnrichmentRefreshAt: recent);
+
+        var enrichedNodeIds = new HashSet<int>();
+        Task<EnrichmentDelta?> CapturingFactory(WiFiNode node, IReadOnlyList<string> _, string __, CancellationToken ___)
+        {
+            lock (enrichedNodeIds) { enrichedNodeIds.Add(node.Id); }
+            return Task.FromResult<EnrichmentDelta?>(new EnrichmentDelta(
+                node.Id,
+                new Dictionary<string, string>(StringComparer.Ordinal),
+                new Dictionary<string, string?>(StringComparer.Ordinal)));
+        }
+
+        // Probe-driver that recognizes BOTH seeded nodes so each yields a Success result.
+        Task<NodeProbeResult> Probe(WiFiNode n, CancellationToken _)
+        {
+            string bssid = n.Id == n1Id ? n1Bssid : (n.Id == n2Id ? n2Bssid : "");
+            if (string.IsNullOrEmpty(bssid))
+                return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Failed(n.Id, "not-this-test"));
+            var network = new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssid, SSID = "Net" };
+            return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Success(
+                NodeId: n.Id,
+                Networks: new[] { network },
+                Stations: Array.Empty<WLANStation>(),
+                NewlyTrustedFingerprint: null));
+        }
+
+        var forceEnrichment = new ForceEnrichmentService();
+        forceEnrichment.Request();      // queue the flag BEFORE the cycle
+
+        var orchestrator = BuildOrchestrator(
+            probeAsync: Probe,
+            enrichmentFactory: CapturingFactory,
+            forceEnrichment: forceEnrichment);
+
+        await orchestrator.RunCycleAsync(ct);
+
+        Assert.Contains(n1Id, enrichedNodeIds);
+        Assert.Contains(n2Id, enrichedNodeIds);
+        // Flag consumed; subsequent cycle without Request() must NOT enrich (time-based gate
+        // not eligible — LastEnrichmentRefreshAt was just bumped to ~now).
+        enrichedNodeIds.Clear();
+        await orchestrator.RunCycleAsync(ct);
+        Assert.DoesNotContain(n1Id, enrichedNodeIds);
+        Assert.DoesNotContain(n2Id, enrichedNodeIds);
+    }
+
+    [Fact]
+    public async Task ForceEnrichment_RespectsPerNodeSubnetScanEnabled_OptOut()
+    {
+        // Seed two nodes: n1 with SubnetScanEnabled=true, n2 with SubnetScanEnabled=false.
+        // Both have a recent LastEnrichmentRefreshAt. With ForceEnrichment.Request() called,
+        // ONLY n1 is enriched. n2's operator opt-out is honored (CONTEXT 14 §D-05 planner
+        // reading — "all online nodes the operator has not opted out of"; documented in
+        // PLAN 14-02 truth #6).
+        var ct = TestContext.Current.CancellationToken;
+        var recent = DateTimeOffset.UtcNow;
+        var (n1Id, _, n1Bssid) = await SeedNodeWithOneNetworkAsync(ct, lastEnrichmentRefreshAt: recent, subnetScanEnabled: true);
+        var (n2Id, _, n2Bssid) = await SeedNodeWithOneNetworkAsync(ct, lastEnrichmentRefreshAt: recent, subnetScanEnabled: false);
+
+        var enrichedNodeIds = new HashSet<int>();
+        Task<EnrichmentDelta?> CapturingFactory(WiFiNode node, IReadOnlyList<string> _, string __, CancellationToken ___)
+        {
+            lock (enrichedNodeIds) { enrichedNodeIds.Add(node.Id); }
+            return Task.FromResult<EnrichmentDelta?>(new EnrichmentDelta(
+                node.Id,
+                new Dictionary<string, string>(StringComparer.Ordinal),
+                new Dictionary<string, string?>(StringComparer.Ordinal)));
+        }
+
+        Task<NodeProbeResult> Probe(WiFiNode n, CancellationToken _)
+        {
+            string bssid = n.Id == n1Id ? n1Bssid : (n.Id == n2Id ? n2Bssid : "");
+            if (string.IsNullOrEmpty(bssid))
+                return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Failed(n.Id, "not-this-test"));
+            var network = new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssid, SSID = "Net" };
+            return Task.FromResult<NodeProbeResult>(new NodeProbeResult.Success(
+                NodeId: n.Id,
+                Networks: new[] { network },
+                Stations: Array.Empty<WLANStation>(),
+                NewlyTrustedFingerprint: null));
+        }
+
+        var forceEnrichment = new ForceEnrichmentService();
+        forceEnrichment.Request();
+
+        var orchestrator = BuildOrchestrator(
+            probeAsync: Probe,
+            enrichmentFactory: CapturingFactory,
+            forceEnrichment: forceEnrichment);
+
+        await orchestrator.RunCycleAsync(ct);
+
+        Assert.Contains(n1Id, enrichedNodeIds);
+        Assert.DoesNotContain(n2Id, enrichedNodeIds);
+    }
+
+    [Fact]
+    public async Task ForceEnrichment_CadenceFromCompletion_PreservedViaLastEnrichmentRefreshAt()
+    {
+        // After a force-flag cycle completes, the next *time-based* enrichment fires
+        // RefreshIntervalSeconds after that completion. Seed one node with a stale
+        // LastEnrichmentRefreshAt. Run a force-cycle. Verify node.LastEnrichmentRefreshAt
+        // is advanced past the stale baseline — D-07 cadence-from-completion is preserved
+        // via the existing UpdateLastEnrichmentRefreshAtAsync at PollOrchestrator.cs:284.
+        var ct = TestContext.Current.CancellationToken;
+        var stale = DateTimeOffset.UtcNow.AddHours(-2);
+        var (nId, _, bssid) = await SeedNodeWithOneNetworkAsync(ct, lastEnrichmentRefreshAt: stale);
+
+        var forceEnrichment = new ForceEnrichmentService();
+        forceEnrichment.Request();
+
+        var fixedNow = DateTimeOffset.UtcNow;
+        var orchestrator = BuildOrchestrator(
+            probeAsync: ProbeForNode(nId, bssid),
+            enrichmentFactory: (n, _, _, _) => Task.FromResult<EnrichmentDelta?>(new EnrichmentDelta(
+                n.Id,
+                new Dictionary<string, string>(StringComparer.Ordinal),
+                new Dictionary<string, string?>(StringComparer.Ordinal))),
+            forceEnrichment: forceEnrichment,
+            timeProvider: new FakeTimeProvider(fixedNow));
+
+        await orchestrator.RunCycleAsync(ct);
+
+        await using var db = _fixture.CreateContext();
+        var refreshed = await db.WiFiNodes.FirstAsync(n => n.Id == nId, ct);
+        Assert.NotNull(refreshed.LastEnrichmentRefreshAt);
+        Assert.True(refreshed.LastEnrichmentRefreshAt!.Value > stale,
+            "LastEnrichmentRefreshAt should advance past the pre-force stale value");
+        // The persisted value should match the fake clock (within 1 second of round-tripping).
+        Assert.True((refreshed.LastEnrichmentRefreshAt.Value - fixedNow).Duration() < TimeSpan.FromSeconds(1),
+            "LastEnrichmentRefreshAt should be ~fixedNow under the fake clock — D-07 cadence-from-completion.");
     }
 
     /// <summary>

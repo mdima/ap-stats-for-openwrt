@@ -1,5 +1,4 @@
 using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
 namespace ApStatsForOpenWrt.Data.Models;
@@ -29,13 +28,14 @@ public class WiFiNetwork
     public bool Enabled { get; set; }
 
     /// <summary>
-    /// Transient (NOT persisted) iface-name carrier used by the parser/orchestrator handoff (Plan 02-02 parser
-    /// emits, Plan 02-03 orchestrator consumes). Holds the WLAN iface name (e.g., "wlan0", "wlan1") detected
-    /// from `iwinfo` or `iw dev` output. Phase 2 plans use this to enumerate per-iface `iwinfo $iface assoclist`
-    /// commands and to map station BSSIDs back to WiFiNetworkId after persist. [NotMapped] so EF ignores it --
-    /// the production schema is unaffected; no migration is generated for this property.
+    /// WLAN iface name (e.g., "wlan0", "phy0-ap0") detected from `iwinfo` or `iw dev` output by the
+    /// Phase 2 parser; persisted since v0.11 (CONTEXT 14 §D-10 — conditional yield to support the
+    /// DISC-01 disconnect path, which issues `ubus call hostapd.&lt;iface&gt; del_client` against the AP).
+    /// Pre-v0.11 this property was [NotMapped]; v0.11 promotes it to a persisted nullable string so
+    /// the Stations/Detail.razor Disconnect button can resolve the iface without an extra SSH probe.
+    /// Polling read path unchanged beyond writing this one extra field per WLAN row.
     /// </summary>
-    [NotMapped]
+    [MaxLength(64)]
     public string? IfaceName { get; set; }
 
     public WiFiNode? Node { get; set; } // navigation; cascade delete via FK convention

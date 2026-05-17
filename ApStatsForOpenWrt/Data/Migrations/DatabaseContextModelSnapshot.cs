@@ -123,6 +123,10 @@ namespace ApStatsForOpenWrt.Data.Migrations
                     b.Property<bool>("Enabled")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("IfaceName")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("MacAddress")
                         .IsRequired()
                         .HasMaxLength(17)
