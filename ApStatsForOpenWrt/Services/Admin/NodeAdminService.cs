@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging;
 using ApStatsForOpenWrt.Data.Models;
@@ -10,12 +11,12 @@ namespace ApStatsForOpenWrt.Services.Admin;
 /// <summary>
 /// Production implementation of <see cref="INodeAdminService"/>. v0.11 Plan 14-04 + quick-task
 /// mid-LIVE-UAT amendments. References:
-/// CONTEXT 14 §D-08 RE-AMENDED 2026-05-16 via quick task 260516-iwo: disconnect mechanism =
-/// <c>iw dev &lt;iface&gt; station del &lt;mac&gt;</c> (universal cfg80211-layer kick path; every
-/// supported OpenWRT release since Chaos Calmer 2015+; Phase 9 NodePoller already uses
-/// <c>iw dev &lt;iface&gt; station dump</c> on the same iface so binary + iface are provably
-/// available). The original ubus-first design (and the ubus→iw cascade from quick task 260516-iwf)
-/// is removed entirely; ubus / hostapd_cli are NOT invoked.
+/// CONTEXT 14 §D-08 RE-AMENDED 2026-05-17 via quick task 260517-hcd: disconnect mechanism =
+/// belt-and-suspenders triple cascade per disconnect call. Step 1 <c>ubus call hostapd.&lt;iface&gt;
+/// del_client</c> (best-effort, log only). Step 2 <c>iw dev &lt;iface&gt; station del &lt;mac&gt;</c>
+/// (best-effort, log only). Step 3 <c>hostapd_cli -p &lt;socket-dir&gt; -i &lt;iface&gt;
+/// deauthenticate &lt;mac&gt;</c> (AUTHORITATIVE — its outcome determines the returned
+/// <see cref="DisconnectResult"/>). All three steps fire unconditionally per disconnect call.
 /// <para>
 /// CONTEXT 14 §D-09 (dedicated class separate from NodePoller; per-call fresh
 /// <c>ISshSession</c>), §D-11 (always-try-and-handle-error; no capability probe), §D-12
@@ -24,7 +25,10 @@ namespace ApStatsForOpenWrt.Services.Admin;
 /// <para>
 /// SSH timeout discipline (DISC-02 belt + braces, mirroring NodePoller.cs:59-60 verbatim):
 /// <c>ConnectionInfo.Timeout</c> = 5s (set inside <c>ISshSession.ConnectAsync</c>) AND a
-/// linked <c>CancellationTokenSource.CancelAfter(TimeSpan.FromSeconds(5))</c>.
+/// linked <c>CancellationTokenSource.CancelAfter(TimeSpan.FromSeconds(5))</c>. The 5s budget
+/// covers ALL THREE STEPS combined (not 5s per step) — on a fast 1-2ms RTT LAN the three round
+/// trips fit comfortably; on a slow/unreachable AP, OperationCanceledException from any step
+/// short-circuits to <c>DisconnectResult.Timeout</c> via the outer catch.
 /// </para>
 /// <para>
 /// Pitfall 5 — <c>ISshSession.DisposeAsync</c> is invoked inside <c>try/catch</c> in the finally
@@ -40,9 +44,12 @@ namespace ApStatsForOpenWrt.Services.Admin;
 ///   (a) Phase 14 plan-time lock 2026-05-16 — ubus call hostapd.&lt;iface&gt; del_client with
 ///       reason=5 / deauth=true / ban_time=0 payload; charter Q3 hostapd_cli rejected.
 ///   (b) 260516-iwf 2026-05-16 — ubus primary + iw cascade fallback on NotSupported.
-///   (c) 260516-iwo 2026-05-16 (this file) — ubus path REMOVED entirely; iw-only. Trade-off:
-///       APs where ubus worked lose the rich payload (no deauth frame; no ban_time); kernel-drop
-///       is sufficient for the §Specifics #3 roam-friendly intent (no lockout).
+///   (c) 260516-iwo 2026-05-16 — ubus path removed entirely; iw-only.
+///   (d) 260517-hcd 2026-05-17 (this file) — belt-and-suspenders triple cascade: ubus + iw as
+///       best-effort log-only steps, hostapd_cli deauthenticate as the AUTHORITATIVE success
+///       determinant. Operator-authorised against a verified-working manual SSH session
+///       against the live fleet (<c>hostapd_cli -p /var/run/hostapd-wifi0 -i wlan0
+///       deauthenticate &lt;MAC&gt;</c> succeeded on 3 stations where iw silently no-op'd).
 /// </para>
 /// </summary>
 public sealed class NodeAdminService(
@@ -69,6 +76,9 @@ public sealed class NodeAdminService(
 
         // Belt + braces: ConnectionInfo.Timeout = 5s (inside ISshSession.ConnectAsync) AND a
         // linked CTS with CancelAfter(5s). Mirrors NodePoller.cs:59-60 verbatim (DISC-02).
+        // The 5s budget covers ALL THREE cascade steps combined (NOT 5s per step) — on a fast
+        // LAN the three round trips fit comfortably; on a slow/unreachable AP, OCE from any
+        // step short-circuits to Timeout via the outer catch.
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         linkedCts.CancelAfter(TimeSpan.FromSeconds(5));
         var sct = linkedCts.Token;
@@ -81,34 +91,80 @@ public sealed class NodeAdminService(
                 onHostKeyAccepted: _ => { },
                 ct: sct);
 
-            // 260516-iwo — CONTEXT 14 §D-08 re-amended 2026-05-16 (operator-authorised via
-            // "please remove the method ubus call hostapd.<iface> del_client from the disconnect
-            // method"): disconnect via `iw dev <iface> station del <mac>` ONLY. The ubus path
-            // and the 260516-iwf cascade are removed; cfg80211 kernel-drop is the sole
-            // mechanism for v0.11.
+            // 260517-hcd — CONTEXT 14 §D-08 fourth amendment 2026-05-17 (operator-authorised
+            // against a verified-working manual SSH session against the live fleet): belt-and-
+            // suspenders triple cascade. Three SSH commands are issued in fixed order per
+            // disconnect call. Steps 1 and 2 are best-effort: their exit codes / raw outputs are
+            // logged for forensics, but they do NOT short-circuit the call (a non-zero exit from
+            // ubus or iw does not prevent step 3 from running). Step 3 is AUTHORITATIVE — its
+            // outcome alone determines the returned DisconnectResult.
             //
-            // Why iw is sufficient on its own:
-            //   - Universal cross-OpenWRT (every release since Chaos Calmer 2015+).
-            //   - Phase 9's NodePoller already invokes `iw dev <iface> station dump` on this
-            //     SAME iface for station enumeration -- binary provably present, iface
-            //     provably valid for any station rendered on Stations/Detail.razor.
-            //   - Independent of hostapd's ubus object name (which was the failure mode that
-            //     necessitated the cascade in 260516-iwf).
-            //
-            // Trade-off accepted: no proper deauth frame (no reason code, no deauth: true, no
-            // ban_time). Operationally adequate per CONTEXT 14 §Specifics #3 -- once kernel-
-            // dropped, the AP stops accepting frames from the station; the station notices
-            // on its next TX attempt and re-scans / re-associates. The roam-friendly intent
-            // (no lockout, allow re-association) is preserved structurally rather than via
-            // an explicit ban_time=0 payload field.
+            // Why belt-and-suspenders (operator-verbatim 2026-05-17): "fails or not fails we
+            // must try this other command I tried myself and I can guarantee it works." Protects
+            // against three observed failure modes:
+            //   1. Silent-exit-0 (260516-iwo): `iw station del` exits 0 on hostapd-managed APs
+            //      without actually deauth-ing. Hostapd_cli still gets the deauth done.
+            //   2. ubus-different-object-name (260516-ncf, 260516-iwf): the operator's AP class
+            //      has hostapd's ubus object under a name that doesn't match `hostapd.<iface>`.
+            //      ubus is still tried first because on future AP classes where it does work,
+            //      the rich payload (reason=5, deauth=true frame, ban_time=0) lands "for free."
+            //   3. Heterogeneous-fleet: on a mixed fleet, one of the three steps will always
+            //      be the path that delivers the deauth.
+
+            // Step 1 — ubus (best-effort). JSON payload eliminates shell-quoting risk on the
+            // MAC arg. On the operator's fleet this typically returns `Command failed: Not
+            // found` (the hostapd ubus object isn't registered as `hostapd.<iface>`).
+            var ubusPayload = JsonSerializer.Serialize(new
+            {
+                addr = mac,
+                reason = 5,
+                deauth = true,
+                ban_time = 0,
+            });
+            var ubusCommand = $"ubus call hostapd.{iface} del_client '{ubusPayload}'";
+            var ubusResult = await session.RunCommandWithExitCodeAsync(ubusCommand, sct);
+            log.LogInformation(
+                "NodeAdmin disconnect step 1 (ubus, best-effort): Node={Hostname} (Id={NodeId}) Iface={Iface} Mac={Mac} ExitCode={ExitCode} Raw={Raw}",
+                node.Hostname, node.Id, iface, mac, ubusResult.ExitCode,
+                !string.IsNullOrEmpty(ubusResult.StdErr) ? ubusResult.StdErr : ubusResult.StdOut);
+
+            // Step 2 — iw (best-effort). On the operator's fleet this exits 0 but is a silent
+            // no-op for hostapd-managed associations (the cfg80211 kernel-drop is suppressed by
+            // hostapd's own STA list). On cfg80211-only firmwares (no hostapd) it does deauth.
+            var iwCommand = $"iw dev {iface} station del {mac}";
+            var iwResult = await session.RunCommandWithExitCodeAsync(iwCommand, sct);
+            log.LogInformation(
+                "NodeAdmin disconnect step 2 (iw, best-effort): Node={Hostname} (Id={NodeId}) Iface={Iface} Mac={Mac} ExitCode={ExitCode} Raw={Raw}",
+                node.Hostname, node.Id, iface, mac, iwResult.ExitCode,
+                !string.IsNullOrEmpty(iwResult.StdErr) ? iwResult.StdErr : iwResult.StdOut);
+
+            // Step 3 — hostapd_cli (AUTHORITATIVE). Socket-directory discovery via shell-glob
+            // covers two layouts:
+            //   - /var/run/hostapd-<radio>/<iface>  (operator's fleet, e.g. wifi0 / wifi1)
+            //   - /var/run/hostapd/<iface>          (stock OpenWRT default)
+            // If neither layout has a socket file matching the iface, the loop emits
+            // `no hostapd socket for <iface>` to stderr and exits 127 — our sentinel for
+            // NotSupported. `exec hostapd_cli …` replaces the shell with the cli so the cli's
+            // own exit code passes through cleanly (no `$?` indirection).
             //
             // MAC + iface defensive note: both are sourced from the DB and were populated by
             // the Phase 9 parser (uppercase 17-char canonical MAC; iface like `wlan0`). The
             // parser validates shapes at write-time so shell-injection via these args is not
-            // a credible attack surface; the single-quote wrapping below is belt-and-braces.
-            var iwCommand = $"iw dev {iface} station del {mac}";
-            var iwResult = await session.RunCommandWithExitCodeAsync(iwCommand, sct);
-            return Classify(iwResult);
+            // a credible attack surface; no MAC regex guard at this entry point.
+            var hostapdCommand =
+                $"for d in /var/run/hostapd-* /var/run/hostapd; do " +
+                $"if [ -S \"$d/{iface}\" ]; then " +
+                $"exec hostapd_cli -p \"$d\" -i {iface} deauthenticate {mac}; " +
+                $"fi; " +
+                $"done; " +
+                $"echo \"no hostapd socket for {iface}\" >&2; " +
+                $"exit 127";
+            var hostapdResult = await session.RunCommandWithExitCodeAsync(hostapdCommand, sct);
+            log.LogInformation(
+                "NodeAdmin disconnect step 3 (hostapd_cli, AUTHORITATIVE): Node={Hostname} (Id={NodeId}) Iface={Iface} Mac={Mac} ExitCode={ExitCode} Stdout={Stdout} Stderr={Stderr}",
+                node.Hostname, node.Id, iface, mac, hostapdResult.ExitCode, hostapdResult.StdOut, hostapdResult.StdErr);
+
+            return ClassifyHostapdCli(hostapdResult);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -117,7 +173,7 @@ public sealed class NodeAdminService(
         }
         catch (OperationCanceledException)
         {
-            // Internal 5s budget expired.
+            // Internal 5s budget expired (covers all 3 cascade steps combined).
             return new DisconnectResult.Timeout();
         }
         catch (SshConnectionException)
@@ -148,52 +204,57 @@ public sealed class NodeAdminService(
         }
     }
 
-    // Exit-code + stderr-pattern -> DisconnectResult mapping (D-12).
+    // hostapd_cli output -> DisconnectResult mapping (D-12). hostapd_cli has a specific protocol:
+    //   - On success: stdout = "OK\n", exit 0.
+    //   - On unknown station / unknown command: stdout = "FAIL\n", exit 0 (NOT non-zero).
+    //   - On socket-not-found: hostapd_cli's own diagnostic to stderr "Failed to connect to
+    //     hostapd - wpa_ctrl_open: <strerror>", non-zero exit.
+    //   - Our shell-glob sentinel: when the loop finds no socket file at all, it emits
+    //     "no hostapd socket for <iface>" to stderr and exits 127.
     //
-    // 260516-iwo — Re-targeted to `iw dev <iface> station del <mac>` stderr shapes (CONTEXT 14
-    // §D-08 second amendment). The ubus-specific patterns are removed entirely. `iw` reports
-    // kernel errors via `command failed: <perror text> (<errno>)`; the patterns below cover the
-    // operator-actionable errno classes.
+    // OperationCanceledException / SshConnectionException are handled by the outer catch
+    // (mapped to Timeout); this method only sees exit-code + stdout + stderr from a normal
+    // command return.
     //
-    //   - exit 0 -> Success.
-    //   - stderr contains "No such device" (errno ENODEV -19) -> NotSupported (D-12 case 2).
-    //       Triggered when the kernel netdev doesn't exist OR isn't in AP mode. Operator-
-    //       relevant signal: iface name stored in WiFiNetwork.IfaceName (Phase 9 / D-10)
-    //       doesn't match the actual kernel netdev on the AP -- Phase-9 followup signal.
-    //   - stderr contains "No such file or directory" (errno ENOENT -2) -> NoSuchStation
-    //       (D-12 case 3). Triggered when the MAC isn't in the kernel station list. Benign
-    //       race: the station legitimately left between page load and click.
-    //   - any other non-zero -> UnknownError(raw). Catches "Operation not permitted" (EPERM)
-    //       if the SSH user lacks CAP_NET_ADMIN, plus any unexpected iw failure mode.
-    //
-    // Pure function -- no I/O, no DI. Used by DisconnectStationAsync directly (no longer
-    // gated on a cascade-decision branch since the cascade was removed in this quick task).
-    private static DisconnectResult Classify((int ExitCode, string StdOut, string StdErr) result)
+    // Pure function -- no I/O, no DI.
+    private static DisconnectResult ClassifyHostapdCli((int ExitCode, string StdOut, string StdErr) result)
     {
-        if (result.ExitCode == 0)
-        {
-            return new DisconnectResult.Success();
-        }
-
         var raw = !string.IsNullOrEmpty(result.StdErr) ? result.StdErr
                 : !string.IsNullOrEmpty(result.StdOut) ? result.StdOut
                 : "";
 
-        // ENODEV (-19): kernel netdev missing or not in AP mode. Map to NotSupported so the
-        // operator-facing banner reads "Disconnect not supported on this AP -- wireless
-        // interface unavailable" (a Phase-9 / D-10 iface-name remediation signal).
-        if (raw.Contains("No such device", StringComparison.OrdinalIgnoreCase))
+        if (result.ExitCode == 0)
+        {
+            // hostapd_cli's `FAIL\n` shape on unknown station / unknown command. Map to
+            // NoSuchStation per D-12 case 3 (informational tone). The trim guards against
+            // a stray leading space if any future hostapd_cli build adds one.
+            if (result.StdOut is { Length: > 0 } stdout
+                && stdout.TrimStart().StartsWith("FAIL", StringComparison.OrdinalIgnoreCase))
+            {
+                return new DisconnectResult.NoSuchStation(raw);
+            }
+
+            // Default for exit 0: Success. Covers the "OK\n" happy path AND defensive
+            // synthetic test cases that supply empty stdout (single-canned setup).
+            return new DisconnectResult.Success();
+        }
+
+        // Our shell-glob sentinel: no socket file under /var/run/hostapd-* or /var/run/hostapd
+        // for this iface. The AP doesn't have hostapd's ctrl-iface socket exposed where we
+        // expect it -- NotSupported (D-12 case 2; D-11 always-try-and-handle-error posture).
+        if (result.ExitCode == 127
+            && raw.Contains("no hostapd socket for", StringComparison.OrdinalIgnoreCase))
         {
             return new DisconnectResult.NotSupported(raw);
         }
 
-        // ENOENT (-2): station MAC not in the kernel's per-iface station list. Benign race
-        // (the station left between page load and click) OR the station never associated
-        // with this iface. Informational tone per D-12 case 3 ("Station is no longer
-        // associated with this AP").
-        if (raw.Contains("No such file or directory", StringComparison.OrdinalIgnoreCase))
+        // hostapd_cli's own connect-failure diagnostic (socket file exists but hostapd isn't
+        // listening on the other end -- daemon stopped, permission denied, etc.). Same
+        // operator-facing semantics as the sentinel above: the AP cannot service deauth via
+        // hostapd_cli right now.
+        if (raw.Contains("Failed to connect to hostapd", StringComparison.OrdinalIgnoreCase))
         {
-            return new DisconnectResult.NoSuchStation(raw);
+            return new DisconnectResult.NotSupported(raw);
         }
 
         return new DisconnectResult.UnknownError(raw);
