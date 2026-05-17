@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
 using ApStatsForOpenWrt.Services.Nodes;
+using ApStatsForOpenWrt.Services.Polling;
 using Xunit;
 using DetailPage = ApStatsForOpenWrt.Components.Pages.Nodes.Detail;
 
@@ -19,9 +20,14 @@ public sealed class DetailTests
         public WiFiNode Existing = new() { Id = 1, Hostname = "ap-detail", Username = "root", Status = Status.Online, LastPollDate = DateTime.UtcNow, HostKeyFingerprint = "0123456789abcdef0123456789abcdef" };
         public int ClearHostKeyFingerprintCallCount;
         public int? ClearedNodeId;
+        // 260517-ndr: pin live-update + post-dispose unsubscribe contracts for Nodes/Detail.razor.
+        public int GetByIdCallCount { get; private set; }
 
-        public Task<WiFiNode?> GetByIdAsync(int id, CancellationToken ct = default) =>
-            Task.FromResult<WiFiNode?>(id == Existing.Id ? Existing : null);
+        public Task<WiFiNode?> GetByIdAsync(int id, CancellationToken ct = default)
+        {
+            GetByIdCallCount++;
+            return Task.FromResult<WiFiNode?>(id == Existing.Id ? Existing : null);
+        }
         public Task ClearHostKeyFingerprintAsync(int nodeId, CancellationToken ct = default)
         {
             ClearHostKeyFingerprintCallCount++;
@@ -93,6 +99,9 @@ public sealed class DetailTests
         ctx.Services.AddSingleton<INodeRepo>(nodes);
         ctx.Services.AddSingleton<INetworkRepo>(nets);
         ctx.Services.AddSingleton<IWlanDiscoveryService>(disc);
+        // 260517-ndr — Detail.razor now injects PollNotifier for live-update on Cycled.
+        // bUnit harness never raises Cycled for unrelated tests, so the singleton is idle.
+        ctx.Services.AddSingleton(new PollNotifier());
         return (ctx, nodes, nets, disc);
     }
 
@@ -210,5 +219,75 @@ public sealed class DetailTests
             Assert.Equal(1, nodes.ClearHostKeyFingerprintCallCount);
             Assert.Equal(1, nodes.ClearedNodeId);
         }
+    }
+
+    // ── 260517-ndr — Nodes/Detail.razor subscribes to PollNotifier.Cycled (mirror of 260516-dlu for Stations/Detail) ──
+    //
+    // Operator-flagged 2026-05-17 (before testing 260517-hcd): *"After the polling, if I am in the details
+    // page I must manually refresh the page in order to get the updated data of the station. I see that
+    // the dashboard gets refreshed after the pull, but not the details page."* 260516-dlu wired
+    // Stations/Detail.razor for live-update but not Nodes/Detail.razor; this quick task closes the parallel
+    // gap by applying the same subscribe-in-Init / unsubscribe-in-Dispose pattern with W4 double-guard.
+
+    [Fact]
+    public async Task OnPollCycled_RefreshesNodeData_FromRepo()
+    {
+        // Pin the live-update contract: when PollNotifier.Cycled fires, Nodes/Detail.razor re-loads the
+        // node from the repo so any DB-side status flip (e.g., a node transitioning Online -> Offline as
+        // a poll-cycle outcome) becomes visible without manual F5. Bug shape (pre-260517-ndr): no
+        // subscription exists; raising Cycled is a no-op for the page; the StatusBadge stays on whatever
+        // it loaded at OnInitializedAsync time.
+        var (ctx, nodes, _, _) = Build();
+        nodes.Existing.Status = Status.Online;
+        nodes.Existing.LastPollDate = DateTime.UtcNow.AddHours(-1);
+
+        using (ctx)
+        {
+            var cut = ctx.Render<DetailPage>(p => p.Add(c => c.Id, 1));
+            // Initial render: StatusBadge shows Online. Match the badge's text-content + closing tag
+            // as the discriminator (same pattern as Stations/DetailTests post-260516-dlu).
+            Assert.Contains(">Online</span>", cut.Markup);
+            var initialLoadCount = nodes.GetByIdCallCount;
+
+            // Simulate a DB-side change between cycles: the next cycle should observe Offline.
+            nodes.Existing.Status = Status.Offline;
+
+            // Raise a cycle event via the renderer's dispatcher so the handler runs on the
+            // correct sync context (Pitfall 7 + Phase 5 D-12 paired-adjacency pattern).
+            var notifier = ctx.Services.GetRequiredService<PollNotifier>();
+            await cut.InvokeAsync(async () =>
+                await notifier.RaiseAsync(new PollSnapshot(
+                    TotalNodes: 1, OnlineNodes: 0, FailedNodes: 1, StationCount: 0, CycleEndUtc: DateTime.UtcNow)));
+
+            // Page must have re-loaded -- repo call count strictly greater than the initial load.
+            Assert.True(nodes.GetByIdCallCount > initialLoadCount,
+                $"GetByIdCallCount stayed at {nodes.GetByIdCallCount} after Cycled raise; expected > {initialLoadCount} (live subscription missing).");
+
+            // Badge now reflects the new state (Offline, not Online).
+            Assert.Contains(">Offline</span>", cut.Markup);
+            Assert.DoesNotContain(">Online</span>", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public async Task OnDispose_UnsubscribesFromCycled_NoRefreshAfterDispose()
+    {
+        // Pattern 2 -- captured `this` leak guard. After the component is disposed, raising Cycled on
+        // the still-live notifier singleton must NOT call back into LoadAsync. Unsubscribe-in-Dispose
+        // removes the handler; the W4 _disposed flag is belt-and-braces if a handler is somehow in-
+        // flight at the moment of dispose.
+        var (ctx, nodes, _, _) = Build();
+        var notifier = ctx.Services.GetRequiredService<PollNotifier>();
+        int countAtDispose;
+        using (ctx)
+        {
+            var cut = ctx.Render<DetailPage>(p => p.Add(c => c.Id, 1));
+            countAtDispose = nodes.GetByIdCallCount;
+        }   // bUnit disposes the rendered component here.
+
+        // Raise Cycled AFTER dispose -- must NOT cause a further LoadAsync call AND must not throw.
+        await notifier.RaiseAsync(new PollSnapshot(1, 1, 0, 0, DateTime.UtcNow));
+
+        Assert.Equal(countAtDispose, nodes.GetByIdCallCount);
     }
 }
