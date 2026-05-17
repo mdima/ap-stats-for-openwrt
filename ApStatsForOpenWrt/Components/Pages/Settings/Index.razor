@@ -114,7 +114,7 @@
 <div class="card mb-4">
     <div class="card-header"><h5 class="card-title mb-0">Local domain suffixes</h5></div>
     <div class="card-body">
-        <small class="text-body-secondary d-block mb-3">Comma-separated list of local domain suffixes (e.g., <code>michelecasa, lab.local</code>). Stripped from station hostnames at display time. Leave blank to show full FQDNs.</small>
+        <small class="text-body-secondary d-block mb-3">Comma-separated list of local domain suffixes (e.g., <code>localnetwork, lab.local</code>). Stripped from station hostnames at display time. Leave blank to show full FQDNs.</small>
 
         @if (!string.IsNullOrEmpty(_suffixesBanner))
         {
@@ -129,7 +129,7 @@
             <DataAnnotationsValidator />
             <div class="mb-3">
                 <label class="form-label" for="suffixes-input">Suffixes</label>
-                <InputText id="suffixes-input" class="form-control" @bind-Value="_suffixesForm.CommaSeparated" placeholder="michelecasa, lab.local" />
+                <InputText id="suffixes-input" class="form-control" @bind-Value="_suffixesForm.CommaSeparated" placeholder="localnetwork, lab.local" />
             </div>
             <button type="submit" class="btn btn-primary">Save changes</button>
         </EditForm>
