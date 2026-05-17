@@ -304,8 +304,8 @@ else
         if (_anyEnabledWlan)
         {
             _rows = await BuildRowsAsync(allNodes);
-            _allSsids    = _rows.Select(r => r.Ssid).Distinct().OrderBy(s => s).ToList();
-            _allApLabels = _rows.Select(r => r.ApHostname).Distinct().OrderBy(a => a).ToList();
+            _allSsids    = _rows.Select(r => r.Ssid).Where(s => s != "—").Distinct().OrderBy(s => s).ToList();
+            _allApLabels = _rows.Select(r => r.ApHostname).Where(a => a != "—").Distinct().OrderBy(a => a).ToList();
         }
     }
 
