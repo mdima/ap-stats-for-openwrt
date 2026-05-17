@@ -432,7 +432,6 @@ else
             "name"     => r => r.Name ?? r.Hostname ?? r.Mac,
             "mac"      => r => r.Mac,
             "vendor"   => r => r.Vendor ?? "",
-            "ip"       => r => r.Ip ?? "",
             "ssid"     => r => r.Ssid,
             "ap"       => r => r.ApHostname,
             "rssi"     => r => r.Rss,
@@ -442,12 +441,19 @@ else
         };
 
         // RSSI null sorts LAST in BOTH directions (UI-SPEC line 889).
+        // IP sorts by IPv4 numeric value (260517-ips) with null/unparseable/IPv6 last in BOTH directions.
         IOrderedEnumerable<DashboardRow> ordered;
         if (_sortColumn == "rssi")
         {
             ordered = _sortDescending
                 ? q.OrderBy(r => r.Rss is null).ThenByDescending(r => r.Rss)
                 : q.OrderBy(r => r.Rss is null).ThenBy(r => r.Rss);
+        }
+        else if (_sortColumn == "ip")
+        {
+            ordered = _sortDescending
+                ? q.OrderBy(r => Ipv4SortKey(r.Ip).IsAbsent).ThenByDescending(r => Ipv4SortKey(r.Ip).Value)
+                : q.OrderBy(r => Ipv4SortKey(r.Ip).IsAbsent).ThenBy(r => Ipv4SortKey(r.Ip).Value);
         }
         else
         {
@@ -461,6 +467,21 @@ else
         // Items= parameter before rendering tfoot/footer, so the field is current at read time.
         _lastFilteredCount = result.Count;
         return result;
+    }
+
+    // 260517-ips -- IPv4 numeric sort key. Returns (IsAbsent, Value) so null/empty/unparseable
+    // and IPv6 rows can be pushed LAST in both ascending and descending directions
+    // (parity with the RSSI-null convention above). Value packs the 4 octets as
+    // b0<<24 | b1<<16 | b2<<8 | b3 so ordinal uint comparison matches IPv4 numeric ordering.
+    private static (bool IsAbsent, uint Value) Ipv4SortKey(string? ip)
+    {
+        if (string.IsNullOrEmpty(ip) || !System.Net.IPAddress.TryParse(ip, out var addr)
+            || addr.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            return (true, 0u);
+        }
+        var b = addr.GetAddressBytes();
+        return (false, ((uint)b[0] << 24) | ((uint)b[1] << 16) | ((uint)b[2] << 8) | b[3]);
     }
 
     private bool IsStale(DashboardRow row)
