@@ -496,6 +496,52 @@ public sealed class DashboardTests
         }
     }
 
+    // ── Quick task 260517-ips — IP column sorts numerically (IPv4 value), not lexicographically ──
+    [Fact]
+    public void Dashboard_IpAscSort_OrdersNumerically_NotLexicographically()
+    {
+        // Pre-fix Dashboard.razor:435 sorted IPs as raw strings, so 192.168.1.100
+        // ranked BEFORE 192.168.1.21 (ordinal '1' < '2' at the fourth-octet position).
+        // Post-fix IPs sort by full IPv4 numeric value across all four octets and
+        // null/unparseable IPs sort LAST in both ascending and descending directions
+        // (mirrors the RSSI-null convention at Dashboard.razor:446-451).
+        var node = new WiFiNode { Id = 1, Hostname = "ap-A", Username = "root", Password = "x", Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var net  = new WiFiNetwork { Id = 10, WiFiNodeId = 1, MacAddress = "00:11:22:33:44:55", SSID = "guest", Enabled = true };
+        // Feed in REVERSE-numeric order so the sort has work to do; include one
+        // null-IP row to pin the null-last invariant.
+        var sHundred = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10, IPAddress = "192.168.1.100", Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var sTwentyTwo = new WLANStation { Id = 101, MacAddress = "AA:00:00:00:00:02", WiFiNetworkId = 10, IPAddress = "192.168.1.22",  Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var sTwentyOne = new WLANStation { Id = 102, MacAddress = "AA:00:00:00:00:03", WiFiNetworkId = 10, IPAddress = "192.168.1.21",  Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var sNullIp    = new WLANStation { Id = 103, MacAddress = "ZZ:00:00:00:00:04", WiFiNetworkId = 10, IPAddress = null,            Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { sHundred, sTwentyTwo, sTwentyOne, sNullIp }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } });
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+
+            // Switch sort column to IP asc via the UI (single click = column switch; default sort is name asc per 260508-dns).
+            cut.FindAll("button").First(b => b.TextContent.Trim() == "IP").Click();
+            var ipTh = cut.FindAll("th").First(t => t.TextContent.Contains("IP"));
+            Assert.Equal("ascending", ipTh.GetAttribute("aria-sort"));
+
+            var idx21  = cut.Markup.IndexOf("AA:00:00:00:00:03", StringComparison.Ordinal); // .21
+            var idx22  = cut.Markup.IndexOf("AA:00:00:00:00:02", StringComparison.Ordinal); // .22
+            var idx100 = cut.Markup.IndexOf("AA:00:00:00:00:01", StringComparison.Ordinal); // .100
+            var idxNull = cut.Markup.IndexOf("ZZ:00:00:00:00:04", StringComparison.Ordinal); // null IP
+            Assert.True(idx21  >= 0, "192.168.1.21 row not rendered");
+            Assert.True(idx22  >= 0, "192.168.1.22 row not rendered");
+            Assert.True(idx100 >= 0, "192.168.1.100 row not rendered");
+            Assert.True(idxNull >= 0, "null-IP row not rendered");
+
+            Assert.True(idx21 < idx22,
+                $"IP numeric sort violated: 192.168.1.21 (index {idx21}) should precede 192.168.1.22 (index {idx22}).");
+            Assert.True(idx22 < idx100,
+                $"IP numeric sort violated: 192.168.1.22 (index {idx22}) should precede 192.168.1.100 (index {idx100}).");
+            Assert.True(idx100 < idxNull,
+                $"Null-IP last invariant violated: 192.168.1.100 (index {idx100}) should precede null-IP row (index {idxNull}).");
+        }
+    }
+
     // ── Phase-5 closure: TODO(phase-05) markers all removed ─────────────────────────
     [Fact]
     public void Dashboard_ClosesAllPhase05TodoMarkers()
