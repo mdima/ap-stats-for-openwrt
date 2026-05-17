@@ -10,6 +10,8 @@
 @inject IWlanDiscoveryService Discovery
 @inject IAppSettingsService Settings
 @inject NavigationManager Nav
+@* 260517-stp — Log unhandled discovery exceptions instead of letting them kill the circuit. *@
+@inject ILogger<ApStatsForOpenWrt.Components.Pages.Setup.Wlans> Log
 
 @* /setup/wlans — Step 3 of the onboarding wizard. Parallel WLAN discovery across all
    added nodes. Per-node spinner while in flight; inline table of discovered WLANs with
@@ -141,6 +143,40 @@
             _nodeOutcomes[nodeId] = outcome;
             _alreadyDiscovered.Add(nodeId);
             _nodeNetworks[nodeId] = (await Networks.GetByNodeAsync(nodeId)).ToList();
+        }
+        catch (Exception ex)
+        {
+            // 260517-stp — cold-start race tolerance. The WlanDiscoveryService can throw
+            // a DbUpdateException (UNIQUE-constraint or SQLITE_BUSY) when its write tx
+            // collides with the orchestrator's cycle-1 write tx on a fresh DB. NetworkRepo's
+            // retry-loop catches UNIQUE collisions; the connection-string busy_timeout
+            // covers SQLITE_BUSY. But if either of those fails defensively (e.g., a
+            // genuinely-novel exception class shows up), we MUST NOT let it bubble out of
+            // OnInitializedAsync -- that kills the Blazor circuit and the operator cannot
+            // complete the Setup wizard (the page renders an unrecoverable error UI and
+            // reloading just hits the same race). Map any caught exception to a
+            // DiscoveryOutcome.Generic with the exception message so the inline error
+            // banner shows; the operator can still click "Finish setup" and the
+            // orchestrator's next cycle backfills WiFiNetworks. The exception is logged at
+            // Warning so the diagnostic stays visible in `docker logs`.
+            Log.LogWarning(ex,
+                "Setup/Wlans discovery threw an unhandled exception for Node {NodeId}; mapped to Generic outcome so the wizard does not crash (260517-stp).",
+                nodeId);
+            _nodeOutcomes[nodeId] = new DiscoveryOutcome.Generic($"Discovery failed: {ex.Message}");
+            _alreadyDiscovered.Add(nodeId);
+            // Best-effort refresh of the cached network list; if Networks.GetByNodeAsync
+            // also throws (unlikely; it's a single-statement read), fall back to empty.
+            try
+            {
+                _nodeNetworks[nodeId] = (await Networks.GetByNodeAsync(nodeId)).ToList();
+            }
+            catch (Exception inner)
+            {
+                Log.LogWarning(inner,
+                    "Setup/Wlans: post-failure Networks.GetByNodeAsync also threw for Node {NodeId}; rendering empty WLAN list.",
+                    nodeId);
+                _nodeNetworks[nodeId] = new List<WiFiNetwork>();
+            }
         }
         finally
         {

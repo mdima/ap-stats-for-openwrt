@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using ApStatsForOpenWrt.Data.Models;
 
@@ -36,11 +37,40 @@ public sealed class NetworkRepo(IDbContextFactory<DatabaseContext> factory) : IN
     }
 
     // ── Repo-owned: opens its own context, commits ──────────────────────────
+    // 260517-stp — retry on SQLITE_CONSTRAINT_UNIQUE (Error 19) up to 2 times. The
+    // cold-start race against PollOrchestrator's first cycle was: discovery reads
+    // existing-rows snapshot (empty) -> orchestrator's tx commits the same WLANs ->
+    // discovery's local merge attempts INSERT for rows that now exist -> SQLite
+    // throws UNIQUE constraint failed. Recovery is to re-read existing (which now
+    // includes the orchestrator's rows), re-run the merge (everything becomes an
+    // UPDATE), re-save. The retry-loop also covers any benign concurrent UPSERT
+    // from a future caller. SQLITE_BUSY (Error 5) is handled separately by the
+    // connection-string-level busy_timeout = 30s set in Program.cs.
     public async Task UpsertManyAsync(int wiFiNodeId, IEnumerable<WiFiNetwork> discovered, CancellationToken ct = default)
     {
-        await using var db = await factory.CreateDbContextAsync(ct);
-        await UpsertManyAsync(db, wiFiNodeId, discovered, ct);
-        await db.SaveChangesAsync(ct);
+        // Materialise once so we can re-iterate the same probe set across retries.
+        var discoveredList = discovered as IReadOnlyList<WiFiNetwork> ?? discovered.ToList();
+
+        const int maxAttempts = 3;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            await using var db = await factory.CreateDbContextAsync(ct);
+            await UpsertManyAsync(db, wiFiNodeId, discoveredList, ct);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                return;
+            }
+            catch (DbUpdateException ex)
+                when (attempt < maxAttempts && ex.InnerException is SqliteException sqlEx
+                      && sqlEx.SqliteErrorCode == 19 /* SQLITE_CONSTRAINT_UNIQUE */)
+            {
+                // Drop the tracked add+update changes; the next iteration opens a
+                // fresh DbContext, reloads existing rows (which now include the
+                // concurrently-inserted ones), and re-runs the merge.
+                db.ChangeTracker.Clear();
+            }
+        }
     }
 
     // ── Caller-owned: NO SaveChangesAsync — orchestrator owns the transaction ──

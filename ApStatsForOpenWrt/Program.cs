@@ -60,15 +60,20 @@ try
             shared: false)));
 
     // 3. EF Core — factory only, NEVER scoped DbContext (PER-05; PITFALL: captive dependency).
-    //    Pooling=True for connection reuse; Default Timeout=5 -> PRAGMA busy_timeout=5000
-    //    so transient SQLITE_BUSY (file-lock) is retried instead of erroring.
+    //    Pooling=True for connection reuse; Default Timeout=30 -> PRAGMA busy_timeout=30000
+    //    so transient SQLITE_BUSY (file-lock) is retried instead of erroring. 260517-stp
+    //    bumped from 5 -> 30: the cold-start poll cycle takes ~5-10s on the operator's fleet
+    //    (SSH ALG-negotiation + AP iwinfo warm-up + DHCP-table population), and 5s wasn't
+    //    enough headroom for the Setup/Wlans.razor auto-discovery write to wait out the
+    //    orchestrator's tx -- the discovery's BeginTransaction would exhaust the 5s and
+    //    surface SQLITE_BUSY (Error 5), killing the Blazor circuit (see 260517-stp PLAN).
     //    NO Cache=Shared on a file DB: shared cache forces table-level cache locks that
     //    bypass WAL's file-level reader/writer concurrency, producing SQLITE_LOCKED (error 6)
     //    when the orchestrator transaction holds WiFiNodes while the dashboard / health checks
     //    read it. WAL itself is enabled by MigrationsHostedService via PRAGMA journal_mode=WAL
     //    and is persisted on the DB file.
     builder.Services.AddDbContextFactory<DatabaseContext>(options =>
-        options.UseSqlite($"Data Source={dataRoot}/AP-Stats-for-OpenWrt.db;Pooling=True;Default Timeout=5"));
+        options.UseSqlite($"Data Source={dataRoot}/AP-Stats-for-OpenWrt.db;Pooling=True;Default Timeout=30"));
 
     // 4. ASP.NET Data Protection — file-system key ring + verbatim application name (D-02 / SEC-03).
     //    On Linux/WSL2 keys are NOT encrypted at rest (DPAPI is Windows-only) —
