@@ -687,10 +687,14 @@ public sealed class DetailTests
     [Fact]
     public void DisconnectModal_Confirm_OnNotSupported_ShowsCapabilityMissingBanner()
     {
-        // 260516-iwo — D-08 re-amended to iw-only; NotSupported now fires on iw ENODEV (-19)
-        // "No such device" (kernel netdev missing or not in AP mode). Banner text updated
-        // to drop the now-obsolete "ubus/hostapd missing" phrasing.
-        var (ctx, nodeAdmin) = BuildDisconnectContext(new DisconnectResult.NotSupported("command failed: No such device (-19)"));
+        // 260517-hcd — D-08 fourth amendment: hostapd_cli is the authoritative step. NotSupported
+        // now fires when the shell-glob socket-discovery loop emits `exit 127 / no hostapd socket
+        // for <iface>` (no socket file under /var/run/hostapd-* or /var/run/hostapd matching the
+        // iface) OR when hostapd_cli's own `Failed to connect to hostapd` diagnostic fires (socket
+        // exists but daemon unreachable). Banner text updated from the 260516-iwo "wireless
+        // interface unavailable" wording to "hostapd control socket unavailable" to match the new
+        // failure surface.
+        var (ctx, nodeAdmin) = BuildDisconnectContext(new DisconnectResult.NotSupported("no hostapd socket for wlan0"));
 
         using (ctx)
         {
@@ -699,7 +703,7 @@ public sealed class DetailTests
             cut.FindAll(".modal-footer .btn-danger").First(b => b.TextContent.Trim() == "Disconnect").Click();
 
             Assert.Equal(1, nodeAdmin.CallCount);
-            Assert.Contains("Disconnect not supported on this AP — wireless interface unavailable.", cut.Markup);
+            Assert.Contains("Disconnect not supported on this AP — hostapd control socket unavailable.", cut.Markup);
             Assert.Contains("alert-danger", cut.Markup);
         }
     }
