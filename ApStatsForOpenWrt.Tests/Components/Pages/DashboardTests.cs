@@ -815,6 +815,53 @@ public sealed class DashboardTests
         }
     }
 
+    // ── Quick task 260517-fpd — SSID/AP filter chips omit the "—" orphan placeholder ──────
+    //
+    // 260511-osd promotes orphan WLANStations (FK = null after cascade-SetNull, or FK pointing
+    // at a missing network id) into _rows with Ssid="—" and ApHostname="—" so operators see
+    // them. The placeholder must stay in the rendered table cells (operator visibility) but
+    // must NOT propagate into the SSID/AP filter chip option lists — clicking a "—" chip is
+    // not a meaningful operator action. The fix lives at Dashboard.razor:307-308 (a `.Where(x
+    // => x != "—")` step before `.Distinct()` on _allSsids and _allApLabels).
+
+    [Fact]
+    public void Dashboard_SsidAndApFilterChips_OmitEmDashPlaceholder()
+    {
+        var (node, net) = MakeApAndNet();
+        var normal = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10,   Hostname = "alice", Status = Status.Online,  LastPollDate = DateTime.UtcNow };
+        var orphan = new WLANStation { Id = 101, MacAddress = "BB:00:00:00:00:02", WiFiNetworkId = null, Hostname = "ghost", Status = Status.Offline, LastPollDate = DateTime.UtcNow };
+
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { normal, orphan }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } });
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+
+            // Sanity: the orphan row IS in the table (260511-osd invariant — row-level
+            // placeholder rendering is unchanged by this quick task).
+            Assert.Contains("BB:00:00:00:00:02", cut.Markup);
+
+            // Scope to each FilterChipGroup via its aria-label wrapper (FilterChipGroup.razor:15).
+            // Chip option buttons live as direct <button> children of that wrapper. The SSID
+            // group has no StatusBadgeFor decorator so its button TextContent is just the label;
+            // the AP group composes StatusBadgeFor (Phase 8) so its button TextContent prefixes
+            // the label (e.g. "ap-A Online"). Both shapes are handled by trimming + StartsWith.
+            var ssidGroup = cut.Find("[aria-label='Filter by SSID']");
+            var apGroup   = cut.Find("[aria-label='Filter by AP']");
+            var ssidChips = ssidGroup.QuerySelectorAll("button");
+            var apChips   = apGroup.QuerySelectorAll("button");
+
+            // The fix is regression-locked here: neither group exposes a chip whose label is "—".
+            Assert.DoesNotContain(ssidChips, b => b.TextContent.Trim() == "—");
+            Assert.DoesNotContain(apChips,   b => b.TextContent.Trim().StartsWith("—"));
+
+            // Forward guard: the legitimate SSID + AP options ARE still present (so we haven't
+            // accidentally dropped real labels alongside the "—" placeholder).
+            Assert.Contains(ssidChips, b => b.TextContent.Trim() == "guest");
+            Assert.Contains(apChips,   b => b.TextContent.Trim().StartsWith("ap-A"));
+        }
+    }
+
     /// <summary>
     /// Walk up from the test binary's BaseDirectory to find the repo root, then load Dashboard.razor.
     /// The test binary lives at ApStatsForOpenWrt.Tests/bin/{Configuration}/net10.0/, so walking up
