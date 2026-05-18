@@ -31,7 +31,7 @@
       that serves the file produced here.
     -->
     <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
-    <Version>0.10.0</Version>
+    <Version>0.11.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
