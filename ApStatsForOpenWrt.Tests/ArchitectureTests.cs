@@ -1,4 +1,6 @@
+using System.IO;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using ApStatsForOpenWrt.Data;
 using Xunit;
 
@@ -185,5 +187,45 @@ public sealed class ArchitectureTests
             .Select(p => p.ParameterType.FullName ?? "")
             .ToList();
         Assert.DoesNotContain(ctorParams, t => t.Contains("IDbContextFactory", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// 260518-vbs — operator-discovered build-config friction. <c>&lt;Version&gt;</c> is owned by
+    /// <c>Directory.Build.props</c> (the file's lines 15-18 comment block calls it the "Single source
+    /// of truth"). MSBuild imports <c>Directory.Build.props</c> BEFORE each csproj's
+    /// <c>&lt;PropertyGroup&gt;</c>, so a duplicate <c>&lt;Version&gt;</c> inside any csproj silently
+    /// OVERRIDES the props value — creating two-place version drift (operator must remember to bump
+    /// both files; e9a3e67 only bumped one). This fact globs every <c>*.csproj</c> under the repo
+    /// root and fails if any of them declares <c>&lt;Version&gt;</c>. RED while
+    /// <c>ApStatsForOpenWrt/ApStatsForOpenWrt.csproj:34</c> still carries the duplicate; GREEN
+    /// after the deletion. Any future re-introduction is provably loud.
+    /// </summary>
+    [Fact]
+    public void NoCsprojDeclaresVersion_DirectoryBuildPropsIsTheOnlySource()
+    {
+        // Walk up from the test binary's base directory looking for Directory.Build.props as the
+        // repo-root marker. Using Directory.Build.props (not .git) keeps this robust across
+        // container builds and worktrees without a .git directory.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Directory.Build.props")))
+            dir = dir.Parent;
+        Assert.NotNull(dir); // sanity — repo root must be discoverable from the test binary
+
+        var versionElement = new Regex(@"<Version\s*>", RegexOptions.IgnoreCase);
+        var csprojs = Directory.GetFiles(dir!.FullName, "*.csproj", SearchOption.AllDirectories)
+            .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
+
+        var violators = csprojs
+            .Where(path => versionElement.IsMatch(File.ReadAllText(path)))
+            .Select(path => Path.GetRelativePath(dir.FullName, path))
+            .ToList();
+
+        Assert.True(
+            violators.Count == 0,
+            $"260518-vbs: <Version> is owned by Directory.Build.props and MUST NOT be declared in any csproj " +
+            $"(csproj declarations silently override the props value, per MSBuild import order). " +
+            $"Offending csproj(s): {string.Join(", ", violators)}. " +
+            $"Fix: delete the <Version> element from each listed file; Directory.Build.props is the single source of truth.");
     }
 }
