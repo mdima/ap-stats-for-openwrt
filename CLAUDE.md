@@ -38,6 +38,7 @@ Detailed rationale and version pins: `.planning/research/STACK.md`.
 - **Visitor count is `Interlocked` + TCS.** Implemented via a singleton `CircuitTracker` fed by a `CircuitHandler`. Disconnect grace period = **30 s pause-debounce inside `CircuitTracker`** (260518-gpd). Blazor's `DisconnectedCircuitRetentionPeriod = 3 min` only covers unintended disconnects (network blip, sleep); F5 / tab close = graceful close = immediate `OnCircuitClosedAsync`, which is why the 30 s in-tracker debounce is required to suppress spurious cold-start kicks.
 - **Tests use bUnit, not mocks of `CircuitHandler`.** Real circuits, real lifecycle. Coverage gate is line + branch ≥ 80%.
 - **No `EnsureCreated` anywhere.** Always EF migrations.
+- **`<Version>` is owned by `Directory.Build.props`.** Never declare `<Version>` (or `<AssemblyVersion>` / `<FileVersion>`) inside any csproj — MSBuild imports `Directory.Build.props` before each csproj's `<PropertyGroup>`, so a duplicate in a csproj silently overrides the props value and creates two-place version drift. `ArchitectureTests.NoCsprojDeclaresVersion_DirectoryBuildPropsIsTheOnlySource` pins this (260518-vbs).
 
 See `.planning/research/PITFALLS.md` for the full anti-pattern list with phase mapping.
 <!-- GSD:conventions-end -->
