@@ -35,7 +35,7 @@ Detailed rationale and version pins: `.planning/research/STACK.md`.
 - **`PeriodicTimer.WaitForNextTickAsync` only.** Do NOT use `System.Threading.Timer` with a period — the tick semantics are different.
 - **SSH timeouts are belt + braces.** `ConnectionInfo.Timeout = 5s` AND a linked `CancellationTokenSource(TimeSpan.FromSeconds(5))`. Always dispose `SshClient` inside `try/catch` (SSH.NET dispose-hang risk).
 - **`/health` is plain HTTP.** It is a `MapHealthChecks` endpoint, never a Blazor route. It must NOT increment the visitor counter.
-- **Visitor count is `Interlocked` + TCS.** Implemented via a singleton `CircuitTracker` fed by a `CircuitHandler`. Disconnect grace period = `DisconnectedCircuitRetentionPeriod + 30s`.
+- **Visitor count is `Interlocked` + TCS.** Implemented via a singleton `CircuitTracker` fed by a `CircuitHandler`. Disconnect grace period = **30 s pause-debounce inside `CircuitTracker`** (260518-gpd). Blazor's `DisconnectedCircuitRetentionPeriod = 3 min` only covers unintended disconnects (network blip, sleep); F5 / tab close = graceful close = immediate `OnCircuitClosedAsync`, which is why the 30 s in-tracker debounce is required to suppress spurious cold-start kicks.
 - **Tests use bUnit, not mocks of `CircuitHandler`.** Real circuits, real lifecycle. Coverage gate is line + branch ≥ 80%.
 - **No `EnsureCreated` anywhere.** Always EF migrations.
 
