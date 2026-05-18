@@ -139,7 +139,7 @@ public sealed class PollingHostedService(
         {
             log.LogInformation(
                 "Visitor gate transitioned to Paused — polling will block until the next visitor connects "
-                + "(grace = DisconnectedCircuitRetentionPeriod + 30s)");
+                + "(grace = 30s pause-debounce in CircuitTracker, 260518-gpd)");
             // Re-arm the cold-start flag. The NEXT Live transition will trigger an immediate cycle.
             _coldStart = true;
             return Task.CompletedTask;
