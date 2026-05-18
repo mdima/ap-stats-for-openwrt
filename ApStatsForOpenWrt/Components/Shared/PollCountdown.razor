@@ -46,7 +46,14 @@
    volatile `_disposed` flag (fast-path skip) AND a try/catch around InvokeAsync in
    OnCycleAsync, OnCycleStartedAsync, and Tick (belt + braces — covers the small window
    between the flag-check and the InvokeAsync call). _disposed is set FIRST in Dispose
-   BEFORE detaching subscriptions and disposing the Timer. *@
+   BEFORE detaching subscriptions and disposing the Timer.
+
+   260518-pch — mid-cycle hydration seed: PollNotifier now caches the last
+   PollSnapshot and an InCycle flag. OnInitializedAsync reads them AFTER
+   subscribing to Cycled/CycleStarted to seed _lastCycleEndUtc + _inCycle, so a
+   per-circuit component mounted mid-cycle (F5 / new tab) renders the same
+   countdown or "Polling…" hold as already-open tabs instead of falling back to
+   "—" / "Awaiting first poll" until the next Cycled event lands. *@
 
 <span class="badge text-bg-secondary" aria-label="@_ariaLabel">
     <span style="font-variant-numeric: tabular-nums;">@_displayText</span>
@@ -64,6 +71,26 @@
     {
         Notifier.Cycled       += OnCycleAsync;
         Notifier.CycleStarted += OnCycleStartedAsync;     // 14-01 / POLL-01 — held-state entry signal
+
+        // 260518-pch — hydration seed. Per-circuit components mounted MID-CYCLE
+        // (F5 / new tab) would otherwise sit on _lastCycleEndUtc=null / _inCycle=false
+        // and render "—" / "Awaiting first poll" until the next Cycled event lands.
+        // Pull the singleton's cached snapshot + in-cycle flag (PollNotifier 260518-pch)
+        // so the first Tick computes a correct {N}s remaining (idle arm) or shows
+        // "Polling…" (U+2026 — held arm) immediately. No InvokeAsync needed: this
+        // runs before the first render and the field writes are picked up naturally.
+        _lastCycleEndUtc = Notifier.LastSnapshot?.CycleEndUtc;
+        _inCycle         = Notifier.InCycle;
+        if (_inCycle)
+        {
+            // Mirror OnCycleStartedAsync's text/aria so a held-state remount renders
+            // identically to a tab that received CycleStarted via subscription. The
+            // ellipsis below is U+2026 HORIZONTAL ELLIPSIS (single codepoint) —
+            // matches PollCountdown.razor:80 and PollCountdownTests assertions.
+            _displayText = "Polling…";
+            _ariaLabel   = "Polling in progress";
+        }
+
         _tick = new System.Threading.Timer(_ => Tick(), state: null, dueTime: 1000, period: 1000);
         return Task.CompletedTask;
     }

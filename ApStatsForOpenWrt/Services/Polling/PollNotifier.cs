@@ -32,12 +32,47 @@ public sealed record PollSnapshot(
 /// </summary>
 public sealed class PollNotifier
 {
+    // 260518-pch — cached state so a per-circuit subscriber mounted MID-CYCLE
+    // (F5 / new tab) can hydrate its local state from the notifier instead of
+    // sitting on "—" / "Awaiting first poll" until the next Cycled event.
+    // Writes happen BEFORE event invocation (see RaiseAsync / RaiseCycleStartedAsync)
+    // so a handler reading these properties inside its own callback sees the new
+    // values — pinned by PollNotifierTests.Ordering_LastSnapshot_VisibleInsideCycledHandler.
+    private PollSnapshot? _lastSnapshot;
+    private volatile bool _inCycle;
+
+    /// <summary>
+    /// Last completed PollSnapshot, or null if no cycle has completed in this
+    /// process lifetime. Hydration source for PollCountdown.razor mid-cycle remounts.
+    /// </summary>
+    public PollSnapshot? LastSnapshot => Volatile.Read(ref _lastSnapshot);
+
+    /// <summary>
+    /// True between RaiseCycleStartedAsync and the next RaiseAsync (cycle in flight).
+    /// Hydration source for PollCountdown.razor — a mid-cycle remount renders
+    /// "Polling…" (U+2026) instead of falling back to the idle-ticking arm.
+    /// </summary>
+    public bool InCycle => _inCycle;
+
     public event Func<PollSnapshot, Task>? Cycled;
     public event Func<Task>? CycleStarted;
 
     public Task RaiseAsync(PollSnapshot snapshot)
-        => Cycled?.Invoke(snapshot) ?? Task.CompletedTask;
+    {
+        // 260518-pch — STATE WRITES BEFORE INVOCATION (ordering invariant).
+        // Reads from inside a Cycled handler MUST see the new snapshot, and
+        // the held-state flag MUST be cleared before subscribers run.
+        Interlocked.Exchange(ref _lastSnapshot, snapshot);
+        _inCycle = false;
+        return Cycled?.Invoke(snapshot) ?? Task.CompletedTask;
+    }
 
     public Task RaiseCycleStartedAsync()
-        => CycleStarted?.Invoke() ?? Task.CompletedTask;
+    {
+        // 260518-pch — STATE WRITES BEFORE INVOCATION (ordering invariant).
+        // A subscriber reading Notifier.InCycle inside a CycleStarted handler
+        // MUST observe true.
+        _inCycle = true;
+        return CycleStarted?.Invoke() ?? Task.CompletedTask;
+    }
 }
