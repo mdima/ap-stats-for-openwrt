@@ -238,6 +238,71 @@ public sealed class PollCountdownTests
         }
     }
 
+    // ── 260518-pch — mid-cycle hydration from PollNotifier shared state ──
+    //
+    // A per-circuit PollCountdown mounted MID-CYCLE (F5 / new tab) must hydrate from
+    // PollNotifier.LastSnapshot + InCycle so it immediately renders the live countdown
+    // or "Polling…" hold, instead of sitting on "—" / "Awaiting first poll" until the
+    // next Cycled event lands. Hydration seed runs in OnInitializedAsync AFTER both
+    // subscriptions are wired so a Cycled racing with the seed overwrites it correctly.
+
+    /// <summary>
+    /// 260518-pch — when PollNotifier already has a LastSnapshot at component mount
+    /// (e.g. F5 / new tab opened while polling is healthy mid-interval), the badge
+    /// renders the countdown anchored to that snapshot's CycleEndUtc instead of "—".
+    /// </summary>
+    [Fact]
+    public async Task RendersCountdown_AnchoredToLastSnapshot_WhenNotifierAlreadyHasSnapshotBeforeMount()
+    {
+        var (ctx, notifier, settings, _) = Build();
+        settings.PollingIntervalSeconds = 60;
+
+        // Pre-populate the notifier BEFORE rendering — the cycle ended 20s ago,
+        // so a freshly-mounted component should render ~40s remaining (±2s slack
+        // for Timer tick latency on CI runners — matches the slack pattern used
+        // in Cycled_ResetsBadgeTo_FullIntervalCountdown_AfterHeldState).
+        await notifier.RaiseAsync(new PollSnapshot(1, 1, 0, 0, DateTime.UtcNow.AddSeconds(-20)));
+
+        using (ctx)
+        {
+            var cut = ctx.Render<PollCountdown>();
+            cut.WaitForState(() => cut.Markup.Contains("Next poll in"), TimeSpan.FromSeconds(2));
+
+            Assert.Contains("Next poll in", cut.Markup);
+            Assert.True(
+                cut.Markup.Contains(">42s<") || cut.Markup.Contains(">41s<") ||
+                cut.Markup.Contains(">40s<") || cut.Markup.Contains(">39s<") ||
+                cut.Markup.Contains(">38s<"),
+                $"Expected ~40s remaining after 20s-ago snapshot with 60s interval (±2s slack); got: {cut.Markup}");
+        }
+    }
+
+    /// <summary>
+    /// 260518-pch — when PollNotifier.InCycle is true at component mount (cycle in
+    /// flight when the new tab opened), the badge renders "Polling…" (U+2026) with
+    /// the held-state aria-label, identical to a tab that received CycleStarted via
+    /// subscription. The ellipsis below is U+2026 HORIZONTAL ELLIPSIS (single
+    /// codepoint) — matches PollCountdown.razor:80 and the existing held-state tests.
+    /// </summary>
+    [Fact]
+    public async Task RendersPollingHeld_WhenNotifierInCycleIsTrueAtMount()
+    {
+        var (ctx, notifier, _, _) = Build();
+
+        // Pre-populate the in-cycle flag BEFORE rendering — a new tab opened while
+        // the orchestrator is mid-cycle must hydrate into the held arm immediately.
+        await notifier.RaiseCycleStartedAsync();
+
+        using (ctx)
+        {
+            var cut = ctx.Render<PollCountdown>();
+            cut.WaitForState(() => cut.Markup.Contains("Polling…"), TimeSpan.FromSeconds(2));
+
+            Assert.Contains("Polling…", cut.Markup);          // U+2026 single codepoint
+            Assert.Contains("Polling in progress", cut.Markup);    // aria-label per D-01
+        }
+    }
+
     // ── Revision 1 W4 — Tick racing with Dispose must not throw ObjectDisposedException ──
     [Fact]
     public async Task PollCountdown_DisposeRacingWithTick_DoesNotThrow()
