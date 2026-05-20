@@ -369,6 +369,21 @@ try
                     QueueLimit = 0,
                     AutoReplenishment = true
                 }));
+        // M-SEC-03 / plan 15-05 — distributed brute-force ceiling on /Login. Single _global_
+        // partition; 30 requests/minute server-wide regardless of source IP. CONTEXT.md
+        // Decision 2: FixedWindow matches LoginPolicy shape verbatim; boundary-burst accepted.
+        // The two policies are chained on Login.razor via two [EnableRateLimiting] attributes;
+        // ASP.NET evaluates each policy independently and 429s if ANY partition is over budget.
+        opts.AddPolicy("LoginGlobalPolicy", _ =>
+            System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: "_global_",
+                factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 30,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
         opts.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     });
 
@@ -622,7 +637,21 @@ try
             return Microsoft.AspNetCore.Http.Results.Redirect(
                 "/setup/password?Error=" + Uri.EscapeDataString("Passwords do not match."));
 
-        var hash = hasher.Hash(password);
+        // M-SEC-03 / plan 15-05 — policy rejection. UIPasswordHasher.Hash (plan 15-02) throws
+        // ArgumentException with the verbatim operator-facing message when the plaintext fails
+        // the four-part policy (>=8 chars + upper + lower + digit-or-symbol). Setup/Password.razor
+        // renders the Error query param via its alert-danger block; redirect there with the
+        // pinned message preserved through URL-encoding. No DB write, no session bump, no SignIn.
+        string hash;
+        try
+        {
+            hash = hasher.Hash(password);
+        }
+        catch (ArgumentException ex)
+        {
+            return Microsoft.AspNetCore.Http.Results.Redirect(
+                "/setup/password?Error=" + Uri.EscapeDataString(ex.Message));
+        }
         await settings.SetUIPasswordHashAsync(hash, ctx.RequestAborted);
 
         // M-SEC-04 / plan 15-04 — stamp the post-bump SessionVersion as a claim. SetUIPasswordHashAsync
