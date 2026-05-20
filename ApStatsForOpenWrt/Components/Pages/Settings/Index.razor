@@ -433,8 +433,12 @@
         var hash = Hasher.Hash(_passwordForm.NewPassword);
         await Settings.SetUIPasswordHashAsync(hash);
 
+        // M-SEC-04 / plan 15-04 — banner copy update. After Plan 15-04, every existing session
+        // is invalidated by the SessionVersion bump (atomic inside SetUIPasswordHashAsync).
+        // The verbatim phrase "All sessions have been signed out." is pinned by REQUIREMENTS.md
+        // line 38 + the integration tests in plan 15-04 (substring assertion).
         _passwordBanner = wasSet
-            ? "Password updated. Existing sessions are still valid; the new password takes effect on the next sign-in."
+            ? "Password updated. All sessions have been signed out."
             : "Password set. Sign-in is now required for all pages except the login screen.";
         _passwordForm = new PasswordForm();   // wipe form
         _ = AutoDismissAsync(() => _passwordBanner = null);
@@ -443,7 +447,10 @@
     private async Task HandleClearPasswordAsync()
     {
         await Settings.SetUIPasswordHashAsync(null);
-        _passwordBanner = "Password cleared. Sign-in is no longer required.";
+        // M-SEC-04 / plan 15-04 — clearing the password ALSO bumps SessionVersion (15-01
+        // symmetric mitigation), so every existing session is invalidated. The pinned phrase
+        // "All sessions have been signed out." appears verbatim as a substring.
+        _passwordBanner = "Password cleared. All sessions have been signed out. Sign-in is no longer required.";
         _ = AutoDismissAsync(() => _passwordBanner = null);
     }
 

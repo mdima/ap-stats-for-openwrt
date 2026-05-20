@@ -116,7 +116,16 @@
 
         // Single shared UI password — no per-user identity. The cookie principal's Name claim
         // is hardcoded to "operator" to match MainLayout's user-menu display label.
-        var claims = new[] { new Claim(ClaimTypes.Name, "operator") };
+        //
+        // M-SEC-04 / plan 15-04 — stamp the current SessionVersion as a claim so a future
+        // password-change (which bumps SessionVersion via 15-01) invalidates this cookie on
+        // the next request via Program.cs's OnValidatePrincipal event. Claim store is
+        // string-typed; OnValidatePrincipal parses back via int.TryParse.
+        var claims = new[]
+        {
+            new Claim(ClaimTypes.Name, "operator"),
+            new Claim("session_version", Settings.SessionVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+        };
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         await HttpContext.SignInAsync(
             CookieAuthenticationDefaults.AuthenticationScheme,
