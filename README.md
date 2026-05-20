@@ -15,7 +15,7 @@
 
 ---
 
-<img src="docs/screenshots/dashboard.png" alt="AP Stats for OpenWrt dashboard showing a live, multi-AP view of WiFi stations across WLANs. Identifiers in the screenshot have been redacted." />
+<img src="support/dashboard.png" alt="AP Stats for OpenWrt dashboard showing a live, multi-AP view of WiFi stations across WLANs. Identifiers in the screenshot have been redacted." />
 
 *Live multi-AP, multi-WLAN station view. The native LuCI UI in AP mode does not present this information cleanly across access points — this dashboard fills that gap.*
 
@@ -25,7 +25,7 @@
 
 ## Why this exists
 
-If you run more than one OpenWRT access point, you already know the problem:
+If you run one or more than one OpenWRT access point, you already know the problem:
 
 - LuCI in AP mode shows you **one AP at a time**.
 - It does not give you a single pane of glass for **which station is on which WLAN on which AP**, in real time.
@@ -41,11 +41,11 @@ If you run more than one OpenWRT access point, you already know the problem:
 - **Per-station detail page.** Rename, delete, mark as random-MAC, and (v0.11) disconnect-from-AP — a write-side SSH action to nudge sticky clients to re-associate.
 - **First-run wizard.** Set the UI password, declare your first OpenWRT AP, choose which WLANs to monitor, land on the dashboard. No config files to hand-edit.
 - **Visitor-gated polling.** While no browser session is open, the background poller is suspended; it resumes the moment you open the dashboard. A separate `/health` HTTP endpoint stays available for external monitoring and does not count toward the gate.
-- **Pi.Alert-style polish.** Clickable KPI tiles bidirectionally synced with filter chips, AdminLTE 4 native dark mode, Bootstrap 5 toast notifications for AP/station events, localStorage-backed user preferences, custom WiFi-stylized SVG branding.
+- **UI standards.** Clickable KPI tiles bidirectionally synced with filter chips, AdminLTE 4 native dark mode, Bootstrap 5 toast notifications for AP/station events, localStorage-backed user preferences.
 - **Encrypted credentials at rest.** Each AP password is encrypted with ASP.NET Data Protection; the optional UI password is stored as a PBKDF2 hash.
 - **Single image, single SQLite file.** Stop the container, copy `/data`, and your entire deployment is portable.
 
-## Try it in 60 seconds
+## Deployment
 
 ### Option A — `docker run`
 
@@ -63,23 +63,34 @@ docker run -d \
 
 A ready-to-use [`docker-compose.yml`](docker-compose.yml) ships in this repo:
 
-```sh
-docker compose up -d
-docker compose logs -f       # follow logs
-docker compose down          # stop (volumes preserved)
+```yaml
+services:
+  apstatsforopenwrt:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: apstatsforopenwrt:latest
+    container_name: apstatsforopenwrt
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - apstatsforopenwrt-data:/data
+      - apstatsforopenwrt-logs:/logs
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  apstatsforopenwrt-data:
+  apstatsforopenwrt-logs:
 ```
 
 Then open **<http://localhost:8080>** in your browser. The first-run wizard takes over — no environment variables required.
 
-### Building the image locally
-
-The repo ships a `Dockerfile`. From the repo root:
-
-```sh
-docker build -t apstatsforopenwrt:latest .
-```
-
-(Or just let `docker compose up -d` build it for you on first start.)
 
 ## Volumes & ports
 

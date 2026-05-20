@@ -6,12 +6,6 @@
 #   docker compose up -d         # start
 #   docker compose logs -f       # follow logs
 #   docker compose down          # stop (PRESERVES volumes)
-#   docker compose down -v       # stop AND WIPE volumes (DO NOT do this on a configured deployment)
-#
-# Named volumes (vs bind mounts) sidestep the UID/GID ownership trap on Linux:
-# the Dockerfile's `chown -R app:app /data /logs` runs against named volumes
-# cleanly on first attach. For bind mounts, operators must `chown -R 1654:1654`
-# the host paths first.
 
 services:
   apstatsforopenwrt:
@@ -26,18 +20,6 @@ services:
     volumes:
       - apstatsforopenwrt-data:/data
       - apstatsforopenwrt-logs:/logs
-    # Healthcheck — Compose is the source of truth for the probe (260520-hcc).
-    # Operator-authorised override of the Dockerfile HEALTHCHECK directive
-    # (`Dockerfile:67-68`) on 2026-05-20 so the probe config lives in the same
-    # file that defines the service. Shape parity with the Dockerfile directive
-    # is intentional and mandatory: any future probe tweak (interval, timeout,
-    # start-period, retries, URL) MUST edit this block. The Dockerfile directive
-    # is kept in place so the image stays usable standalone (README Option A
-    # `docker run`); Compose users get this block instead. CMD exec form
-    # (rather than CMD-SHELL) makes the `|| exit 1` trailer from the Dockerfile
-    # unnecessary — curl `-f` already returns non-zero on HTTP failure, which
-    # Docker treats as unhealthy. Supersedes Phase 7 RESEARCH Finding #8 for the
-    # Compose path only.
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 30s
