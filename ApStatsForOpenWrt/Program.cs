@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using ApStatsForOpenWrt.Data;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
@@ -309,9 +310,42 @@ try
             o.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest;
             o.LoginPath = "/Login";
             o.LogoutPath = "/Logout";
-            o.ExpireTimeSpan = TimeSpan.FromDays(7);
-            o.SlidingExpiration = true;
+            o.ExpireTimeSpan = TimeSpan.FromDays(7);          // M-SEC-04 — UNCHANGED from v0.11
+            o.SlidingExpiration = true;                        // M-SEC-04 — UNCHANGED from v0.11
+
+            // M-SEC-04 / plan 15-04 — session-version claim check on every request.
+            // Per CONTEXT.md Decision 1, missing claim is treated as a mismatch (every v0.11
+            // cookie at v0.12 deploy) — one-time UX cost; operators re-auth once on deploy.
+            //
+            // Documented deviation from Decision 1's pinned shape (15-04 truths block):
+            // adds `SignOutAsync` AFTER `RejectPrincipal` so the now-invalid cookie is also
+            // wiped from the browser via a Set-Cookie deletion header. RejectPrincipal alone
+            // leaves the stale cookie in place — every subsequent request would pay the full
+            // validation cost before rejection. Additive mitigation; does not weaken the gate.
+            //
+            // IAppSettingsService is resolved PER-REQUEST via ctx.HttpContext.RequestServices
+            // — NOT captured at registration time (CONTEXT.md code_context "OnValidatePrincipal").
+            o.Events.OnValidatePrincipal = static async ctx =>
+            {
+                var settings = ctx.HttpContext.RequestServices.GetRequiredService<IAppSettingsService>();
+                var sv = ctx.Principal?.FindFirst("session_version")?.Value;
+                if (sv is null || !int.TryParse(sv, out var claimVersion) || claimVersion != settings.SessionVersion)
+                {
+                    ctx.RejectPrincipal();
+                    await ctx.HttpContext.SignOutAsync(
+                        Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme);
+                }
+            };
         });
+
+    // M-SEC-04 / plan 15-04 — bind the DI-resolved TimeProvider onto CookieAuthenticationOptions
+    // via IPostConfigureOptions. The AddCookie lambda above runs at registration time with no
+    // scope (cannot resolve TimeProvider directly); IPostConfigureOptions runs AFTER the options
+    // instance is constructed, inside a scope where TimeProvider is resolvable.
+    // TimeProvider.System is already registered as a Singleton above (Phase 10 ORCH-07);
+    // SlidingExpirationTests swaps it for a FakeTimeProvider via ConfigureTestServices.
+    builder.Services.AddSingleton<IPostConfigureOptions<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions>>(
+        sp => new ApStatsForOpenWrt.Services.Auth.CookieAuthTimeProviderConfigurator(sp.GetRequiredService<TimeProvider>()));
 
     builder.Services.AddCascadingAuthenticationState();
     builder.Services.AddAuthorization(o =>
@@ -419,6 +453,17 @@ try
         .AddInteractiveServerComponents();
 
     var app = builder.Build();
+
+    // M-SEC-10 / plan 15-04 — Warning when ASPNETCORE_ENVIRONMENT=Development is set,
+    // so an operator who accidentally ships the dev env flag into a production container
+    // sees it in docker logs at boot. The verbatim message is pinned by
+    // DevelopmentEnvironmentWarningTests (em-dash is U+2014, NOT a hyphen).
+    if (app.Environment.IsDevelopment())
+    {
+        var startupLog = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+        startupLog.LogWarning(
+            "ASPNETCORE_ENVIRONMENT=Development is set. This should never be true in production deployments — verify your container/orchestrator config.");
+    }
 
     // Middleware pipeline — order is LOAD-BEARING (RESEARCH §Pitfall 4):
     // UseForwardedHeaders MUST run before UseAuthentication (so cookie sees the rewritten
@@ -580,7 +625,14 @@ try
         var hash = hasher.Hash(password);
         await settings.SetUIPasswordHashAsync(hash, ctx.RequestAborted);
 
-        var claims   = new[] { new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, "operator") };
+        // M-SEC-04 / plan 15-04 — stamp the post-bump SessionVersion as a claim. SetUIPasswordHashAsync
+        // bumps the version atomically (plan 15-01), so settings.SessionVersion here is the new value;
+        // the freshly-issued cookie validates cleanly against OnValidatePrincipal on the next request.
+        var claims   = new[]
+        {
+            new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, "operator"),
+            new System.Security.Claims.Claim("session_version", settings.SessionVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+        };
         var identity = new System.Security.Claims.ClaimsIdentity(
             claims,
             Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme);
