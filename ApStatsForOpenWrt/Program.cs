@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -490,30 +491,75 @@ try
     app.UseRateLimiter();           // sees rewritten IP (Pitfall 4)
 
     // /Logout — minimal endpoint; SignOut + redirect (RESEARCH §Open Question #1 recommendation).
-    // The user-menu form posts the antiforgery token; we validate it by default.
-    app.MapPost("/Logout", async (HttpContext ctx) =>
+    // M-SEC-01 — explicit antiforgery validation because `ctx.Request.Form` binding bypasses
+    // `app.UseAntiforgery()` auto-validation. The user-menu form posts the antiforgery token;
+    // we validate it explicitly here. No commitment-404 gate on /Logout — sign-out is always
+    // legitimate for an authenticated principal.
+    app.MapPost("/Logout", async (
+        IAntiforgery antiforgery,
+        HttpContext ctx) =>
     {
+        try { await antiforgery.ValidateRequestAsync(ctx); }
+        catch (AntiforgeryValidationException)
+        {
+            return Microsoft.AspNetCore.Http.Results.BadRequest();
+        }
         await ctx.SignOutAsync(Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme);
         return Microsoft.AspNetCore.Http.Results.Redirect("/");
     });
 
     // D-08: "Skip for now" POST handler. Sets WizardDismissed = true and redirects to dashboard.
     // Works from all three wizard steps (even Step 1 static SSR via the SetupLayout form POST).
+    // M-SEC-01 — explicit antiforgery validation + commitment-404 gate. WizardDismissed is NOT
+    // in the gate (Option B resumability — dismissed-only state must still allow skip to be
+    // re-issued until a real commitment lands).
     app.MapPost("/setup/skip", async (
+        IAntiforgery antiforgery,
         IAppSettingsService settings,
+        INodeRepo nodeRepo,
         HttpContext ctx) =>
     {
+        try { await antiforgery.ValidateRequestAsync(ctx); }
+        catch (AntiforgeryValidationException)
+        {
+            return Microsoft.AspNetCore.Http.Results.BadRequest();
+        }
+
+        // M-SEC-01 — refuse 404 once a real commitment exists. WizardDismissed is NOT in
+        // the gate (Option B resumability).
+        var anyNodes = await nodeRepo.AnyAsync(ctx.RequestAborted);
+        var hasPassword = !string.IsNullOrEmpty(settings.UIPasswordHash);
+        if (anyNodes || hasPassword)
+            return Microsoft.AspNetCore.Http.Results.NotFound();
+
         await settings.SetWizardDismissedAsync(true, ctx.RequestAborted);
         return Microsoft.AspNetCore.Http.Results.Redirect("/");
     }).AllowAnonymous();
 
     // Step 1 password submission — auth needs the HTTP response pipeline, not the Blazor circuit.
     // Password.razor is a normal InteractiveServer page; this endpoint handles the POST.
+    // M-SEC-01 — explicit antiforgery validation + commitment-404 gate. WizardDismissed is NOT
+    // in the gate (Option B resumability).
     app.MapPost("/setup/submit-password", async (
+        IAntiforgery antiforgery,
         ApStatsForOpenWrt.Services.Auth.IUIPasswordHasher hasher,
         IAppSettingsService settings,
+        INodeRepo nodeRepo,
         HttpContext ctx) =>
     {
+        try { await antiforgery.ValidateRequestAsync(ctx); }
+        catch (AntiforgeryValidationException)
+        {
+            return Microsoft.AspNetCore.Http.Results.BadRequest();
+        }
+
+        // M-SEC-01 — refuse 404 once a real commitment exists. WizardDismissed is NOT in
+        // the gate (Option B resumability).
+        var anyNodes = await nodeRepo.AnyAsync(ctx.RequestAborted);
+        var hasPassword = !string.IsNullOrEmpty(settings.UIPasswordHash);
+        if (anyNodes || hasPassword)
+            return Microsoft.AspNetCore.Http.Results.NotFound();
+
         var form   = ctx.Request.Form;
         var action = form["action"].ToString();
 
