@@ -15,7 +15,7 @@
 
 ---
 
-<img src="docs/screenshots/dashboard.png" alt="AP Stats for OpenWrt dashboard showing a live, multi-AP view of WiFi stations across WLANs. Identifiers in the screenshot have been redacted." width="900" />
+<img src="docs/screenshots/dashboard.png" alt="AP Stats for OpenWrt dashboard showing a live, multi-AP view of WiFi stations across WLANs. Identifiers in the screenshot have been redacted." />
 
 *Live multi-AP, multi-WLAN station view. The native LuCI UI in AP mode does not present this information cleanly across access points — this dashboard fills that gap.*
 
@@ -178,6 +178,10 @@ Conventions, anti-patterns, and architectural invariants are documented in [`CLA
 This project is released under the [PolyForm Noncommercial License 1.0.0](LICENSE). In plain terms: you may use, study, modify, and redistribute the source — including modified versions — for any noncommercial purpose, provided you keep the `Required Notice:` attribution line that names the original author. Commercial use is not granted by this license; contact the maintainer if you need a separate commercial arrangement.
 
 PolyForm Noncommercial is a *source-available* license, not an OSI-approved open-source license — the noncommercial restriction is incompatible with the OSI definition. The canonical license text is hosted at <https://polyformproject.org/licenses/noncommercial/1.0.0>; the verbatim copy that governs this repository lives in [`LICENSE`](LICENSE).
+
+## Trademarks
+
+*OpenWRT*, *LuCI*, *Docker*, *.NET*, *Blazor*, *ASP.NET*, *SQLite*, *EF Core*, *AdminLTE*, *Pi.Alert*, *SSH.NET*, *Serilog*, and any other product, project, or company names referenced in this repository are trademarks or registered trademarks of their respective owners. Their use here is for identification purposes only and does not imply any affiliation with, sponsorship by, or endorsement from those owners. *AP Stats for OpenWrt* is an independent project that monitors OpenWRT access points over SSH; it is not affiliated with the OpenWRT project.
 
 ---
 
