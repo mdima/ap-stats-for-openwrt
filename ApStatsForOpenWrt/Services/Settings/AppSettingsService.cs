@@ -20,6 +20,7 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
     private const string KeyWizardDismissed        = "WizardDismissed";
     private const string KeyRefreshIntervalSeconds = "RefreshIntervalSeconds";
     private const string KeyLocalDomainSuffixes    = "LocalDomainSuffixes";
+    private const string KeySessionVersion         = "SessionVersion";
 
     private static readonly IReadOnlyList<string> EmptySuffixList = Array.Empty<string>();
 
@@ -29,14 +30,16 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
         string? UIPasswordHash,
         bool WizardDismissed,
         int RefreshIntervalSeconds,
-        IReadOnlyList<string> LocalDomainSuffixes);
-    private Snapshot _current = new(30, null, false, 3600, EmptySuffixList); // safe defaults until WarmAsync runs (3600 matches Phase 9 SCHEMA-06 seed)
+        IReadOnlyList<string> LocalDomainSuffixes,
+        int SessionVersion);
+    private Snapshot _current = new(30, null, false, 3600, EmptySuffixList, 0); // safe defaults until WarmAsync runs (3600 matches Phase 9 SCHEMA-06 seed; SessionVersion default 0 per M-SEC-04)
 
     public int     PollingIntervalSeconds => Volatile.Read(ref _current).PollingIntervalSeconds;
     public string? UIPasswordHash         => Volatile.Read(ref _current).UIPasswordHash;
     public bool    WizardDismissed        => Volatile.Read(ref _current).WizardDismissed;
     public int     RefreshIntervalSeconds => Volatile.Read(ref _current).RefreshIntervalSeconds;
     public IReadOnlyList<string> LocalDomainSuffixes => Volatile.Read(ref _current).LocalDomainSuffixes;
+    public int     SessionVersion         => Volatile.Read(ref _current).SessionVersion;
 
     public event Action<IAppSettingsService>? Changed;
 
@@ -64,15 +67,23 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
             UIPasswordHash:            rows.TryGetValue(KeyUIPasswordHash,         out var uh) ? uh.StringValue       : null,
             WizardDismissed:           rows.TryGetValue(KeyWizardDismissed,        out var wd) ? wd.BoolValue ?? false: false,
             RefreshIntervalSeconds:    rows.TryGetValue(KeyRefreshIntervalSeconds, out var ri) ? ri.IntValue ?? 3600 : 3600,
-            LocalDomainSuffixes:       suffixes);
+            LocalDomainSuffixes:       suffixes,
+            SessionVersion:            rows.TryGetValue(KeySessionVersion,         out var sv) ? sv.IntValue ?? 0    : 0);
         Interlocked.Exchange(ref _current, snap);
     }
 
     public Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default)
         => UpsertAndRefreshAsync(KeyPollingInterval, intValue: seconds, ct: ct);
 
-    public Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default)
-        => UpsertAndRefreshAsync(KeyUIPasswordHash, stringValue: hash, ct: ct);
+    public async Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default)
+    {
+        // M-SEC-04 — sequence both upserts through the same IAppSettingsRepo writer (single-
+        // writer invariant preserved). The bump happens on BOTH set and clear (null) paths —
+        // no branching. Plan 15-04 reads SessionVersion from OnValidatePrincipal to invalidate
+        // every existing cookie once the password changes.
+        await UpsertAndRefreshAsync(KeyUIPasswordHash, stringValue: hash, ct: ct);
+        await BumpSessionVersionAsync(ct);
+    }
 
     public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default)
         => UpsertAndRefreshAsync(KeyWizardDismissed, boolValue: dismissed, ct: ct);
@@ -91,6 +102,17 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
             .ToArray();
         var json = JsonSerializer.Serialize(cleaned);
         return UpsertAndRefreshAsync(KeyLocalDomainSuffixes, stringValue: json, ct: ct);
+    }
+
+    public Task SetSessionVersionAsync(int version, CancellationToken ct = default)
+        => UpsertAndRefreshAsync(KeySessionVersion, intValue: version, ct: ct);
+
+    public async Task BumpSessionVersionAsync(CancellationToken ct = default)
+    {
+        // M-SEC-04 — read current snapshot, compute +1, persist through the same single-writer
+        // path as every other setter. Called atomically inside SetUIPasswordHashAsync.
+        var next = Volatile.Read(ref _current).SessionVersion + 1;
+        await UpsertAndRefreshAsync(KeySessionVersion, intValue: next, ct: ct);
     }
 
     private async Task UpsertAndRefreshAsync(
