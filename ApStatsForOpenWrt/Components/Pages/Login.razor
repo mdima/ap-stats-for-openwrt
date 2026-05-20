@@ -4,8 +4,18 @@
 @attribute [ExcludeFromInteractiveRouting]
 @attribute [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("LoginPolicy")]
 @* Pitfall 2: opt out of D-06 global InteractiveServer — sign-in needs static SSR roundtrip
-   Pitfall 3: rate limit attached at the page route level via [EnableRateLimiting] — covers
-   both GET and POST traffic to /Login per SEC-06 / D-03 (5/IP/min). *@
+   Pitfall 3 / M-SEC-03 (plan 15-05): per-IP rate-limit applied via [EnableRateLimiting("LoginPolicy")]
+   (5 requests/IP/minute, partition key = RemoteIpAddress).
+
+   The distributed brute-force ceiling (LoginGlobalPolicy / 30 requests/minute server-wide,
+   partition key = "_global_") is enforced via opts.GlobalLimiter in Program.cs, gated to
+   /Login only. Plan 15-05 originally specified two stacked [EnableRateLimiting] attributes,
+   but EnableRateLimitingAttribute carries [AttributeUsage(AllowMultiple = false)] in
+   ASP.NET Core 10 (verified by reflection against the runtime assembly), producing CS0579
+   "Duplicate attribute" when stacked. The GlobalLimiter + path-gate shape preserves
+   CONTEXT.md Decision 2's intent verbatim — every /Login request consumes BOTH the per-IP
+   budget (this attribute) AND the global budget (GlobalLimiter in Program.cs); either over
+   budget yields a 429 via the shared opts.RejectionStatusCode. *@
 @using System.Security.Claims
 @using Microsoft.AspNetCore.Authentication
 @using Microsoft.AspNetCore.Authentication.Cookies
@@ -110,8 +120,25 @@
         // Pitfall 8 — re-hash if framework signaled an upgrade is available.
         if (verifyResult == PasswordVerificationResult.SuccessRehashNeeded)
         {
-            var newHash = Hasher.Hash(form.Password ?? "");
-            await Settings.SetUIPasswordHashAsync(newHash, HttpContext.RequestAborted);
+            try
+            {
+                var newHash = Hasher.Hash(form.Password ?? "");
+                await Settings.SetUIPasswordHashAsync(newHash, HttpContext.RequestAborted);
+            }
+            catch (ArgumentException ex)
+            {
+                // M-SEC-03 / plan 15-05 — operator's existing password (just verified by
+                // Hasher.Verify above) does NOT satisfy the new four-part policy. Don't
+                // sign them in; surface the verbatim policy message and keep the legacy
+                // hash in place (no SetUIPasswordHashAsync write happens in the catch path).
+                // They can still authenticate later — they just don't get rehashed mid-sign-in
+                // if their current password is below policy. The pinned operator-facing copy
+                // lives in UIPasswordHasher.PolicyMessage (plan 15-02); ex.Message surfaces
+                // it 1:1 (the framework appends " (Parameter '...)" but the prefix is the
+                // operator-facing literal). PasswordPolicyBannerTests pins this end-to-end.
+                _banner = ex.Message;
+                return;
+            }
         }
 
         // Single shared UI password — no per-user identity. The cookie principal's Name claim

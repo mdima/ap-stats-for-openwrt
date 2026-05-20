@@ -359,6 +359,8 @@ try
 
     builder.Services.AddRateLimiter(opts =>
     {
+        // Existing per-IP LoginPolicy — UNCHANGED. Applied via [EnableRateLimiting("LoginPolicy")]
+        // on Login.razor. SEC-06 / D-03 contract: 5 requests per minute per source IP.
         opts.AddPolicy("LoginPolicy", ctx =>
             System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                 partitionKey: ctx.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
@@ -369,11 +371,16 @@ try
                     QueueLimit = 0,
                     AutoReplenishment = true
                 }));
-        // M-SEC-03 / plan 15-05 — distributed brute-force ceiling on /Login. Single _global_
-        // partition; 30 requests/minute server-wide regardless of source IP. CONTEXT.md
-        // Decision 2: FixedWindow matches LoginPolicy shape verbatim; boundary-burst accepted.
-        // The two policies are chained on Login.razor via two [EnableRateLimiting] attributes;
-        // ASP.NET evaluates each policy independently and 429s if ANY partition is over budget.
+        // M-SEC-03 / plan 15-05 — LoginGlobalPolicy: distributed brute-force ceiling on /Login.
+        // Single _global_ partition; 30 requests/minute server-wide regardless of source IP.
+        // CONTEXT.md Decision 2 PINNED shape (FixedWindow, PermitLimit=30, Window=1min,
+        // QueueLimit=0, AutoReplenishment=true, partitionKey="_global_") — mirrors LoginPolicy
+        // verbatim except for the global partition key and the higher permit limit.
+        //
+        // NOTE: This standalone policy registration preserves CONTEXT.md Decision 2's shape
+        // verbatim and makes the policy directly applicable via [EnableRateLimiting(...)] on
+        // any future endpoint. Login.razor itself enforces BOTH partitions via the GlobalLimiter
+        // below (see deviation note) because EnableRateLimitingAttribute is AllowMultiple=false.
         opts.AddPolicy("LoginGlobalPolicy", _ =>
             System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                 partitionKey: "_global_",
@@ -384,6 +391,40 @@ try
                     QueueLimit = 0,
                     AutoReplenishment = true
                 }));
+
+        // M-SEC-03 / plan 15-05 — DEVIATION FROM PLAN ATTRIBUTE-CHAIN SHAPE.
+        //
+        // Plan 15-05 prescribed two stacked [EnableRateLimiting] attributes on Login.razor
+        // (LoginPolicy + LoginGlobalPolicy). EnableRateLimitingAttribute is marked
+        // [AttributeUsage(..., AllowMultiple = false)] in ASP.NET Core 10 (verified via
+        // reflection against the 10.0.8 runtime assembly), producing CS0579 ("Duplicate
+        // attribute") when two attributes of the same type stack on a Razor page. The
+        // attribute-chain approach is structurally impossible.
+        //
+        // Resolution: enforce the LoginGlobalPolicy budget via opts.GlobalLimiter, gated to
+        // /Login only. Combined with the per-IP [EnableRateLimiting("LoginPolicy")] attribute
+        // still present on Login.razor, this yields IDENTICAL observable behavior to the
+        // attribute-chain design: every /Login request consumes BOTH budgets, and either
+        // budget over-limit → 429 via the shared RejectionStatusCode below. Non-/Login
+        // endpoints (every other route) hit RateLimitPartition.GetNoLimiter and pay no cost.
+        //
+        // CONTEXT.md Decision 2's PINNED partition parameters are preserved verbatim. The
+        // PartitionedRateLimiter.CreateChained shape is the .NET 10 canonical way to
+        // independently evaluate multiple partition budgets on a single endpoint.
+        opts.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.CreateChained(
+            System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+                ctx.Request.Path.StartsWithSegments("/Login")
+                    ? System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: "_global_",                            // M-SEC-03 plan 15-05
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 30,                                // CONTEXT.md Decision 2
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0,
+                            AutoReplenishment = true
+                        })
+                    : System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter<string>("non-login")));
+
         opts.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     });
 
