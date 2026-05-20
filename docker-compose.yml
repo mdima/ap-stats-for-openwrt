@@ -26,9 +26,24 @@ services:
     volumes:
       - apstatsforopenwrt-data:/data
       - apstatsforopenwrt-logs:/logs
-    # NOTE: No `healthcheck:` block here — the Dockerfile's HEALTHCHECK directive
-    # governs. Adding a Compose healthcheck would OVERRIDE the image directive
-    # (Phase 7 RESEARCH Finding #8).
+    # Healthcheck — Compose is the source of truth for the probe (260520-hcc).
+    # Operator-authorised override of the Dockerfile HEALTHCHECK directive
+    # (`Dockerfile:67-68`) on 2026-05-20 so the probe config lives in the same
+    # file that defines the service. Shape parity with the Dockerfile directive
+    # is intentional and mandatory: any future probe tweak (interval, timeout,
+    # start-period, retries, URL) MUST edit this block. The Dockerfile directive
+    # is kept in place so the image stays usable standalone (README Option A
+    # `docker run`); Compose users get this block instead. CMD exec form
+    # (rather than CMD-SHELL) makes the `|| exit 1` trailer from the Dockerfile
+    # unnecessary — curl `-f` already returns non-zero on HTTP failure, which
+    # Docker treats as unhealthy. Supersedes Phase 7 RESEARCH Finding #8 for the
+    # Compose path only.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
 
 volumes:
   apstatsforopenwrt-data:
