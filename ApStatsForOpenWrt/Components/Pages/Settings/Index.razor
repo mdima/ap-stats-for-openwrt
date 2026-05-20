@@ -430,7 +430,24 @@
         }
 
         var wasSet = !string.IsNullOrEmpty(Settings.UIPasswordHash);
-        var hash = Hasher.Hash(_passwordForm.NewPassword);
+
+        // M-SEC-03 / plan 15-05 — UIPasswordHasher.Hash (plan 15-02) throws ArgumentException
+        // with the verbatim operator-facing policy message when the plaintext fails the
+        // four-part policy (>=8 chars + upper + lower + digit-or-symbol). Surface ex.Message
+        // verbatim via the existing _passwordError -> alert-danger rendering path (above
+        // the alert-success _passwordBanner in the password card template). No DB write,
+        // no session bump, no banner-success — operator sees the verbatim policy reason
+        // and the form is preserved for retry.
+        string hash;
+        try
+        {
+            hash = Hasher.Hash(_passwordForm.NewPassword);
+        }
+        catch (ArgumentException ex)
+        {
+            _passwordError = ex.Message;
+            return;
+        }
         await Settings.SetUIPasswordHashAsync(hash);
 
         // M-SEC-04 / plan 15-04 — banner copy update. After Plan 15-04, every existing session
