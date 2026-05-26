@@ -27,7 +27,11 @@ public sealed class NodeRepoClearFingerprintsTests(SqliteInMemoryFixture fixture
         await repo.AddAsync(n1, ct);
         await repo.AddAsync(n2, ct);
 
+        // M-SEC-06 (plan 16-04): method is [Obsolete] (v0.13 removal target). The CR-02-safe
+        // bulk-clear behavior is still covered until v0.13 removes the method + this test.
+#pragma warning disable CS0618
         await repo.ClearAllHostKeyFingerprintsAsync(ct);
+#pragma warning restore CS0618
 
         var f1 = await repo.GetByIdAsync(n1.Id, ct);
         var f2 = await repo.GetByIdAsync(n2.Id, ct);
