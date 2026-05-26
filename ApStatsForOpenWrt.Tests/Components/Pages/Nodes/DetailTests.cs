@@ -121,8 +121,11 @@ public sealed class DetailTests
             // Empty-state pre-discovery (UI-SPEC §Node Detail empty-state copy)
             Assert.Contains("No WLANs discovered yet", cut.Markup);
             Assert.Contains("Click \"Discover WLANs\" to scan this access point.", cut.Markup);
-            // Truncated fingerprint with ellipsis
-            Assert.Contains("0123456789abcdef…", cut.Markup);
+            // M-SEC-06 (plan 16-04) — full fingerprint, no truncation/ellipsis. The
+            // full DetailFullFingerprintTests suite pins the user-select-all markup + recipe;
+            // here we just confirm the un-truncated value renders and the old ellipsis is gone.
+            Assert.Contains("0123456789abcdef0123456789abcdef", cut.Markup);
+            Assert.DoesNotContain("…", cut.Markup);
         }
     }
 
@@ -136,7 +139,8 @@ public sealed class DetailTests
 
             var cut = ctx.Render<DetailPage>(p => p.Add(c => c.Id, 1));
 
-            Assert.Contains("Not yet trusted", cut.Markup);
+            // M-SEC-06 (plan 16-04) — empty-state copy updated to the CONTEXT.md Decision 4 phrasing.
+            Assert.Contains("Not yet captured — first poll cycle establishes trust", cut.Markup);
         }
     }
 

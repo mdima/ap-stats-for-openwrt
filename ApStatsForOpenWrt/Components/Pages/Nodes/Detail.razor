@@ -47,11 +47,14 @@ else
                 <dd class="col-sm-9">
                     @if (string.IsNullOrEmpty(_node.HostKeyFingerprint))
                     {
-                        <span class="text-body-secondary">Not yet trusted</span>
+                        <span class="text-muted">Not yet captured — first poll cycle establishes trust</span>
                     }
                     else
                     {
-                        <code class="font-monospace">@(_node.HostKeyFingerprint.Length > 16 ? _node.HostKeyFingerprint[..16] + "…" : _node.HostKeyFingerprint)</code>
+                        <code class="font-monospace user-select-all">@_node.HostKeyFingerprint</code>
+                        <div class="text-muted small mt-1">
+                            Verify out-of-band: <code class="user-select-all">ssh-keyscan @_node.Hostname | ssh-keygen -lf -</code>
+                        </div>
                     }
                 </dd>
             </dl>
