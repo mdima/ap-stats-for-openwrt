@@ -121,6 +121,11 @@ public sealed class RealSshSession(ILogger<RealSshSession> log) : ISshSession
 
     public Task<(int ExitCode, string StdOut, string StdErr)> RunCommandWithExitCodeAsync(string command, CancellationToken ct)
     {
+        // WR-02: `ct` here only gates SCHEDULING of the delegate — if cancellation has already
+        // fired, Task.Run will not start the body. Once cmd.Execute() (a blocking SSH.NET call) is
+        // running it does NOT observe `ct`, so an in-flight command is bounded only by the
+        // channel-level ConnectionInfo.Timeout (set to 5s in ConnectAsync), NOT by a caller's
+        // CancelAfter. Callers must not rely on `ct` to interrupt a command already mid-execution.
         return Task.Run(() =>
         {
             using var cmd = _client!.CreateCommand(command);

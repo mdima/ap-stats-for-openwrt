@@ -108,9 +108,18 @@ public sealed class NodeAdminService(
 
         // Belt + braces: ConnectionInfo.Timeout = 5s (inside ISshSession.ConnectAsync) AND a
         // linked CTS with CancelAfter(5s). Mirrors NodePoller.cs:59-60 verbatim (DISC-02).
-        // The 5s budget covers ALL THREE cascade steps combined (NOT 5s per step) — on a fast
-        // LAN the three round trips fit comfortably; on a slow/unreachable AP, OCE from any
-        // step short-circuits to Timeout via the outer catch.
+        //
+        // WHAT THE 5s LINKED CTS ACTUALLY COVERS (WR-02 — do NOT overstate this): the linked
+        // CTS bounds the CONNECT phase (Task.Run(() => _client.Connect(), sct) observes sct) and
+        // gates the *scheduling* of each subsequent RunCommandWithExitCodeAsync delegate — if the
+        // 5s has already elapsed when a step is about to start, that step's Task.Run is cancelled
+        // before it runs and the OCE short-circuits to Timeout via the outer catch. It is NOT a
+        // hard combined wall-clock budget: once a step's blocking cmd.Execute() is already running,
+        // SSH.NET does not observe the token, so a single in-flight command is bounded only by the
+        // per-operation channel-level ConnectionInfo.Timeout (= 5s), not by CancelAfter. In the
+        // worst case (each of the three sequential commands stalling near the channel timeout) the
+        // total wall-clock can exceed 5s. The cancellation guarantee is therefore best-effort, not
+        // a strict 5s ceiling on the whole cascade.
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         linkedCts.CancelAfter(TimeSpan.FromSeconds(5));
         var sct = linkedCts.Token;
@@ -206,7 +215,9 @@ public sealed class NodeAdminService(
         }
         catch (OperationCanceledException)
         {
-            // Internal 5s budget expired (covers all 3 cascade steps combined).
+            // Internal 5s linked-CTS fired — either during the connect phase or while gating the
+            // scheduling of a cascade step (see WR-02 note above; this is best-effort, not a hard
+            // combined budget for already-running commands).
             return new DisconnectResult.Timeout();
         }
         catch (SshConnectionException)
