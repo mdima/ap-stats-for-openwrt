@@ -33,7 +33,20 @@ public sealed class SecurityHeadersMiddleware : IMiddleware
 
     public async Task InvokeAsync(HttpContext ctx, RequestDelegate next)
     {
-        SetHeaders(ctx);
+        // Register the header write on the OnStarting callback (fired just before the
+        // first response byte is flushed) rather than setting them on the inbound leg.
+        // This is the most defensive shape: it guarantees the charter-pinned values win
+        // even when a DOWNSTREAM component (e.g. ASP.NET Core's UseAntiforgery, which on
+        // .NET 10 appends `Content-Security-Policy: frame-ancestors 'self'`) would
+        // otherwise Append() a second, conflicting CSP value after this middleware ran.
+        // The indexer assignment in SetHeaders REPLACES rather than Appends, so the
+        // emitted CSP is exactly the verbatim charter value (frame-ancestors 'none').
+        ctx.Response.OnStarting(static state =>
+        {
+            SetHeaders((HttpContext)state);
+            return Task.CompletedTask;
+        }, ctx);
+
         await next(ctx);
     }
 
@@ -41,13 +54,17 @@ public sealed class SecurityHeadersMiddleware : IMiddleware
     internal static void SetHeaders(HttpContext ctx)
     {
         var h = ctx.Response.Headers;
-        // TryAdd-equivalent: only set if absent so downstream components / explicit
-        // overrides (e.g., a future per-endpoint policy) take precedence.
-        if (!h.ContainsKey("X-Content-Type-Options")) h.Append("X-Content-Type-Options", XContentTypeOptionsValue);
-        if (!h.ContainsKey("X-Frame-Options"))        h.Append("X-Frame-Options", XFrameOptionsValue);
-        if (!h.ContainsKey("Referrer-Policy"))        h.Append("Referrer-Policy", ReferrerPolicyValue);
-        if (!h.ContainsKey("Permissions-Policy"))     h.Append("Permissions-Policy", PermissionsPolicyValue);
-        if (!h.ContainsKey("Content-Security-Policy")) h.Append("Content-Security-Policy", ContentSecurityPolicyValue);
+        // Indexer assignment = REPLACE semantics (sets the header to exactly this single
+        // value, overwriting any value a downstream component appended). The charter
+        // contract requires these EXACT values on every response (T-16-05-01 clickjacking
+        // mitigation pins frame-ancestors 'none'); a downstream Append() of a second CSP
+        // value (e.g. UseAntiforgery's `frame-ancestors 'self'`) would both break the
+        // verbatim-value contract and weaken the clickjacking gate.
+        h["X-Content-Type-Options"] = XContentTypeOptionsValue;
+        h["X-Frame-Options"] = XFrameOptionsValue;
+        h["Referrer-Policy"] = ReferrerPolicyValue;
+        h["Permissions-Policy"] = PermissionsPolicyValue;
+        h["Content-Security-Policy"] = ContentSecurityPolicyValue;
         // M-SEC-07 deliberate omissions (HTTP-on-LAN compat):
         //   - Strict-Transport-Security: NOT emitted under any code path.
         //   - CSP upgrade-insecure-requests: NOT included in the CSP value above.
