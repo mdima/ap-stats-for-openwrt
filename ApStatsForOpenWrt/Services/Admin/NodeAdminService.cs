@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging;
 using ApStatsForOpenWrt.Data.Models;
@@ -57,9 +58,40 @@ public sealed class NodeAdminService(
     IDataProtectionProvider dpp,
     ILogger<NodeAdminService> log) : INodeAdminService
 {
+    // M-SEC-09 / plan 16-06 — defense-in-depth at the construction site (charter:
+    // "sibling re-validates at the construction site"; mirrors SubnetSweepProbe.cs:29-30).
+    // Both args are DB-sourced and Phase-9-parser-validated upstream, but the single
+    // write-side shell-command path re-validates before interpolating into the ubus / iw /
+    // hostapd_cli commands.
+    //
+    // MAC: uppercase-only ^[0-9A-F]{2}(:[0-9A-F]{2}){5}$ — WLANStation.MacAddress is
+    // canonical-uppercase (CLAUDE.md dedup key), so the happy path receives uppercase MACs.
+    // A lowercase MAC reaching here indicates an upstream canonicalization regression and
+    // is correctly surfaced as invalid-mac (fail-closed).
+    private static readonly Regex MacRegex =
+        new(@"^[0-9A-F]{2}(:[0-9A-F]{2}){5}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    // Iface: ^[a-zA-Z0-9._\-]+$ accepts dots (wlan0.1 VLAN subinterfaces) and underscores
+    // (OpenWRT shell-friendly names). Same shape as SubnetSweepProbe.IfaceNameRegex.
+    private static readonly Regex IfaceNameRegex =
+        new(@"^[a-zA-Z0-9._\-]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     public async Task<DisconnectResult> DisconnectStationAsync(
         WiFiNode node, string mac, string iface, CancellationToken ct)
     {
+        // M-SEC-09 / plan 16-06 — defense-in-depth regex gates BEFORE any side effect
+        // (password decrypt / SSH connect / command construction). MAC checked first,
+        // then iface (deterministic precedence). Invalid input fails closed with NO SSH
+        // command issued and NO password decryption.
+        if (!MacRegex.IsMatch(mac))
+        {
+            return new DisconnectResult.UnknownError("invalid-mac");
+        }
+        if (!IfaceNameRegex.IsMatch(iface))
+        {
+            return new DisconnectResult.UnknownError("invalid-iface");
+        }
+
         // SEC-07: decrypt password just-in-time; plaintext lives only in this stack frame.
         string plaintext;
         try
@@ -149,8 +181,9 @@ public sealed class NodeAdminService(
             //
             // MAC + iface defensive note: both are sourced from the DB and were populated by
             // the Phase 9 parser (uppercase 17-char canonical MAC; iface like `wlan0`). The
-            // parser validates shapes at write-time so shell-injection via these args is not
-            // a credible attack surface; no MAC regex guard at this entry point.
+            // parser validates shapes at write-time; M-SEC-09 (plan 16-06) ADDS a belt-and-braces
+            // regex gate at the TOP of this method (MacRegex + IfaceNameRegex) so a future parser
+            // regression or a new call path cannot inject shell metacharacters here.
             var hostapdCommand =
                 $"for d in /var/run/hostapd-* /var/run/hostapd; do " +
                 $"if [ -S \"$d/{iface}\" ]; then " +
