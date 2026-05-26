@@ -374,6 +374,11 @@ try
     forwardedNetworkCount = CountAcceptableEntries(knownNetworksRaw,
         s => System.Net.IPNetwork.TryParse(s, out _));
 
+    // M-SEC-07 / plan 16-05 — baseline security response headers middleware.
+    // Registered as transient per IMiddleware pattern. Pipeline registration below
+    // (immediately before app.UseStaticFiles()).
+    builder.Services.AddTransient<ApStatsForOpenWrt.Services.Security.SecurityHeadersMiddleware>();
+
     builder.Services.AddAuthentication(Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme)
         .AddCookie(o =>
         {
@@ -621,6 +626,11 @@ try
         app.UseForwardedHeaders();
     }
     app.UseSerilogRequestLogging();
+    // M-SEC-07 / plan 16-05 — baseline security headers. Placed BEFORE UseStaticFiles
+    // so static-asset responses (/lib/*, /app.css, /favicon.ico) also carry the
+    // 5 headers. Headers omitted by charter: Strict-Transport-Security AND CSP
+    // upgrade-insecure-requests (both fight HTTP-on-LAN deployment).
+    app.UseMiddleware<ApStatsForOpenWrt.Services.Security.SecurityHeadersMiddleware>();
     app.UseStaticFiles();           // serves /lib/adminlte/* /lib/bootstrap-icons/* /lib/source-sans-3/* /app.css /favicon.ico
     app.UseAntiforgery();
     // D-07: Auto-redirect first-run operator to the onboarding wizard.
