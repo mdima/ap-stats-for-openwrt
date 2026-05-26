@@ -24,12 +24,20 @@ public sealed class RealSshSession(ILogger<RealSshSession> log) : ISshSession
     private Action<string>? _onAccepted;
     private HostKeyMismatchException? _capturedMismatch;
 
+    // M-SEC-06 / plan 16-03 — captured at ConnectAsync entry so OnHostKeyReceived
+    // (SSH.NET-fixed signature with no WiFiNode arg) can emit a structured log line
+    // naming the node. The pair is reset per Connect.
+    private int _nodeId;
+    private string _nodeHostname = "";
+
     public async Task ConnectAsync(WiFiNode node, string plaintextPassword, string? expectedFingerprint,
         Action<string>? onHostKeyAccepted, CancellationToken ct)
     {
         _expectedFingerprint = expectedFingerprint;
         _onAccepted = onHostKeyAccepted;
         _capturedMismatch = null;
+        _nodeId = node.Id;             // M-SEC-06 / plan 16-03
+        _nodeHostname = node.Hostname; // M-SEC-06 / plan 16-03 — WiFiNode.Hostname is non-nullable (defaults to string.Empty)
 
         var connInfo = new ConnectionInfo(
             node.Hostname,
@@ -74,6 +82,13 @@ public sealed class RealSshSession(ILogger<RealSshSession> log) : ISshSession
 
         if (_expectedFingerprint is null)
         {
+            // M-SEC-06 / plan 16-03 — TOFU-capture Warning. Fires for every first-connect
+            // AND every post-Re-trust capture (operator-initiated Clear on Nodes/Detail.razor
+            // sets HostKeyFingerprint = null, which lands here on the next poll cycle).
+            // Emitted BEFORE _onAccepted?.Invoke so the operator-visible log entry exists
+            // even if the orchestrator-side persistence callback throws.
+            EmitM_SEC_06_TofuCapture(_log, _nodeId, _nodeHostname, actual);
+
             // D-02: first-connect TOFU. Accept the key; capture for orchestrator-side persistence.
             e.CanTrust = true;
             _onAccepted?.Invoke(actual);
@@ -117,6 +132,22 @@ public sealed class RealSshSession(ILogger<RealSshSession> log) : ISshSession
         try { _client?.Dispose();    } catch { /* swallow */ }
         _client = null;
         return ValueTask.CompletedTask;
+    }
+
+    // M-SEC-06 / plan 16-03 — TOFU-capture Warning. Internal static so the unit tests can
+    // drive it directly (a sealed Renci.SshNet HostKeyEventArgs cannot be faked cheaply).
+    // Pinned shape from CONTEXT.md Decision 1 — operator-grep tooling parses the M-SEC-06:
+    // prefix tag and the structured {NodeId} / {Hostname} / {Fingerprint} fields. The
+    // trailing parenthetical embeds the out-of-band verification recipe so the operator
+    // does not need to look it up. The Hostname token appears TWICE in the template
+    // (the Hostname= field + the recipe), so it appears twice in the args list to match
+    // positional {Hostname} resolution. This is intentional and grep-stable.
+    internal static void EmitM_SEC_06_TofuCapture(
+        ILogger log, int nodeId, string hostname, string fingerprint)
+    {
+        log.LogWarning(
+            "M-SEC-06: SSH host-key TOFU capture: NodeId={NodeId} Hostname={Hostname} Fingerprint={Fingerprint} (verify out-of-band: ssh-keyscan {Hostname} | ssh-keygen -lf -)",
+            nodeId, hostname, fingerprint, hostname);
     }
 
     // M-SEC-08 / plan 16-02 — SHA-1 detection rule per CONTEXT.md Decision 1 (SHA-1
