@@ -63,10 +63,14 @@ public sealed class RealSshSession(ILogger<RealSshSession> log) : ISshSession
 
             // M-SEC-08 / plan 16-02 — algo-negotiation visibility logs (see helper below).
             var ci = _client.ConnectionInfo;
+            // SSH negotiates the HMAC independently per direction. Pass BOTH the client→server
+            // (CurrentClientHmacAlgorithm) AND server→client (CurrentServerHmacAlgorithm) slots so
+            // a SHA-1 HMAC on EITHER direction surfaces the M-SEC-08 weak-crypto Warning (WR-03).
             EmitM_SEC_08_Logs(
                 _log, node.Id, node.Hostname,
                 ci.CurrentKeyExchangeAlgorithm, ci.CurrentHostKeyAlgorithm,
-                ci.CurrentClientEncryption, ci.CurrentClientHmacAlgorithm);
+                ci.CurrentClientEncryption, ci.CurrentClientHmacAlgorithm,
+                ci.CurrentServerHmacAlgorithm);
         }
         catch (SshConnectionException) when (_capturedMismatch is not null)
         {
@@ -175,9 +179,16 @@ public sealed class RealSshSession(ILogger<RealSshSession> log) : ISshSession
     // Decision 1 pinned shapes; M-SEC-NN: prefix-tag matches Phase 15 M-SEC-04 / M-SEC-10
     // convention + Phase 16 sibling 16-01 / 16-03. Information fires first (full algo set),
     // then the conditional SHA-1 Warning supplement.
+    // <paramref name="mac"/> is the client→server HMAC slot (rendered as Mac= in the Information
+    // line, preserving the pinned template shape). <paramref name="macServer"/> is the OPTIONAL
+    // server→client HMAC slot (WR-03): when supplied, it participates in SHA-1 detection and
+    // renders as a distinct MacServer= member so the two HMAC directions stay distinguishable in
+    // the Warning. It is intentionally NOT added to the Information template (which stays verbatim
+    // per CONTEXT.md Decision 1); when null (the synthetic-test seam) the behaviour is identical to
+    // the original client-only signature.
     internal static void EmitM_SEC_08_Logs(
         ILogger log, int nodeId, string hostname,
-        string? kex, string? hostKey, string? encryption, string? mac)
+        string? kex, string? hostKey, string? encryption, string? mac, string? macServer = null)
     {
         var kexV = kex ?? "<unknown>";
         var hostKeyV = hostKey ?? "<unknown>";
@@ -190,12 +201,17 @@ public sealed class RealSshSession(ILogger<RealSshSession> log) : ISshSession
 
         // SHA-1 family supplement (CONTEXT.md Decision 1). Warning fires when ANY slot
         // triggers IsSha1Family. Members render: comma-separated Slot=Value pairs in
-        // declaration order (Kex, HostKey, Encryption, Mac).
-        var triggered = new List<string>(4);
+        // declaration order (Kex, HostKey, Encryption, Mac [client→server], MacServer
+        // [server→client, only when a value was supplied]).
+        var triggered = new List<string>(5);
         if (IsSha1Family("Kex", kexV))               triggered.Add($"Kex={kexV}");
         if (IsSha1Family("HostKey", hostKeyV))       triggered.Add($"HostKey={hostKeyV}");
         if (IsSha1Family("Encryption", encryptionV)) triggered.Add($"Encryption={encryptionV}");
         if (IsSha1Family("Mac", macV))               triggered.Add($"Mac={macV}");
+        // Server→client HMAC slot — only evaluated when ConnectAsync supplied it. The synthetic
+        // unit-test seam omits it (null), preserving the original client-only Members shape.
+        if (macServer is not null && IsSha1Family("MacServer", macServer))
+            triggered.Add($"MacServer={macServer}");
 
         if (triggered.Count > 0)
         {
