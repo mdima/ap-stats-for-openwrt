@@ -32,13 +32,15 @@ namespace ApStatsForOpenWrt.Tests.Auth;
 /// </para>
 ///
 /// <para>
-/// Test-scoped ForwardedHeaders override: production Program.cs clears KnownProxies
-/// at startup (line ~301-302) so X-Forwarded-For is ignored by default. This factory
-/// adds 0.0.0.0/0 to KnownIPNetworks so the synthetic loopback sender is honored as
-/// a trusted proxy and the spoofed header rewrites RemoteIpAddress. Plan 15-05
-/// forward-coupling note: Phase 16 M-SEC-05 will fold this into a conditional
-/// registration (production-safe ForwardedHeaders); for plan 15-05 this is a test
-/// factory override only.
+/// Forwarded-headers opt-in: Phase 16 plan 16-01 (M-SEC-05) HAS folded forwarded-headers
+/// into conditional registration — production <c>app.UseForwardedHeaders()</c> only
+/// registers when <c>ForwardedHeaders__KnownProxies</c> and/or
+/// <c>ForwardedHeaders__KnownNetworks</c> is set. This factory opts in by setting
+/// <c>ForwardedHeaders__KnownNetworks=0.0.0.0/0</c> in its constructor (BEFORE the host
+/// builds) so the synthetic loopback sender is honored and the spoofed X-Forwarded-For
+/// rewrites RemoteIpAddress; the prior env-var value is restored on dispose. The old
+/// test-scoped <c>services.Configure&lt;ForwardedHeadersOptions&gt;</c> DI override is dead
+/// under conditional registration and has been removed.
 /// </para>
 /// </summary>
 [Collection("RateLimitSerial")]
@@ -67,6 +69,20 @@ public sealed class LoginGlobalRateLimitTests
         private readonly string _dataSource = $"LoginGlobalRL-{Guid.NewGuid():N}";
         private Microsoft.Data.Sqlite.SqliteConnection? _keepAlive;
 
+        // M-SEC-05 / plan 16-01 Task 3 — the production ForwardedHeaders registration is now
+        // env-var-gated (was unconditional in v0.11). This test needs X-Forwarded-For honored
+        // so each request lands in a distinct /Login per-IP rate-limit partition (only the
+        // shared "_global_" ceiling should reject). Set the env var BEFORE the host builds
+        // (first CreateClient) and restore on dispose. 0.0.0.0/0 trusts the synthetic loopback
+        // test peer — behaviorally identical to the old DI override this replaces.
+        private readonly string? _priorKnownNetworks =
+            Environment.GetEnvironmentVariable("ForwardedHeaders__KnownNetworks");
+
+        public GlobalRateLimitFactory()
+        {
+            Environment.SetEnvironmentVariable("ForwardedHeaders__KnownNetworks", "0.0.0.0/0");
+        }
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Testing");
@@ -79,16 +95,10 @@ public sealed class LoginGlobalRateLimitTests
                 services.AddDbContextFactory<ApStatsForOpenWrt.Data.DatabaseContext>(opts =>
                     opts.UseSqlite($"Data Source={_dataSource};Mode=Memory;Cache=Shared"));
 
-                // Plan 15-05 forward-coupling note: Phase 16 M-SEC-05 will fold this into
-                // conditional registration (production-safe ForwardedHeaders); for plan 15-05
-                // this override is test-scoped only.
-                services.Configure<ForwardedHeadersOptions>(opts =>
-                {
-                    opts.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-                    opts.KnownIPNetworks.Clear();
-                    opts.KnownProxies.Clear();
-                    opts.KnownIPNetworks.Add(new System.Net.IPNetwork(IPAddress.Parse("0.0.0.0"), 0));
-                });
+                // Forwarded-headers trust is now driven by the ForwardedHeaders__KnownNetworks env var
+                // set in this factory's constructor (M-SEC-05 / plan 16-01) — the old
+                // Configure-ForwardedHeadersOptions override is dead under conditional
+                // registration and has been removed.
             });
         }
 
@@ -103,6 +113,7 @@ public sealed class LoginGlobalRateLimitTests
 
         public new ValueTask DisposeAsync()
         {
+            Environment.SetEnvironmentVariable("ForwardedHeaders__KnownNetworks", _priorKnownNetworks);
             _keepAlive?.Dispose();
             base.Dispose();
             return ValueTask.CompletedTask;

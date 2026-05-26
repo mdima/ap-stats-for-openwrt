@@ -160,8 +160,16 @@ public sealed class SlidingExpirationTests
     /// WebApplicationFactory that injects a <see cref="FakeTimeProvider"/> singleton so
     /// the cookie auth pipeline's TimeProvider (wired via
     /// <c>CookieAuthTimeProviderConfigurator</c>) reads test-controlled time.
-    /// Trusts 0.0.0.0/0 as a proxy so X-Forwarded-For partitions the LoginPolicy bucket
-    /// distinctly from sibling tests in the Integration collection.
+    ///
+    /// <para>
+    /// Phase 16 plan 16-01 (M-SEC-05) HAS folded forwarded-headers into conditional
+    /// registration. This factory opts the production path into trusting the loopback test
+    /// peer by setting <c>ForwardedHeaders__KnownNetworks=0.0.0.0/0</c> in its constructor
+    /// (BEFORE the host builds) so X-Forwarded-For partitions the LoginPolicy bucket distinctly
+    /// from sibling tests; the prior env-var value is restored on dispose. The old
+    /// <c>services.Configure&lt;ForwardedHeadersOptions&gt;</c> DI override is dead under
+    /// conditional registration and has been removed.
+    /// </para>
     /// </summary>
     private sealed class FakeClockFactory : WebApplicationFactory<Program>, IAsyncDisposable
     {
@@ -169,8 +177,15 @@ public sealed class SlidingExpirationTests
         private readonly FakeTimeProvider _fake;
         private Microsoft.Data.Sqlite.SqliteConnection? _keepAlive;
 
+        // M-SEC-05 / plan 16-01 Task 3 — opt into the env-var-gated forwarded-headers path.
+        // 0.0.0.0/0 trusts the synthetic loopback test peer — behaviorally identical to the
+        // old Configure-ForwardedHeadersOptions DI override this replaces.
+        private readonly string? _priorKnownNetworks =
+            Environment.GetEnvironmentVariable("ForwardedHeaders__KnownNetworks");
+
         public FakeClockFactory(FakeTimeProvider fake)
         {
+            Environment.SetEnvironmentVariable("ForwardedHeaders__KnownNetworks", "0.0.0.0/0");
             _fake = fake;
             _keepAlive = new Microsoft.Data.Sqlite.SqliteConnection(
                 $"Data Source={_dataSource};Mode=Memory;Cache=Shared");
@@ -193,19 +208,16 @@ public sealed class SlidingExpirationTests
                 services.RemoveAll<TimeProvider>();
                 services.AddSingleton<TimeProvider>(_fake);
 
-                // Trust all proxies so X-Forwarded-For drives the LoginPolicy partition.
-                services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(opts =>
-                {
-                    opts.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-                    opts.KnownIPNetworks.Clear();
-                    opts.KnownProxies.Clear();
-                    opts.KnownIPNetworks.Add(new System.Net.IPNetwork(System.Net.IPAddress.Parse("0.0.0.0"), 0));
-                });
+                // Forwarded-headers trust is now driven by the ForwardedHeaders__KnownNetworks env var
+                // set in this factory's constructor (M-SEC-05 / plan 16-01) — the old
+                // Configure-ForwardedHeadersOptions override is dead under conditional
+                // registration and has been removed.
             });
         }
 
         public new async ValueTask DisposeAsync()
         {
+            Environment.SetEnvironmentVariable("ForwardedHeaders__KnownNetworks", _priorKnownNetworks);
             _keepAlive?.Dispose();
             _keepAlive = null;
             await base.DisposeAsync();

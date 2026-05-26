@@ -41,17 +41,42 @@ public sealed class SessionRotationTests(SessionRotationTests.ForwardedHeadersTr
 
     /// <summary>
     /// Test-only factory that mirrors SmokeFactoryFixture (in-memory SQLite + keep-alive)
-    /// BUT additionally trusts the TestServer's loopback address as a forwarded-headers
-    /// proxy. Without this, the production <c>opts.KnownProxies.Clear()</c> at Program.cs
-    /// rejects every X-Forwarded-For header — meaning every test request lands in the same
-    /// /Login rate-limit partition (5/IP/min) and the 5-fact suite collides on the budget.
-    /// With KnownNetworks=0.0.0.0/0, X-Forwarded-For partitions cleanly across tests.
+    /// BUT additionally opts the production forwarded-headers path into trusting the
+    /// TestServer's loopback sender. Without this, X-Forwarded-For is ignored — meaning
+    /// every test request lands in the same /Login rate-limit partition (5/IP/min) and the
+    /// 5-fact suite collides on the budget. By setting <c>ForwardedHeaders__KnownNetworks=0.0.0.0/0</c>
+    /// X-Forwarded-For partitions cleanly across tests.
+    ///
+    /// <para>
+    /// Phase 16 plan 16-01 (M-SEC-05) HAS folded forwarded-headers into conditional
+    /// registration: the production <c>app.UseForwardedHeaders()</c> only registers when
+    /// <c>ForwardedHeaders__KnownProxies</c> and/or <c>ForwardedHeaders__KnownNetworks</c> is
+    /// set. This factory therefore opts in via the <c>ForwardedHeaders__KnownNetworks</c> env
+    /// var set in its constructor (BEFORE the host builds — Program.cs reads the env var at
+    /// host-build time) and restores the prior value on dispose. The old
+    /// <c>services.Configure&lt;ForwardedHeadersOptions&gt;</c> DI override is dead under
+    /// conditional registration and has been removed.
+    /// </para>
     /// </summary>
     public sealed class ForwardedHeadersTrustingFactory
         : Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>, Xunit.IAsyncLifetime
     {
         private readonly string _dataSource = $"SessionRot-{Guid.NewGuid():N}";
         private Microsoft.Data.Sqlite.SqliteConnection? _keepAlive;
+
+        // M-SEC-05 / plan 16-01 Task 3 — the production ForwardedHeaders registration is now
+        // env-var-gated (was unconditional in v0.11). These auth tests need X-Forwarded-For
+        // honored so each request lands in a distinct /Login per-IP rate-limit partition.
+        // Set the env var BEFORE the host builds (first CreateClient) and restore on dispose.
+        // 0.0.0.0/0 trusts the synthetic loopback test peer — behaviorally identical to the
+        // old Configure-ForwardedHeadersOptions DI override this replaces.
+        private readonly string? _priorKnownNetworks =
+            Environment.GetEnvironmentVariable("ForwardedHeaders__KnownNetworks");
+
+        public ForwardedHeadersTrustingFactory()
+        {
+            Environment.SetEnvironmentVariable("ForwardedHeaders__KnownNetworks", "0.0.0.0/0");
+        }
 
         protected override void ConfigureWebHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)
         {
@@ -65,20 +90,10 @@ public sealed class SessionRotationTests(SessionRotationTests.ForwardedHeadersTr
                 services.AddDbContextFactory<ApStatsForOpenWrt.Data.DatabaseContext>(opts =>
                     opts.UseSqlite($"Data Source={_dataSource};Mode=Memory;Cache=Shared"));
 
-                // Trust ALL proxies for forwarded-headers so X-Forwarded-For rewrites
-                // RemoteIpAddress, giving each test a distinct LoginPolicy partition.
-                services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(opts =>
-                {
-                    opts.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
-                                          | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
-                    opts.KnownIPNetworks.Clear();
-                    opts.KnownProxies.Clear();
-                    // Trust the entire IPv4 space so the TestServer's synthetic loopback
-                    // sender is honored as a "proxy" and X-Forwarded-For rewrites
-                    // RemoteIpAddress (used as the LoginPolicy partition key).
-                    opts.KnownIPNetworks.Add(new System.Net.IPNetwork(
-                        System.Net.IPAddress.Parse("0.0.0.0"), 0));
-                });
+                // Forwarded-headers trust is now driven by the ForwardedHeaders__KnownNetworks env var
+                // set in this factory's constructor (M-SEC-05 / plan 16-01) — the old
+                // Configure-ForwardedHeadersOptions override is dead under conditional
+                // registration and has been removed.
             });
         }
 
@@ -93,6 +108,9 @@ public sealed class SessionRotationTests(SessionRotationTests.ForwardedHeadersTr
 
         public new ValueTask DisposeAsync()
         {
+            // Restore the prior env-var value so the conditional production path reverts to
+            // mode=disabled for sibling tests that expect no forwarded-headers trust.
+            Environment.SetEnvironmentVariable("ForwardedHeaders__KnownNetworks", _priorKnownNetworks);
             _keepAlive?.Dispose();
             base.Dispose();
             return ValueTask.CompletedTask;
