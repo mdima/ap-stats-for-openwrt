@@ -293,13 +293,86 @@ try
     // 5c. Phase 3 — Cookie auth + conditional fallback policy + rate limiter +
     //     ForwardedHeaders + UI password hasher + OUI lookup + UI services.
     //     RESEARCH §Code Examples §1; Pitfalls 3 + 4 + 8 + 9 binding.
-    builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(opts =>
+
+    // M-SEC-05 / plan 16-01 — ForwardedHeaders conditional registration. Default
+    // LAN-HTTP case: middleware NOT registered; RemoteIpAddress reflects the actual
+    // TCP peer. When at least one of ForwardedHeaders__KnownProxies (comma-separated
+    // IPs) or ForwardedHeaders__KnownNetworks (comma-separated CIDRs) is set, the
+    // middleware is registered with that allow-list. Invalid entries throw at
+    // startup (fail-fast over skip-and-warn — CONTEXT.md Decision 2).
+    //
+    // Pitfall 4 ordering preserved: app.UseForwardedHeaders() at line ~527 runs
+    // BEFORE app.UseRateLimiter() so the per-IP partition key consumes the
+    // rewritten RemoteIpAddress when the middleware IS active.
+    //
+    // DEVIATION (plan 16-01 important_implementation_note): the CONTEXT.md pinned shape
+    // called Microsoft.AspNetCore.HttpOverrides.IPNetwork.TryParse, but on .NET 10
+    // ForwardedHeadersOptions.KnownIPNetworks is IList<System.Net.IPNetwork> (the BCL
+    // type), NOT the HttpOverrides type. We use System.Net.IPNetwork.TryParse (BCL) —
+    // identical parse-CIDR-then-add behavior; matches the existing test factories that
+    // already construct System.Net.IPNetwork instances.
+    var knownProxiesRaw = Environment.GetEnvironmentVariable("ForwardedHeaders__KnownProxies");
+    var knownNetworksRaw = Environment.GetEnvironmentVariable("ForwardedHeaders__KnownNetworks");
+    var forwardedHeadersEnabled =
+        !string.IsNullOrWhiteSpace(knownProxiesRaw) ||
+        !string.IsNullOrWhiteSpace(knownNetworksRaw);
+
+    int forwardedProxyCount = 0;
+    int forwardedNetworkCount = 0;
+
+    if (forwardedHeadersEnabled)
     {
-        opts.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
-                              | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
-        opts.KnownIPNetworks.Clear();  // D-04 — operator's job to harden if exposed publicly (KnownNetworks is deprecated in .NET 10 — ASPDEPR005)
-        opts.KnownProxies.Clear();
-    });
+        builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(opts =>
+        {
+            opts.ForwardedHeaders =
+                Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor |
+                Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+            opts.KnownProxies.Clear();
+            opts.KnownIPNetworks.Clear();
+
+            foreach (var entry in (knownProxiesRaw ?? "")
+                .Split(',')
+                .Select(s => s.Trim())
+                .Where(s => s.Length > 0))
+            {
+                if (!System.Net.IPAddress.TryParse(entry, out var ip))
+                {
+                    throw new InvalidOperationException(
+                        $"ForwardedHeaders__KnownProxies contains invalid IP: '{entry}'");
+                }
+                opts.KnownProxies.Add(ip);
+            }
+
+            foreach (var entry in (knownNetworksRaw ?? "")
+                .Split(',')
+                .Select(s => s.Trim())
+                .Where(s => s.Length > 0))
+            {
+                if (!System.Net.IPNetwork.TryParse(entry, out var net))
+                {
+                    throw new InvalidOperationException(
+                        $"ForwardedHeaders__KnownNetworks contains invalid CIDR: '{entry}'");
+                }
+                opts.KnownIPNetworks.Add(net);
+            }
+        });
+    }
+
+    // Count the accepted entries up-front for the startup log line. The Configure<>
+    // lambda above runs LAZILY (first IOptions<ForwardedHeadersOptions> resolution, inside
+    // UseForwardedHeaders()), so its in-lambda counts are not yet populated when the log
+    // line below fires. Re-split the raw strings here using the same accept-path predicate
+    // (IPAddress.TryParse / IPNetwork.TryParse) the Configure lambda uses.
+    static int CountAcceptableEntries(string? raw, Func<string, bool> tryParse) =>
+        (raw ?? "")
+            .Split(',')
+            .Select(s => s.Trim())
+            .Count(s => s.Length > 0 && tryParse(s));
+
+    forwardedProxyCount = CountAcceptableEntries(knownProxiesRaw,
+        s => System.Net.IPAddress.TryParse(s, out _));
+    forwardedNetworkCount = CountAcceptableEntries(knownNetworksRaw,
+        s => System.Net.IPNetwork.TryParse(s, out _));
 
     builder.Services.AddAuthentication(Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme)
         .AddCookie(o =>
@@ -510,6 +583,18 @@ try
 
     var app = builder.Build();
 
+    // M-SEC-05 / plan 16-01 — startup posture log line. Operator-grep-friendly prefix
+    // matches the M-SEC-NN: convention established in Phase 15 (M-SEC-04 banner / M-SEC-10
+    // ASPNETCORE warning) and continues in 16-02 (algo negotiation) + 16-03 (TOFU capture).
+    {
+        var startupLog = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+        startupLog.LogInformation(
+            "M-SEC-05: ForwardedHeaders middleware: mode={Mode} trustedProxies={ProxyCount} trustedNetworks={NetworkCount}",
+            forwardedHeadersEnabled ? "enabled" : "disabled",
+            forwardedProxyCount,
+            forwardedNetworkCount);
+    }
+
     // M-SEC-10 / plan 15-04 — Warning when ASPNETCORE_ENVIRONMENT=Development is set,
     // so an operator who accidentally ships the dev env flag into a production container
     // sees it in docker logs at boot. The verbatim message is pinned by
@@ -524,7 +609,17 @@ try
     // Middleware pipeline — order is LOAD-BEARING (RESEARCH §Pitfall 4):
     // UseForwardedHeaders MUST run before UseAuthentication (so cookie sees the rewritten
     // RemoteIpAddress) AND before UseRateLimiter (so the partition key is correct).
-    app.UseForwardedHeaders();
+    //
+    // M-SEC-05 / plan 16-01 — only register the middleware when the operator has pinned at
+    // least one trusted proxy or network. Default LAN-HTTP case: NOT registered;
+    // RemoteIpAddress reflects the actual TCP peer; forged X-Forwarded-For headers are
+    // ignored because the middleware never runs. When registered, UseForwardedHeaders()
+    // still runs here (before UseRateLimiter / UseAuthentication) so the partition key +
+    // auth cookie see the rewritten RemoteIpAddress (Pitfall 4 ordering preserved).
+    if (forwardedHeadersEnabled)
+    {
+        app.UseForwardedHeaders();
+    }
     app.UseSerilogRequestLogging();
     app.UseStaticFiles();           // serves /lib/adminlte/* /lib/bootstrap-icons/* /lib/source-sans-3/* /app.css /favicon.ico
     app.UseAntiforgery();
