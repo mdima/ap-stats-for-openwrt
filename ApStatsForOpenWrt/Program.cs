@@ -22,6 +22,71 @@ Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
     .CreateBootstrapLogger();
 
+// M-SEC-05 / plan 16-01 — ForwardedHeaders conditional registration. Default LAN-HTTP case:
+// middleware NOT registered; RemoteIpAddress reflects the actual TCP peer. When at least one of
+// ForwardedHeaders__KnownProxies (comma-separated IPs) or ForwardedHeaders__KnownNetworks
+// (comma-separated CIDRs) is set, the middleware is registered with that allow-list.
+//
+// FAIL-FAST (CONTEXT.md Decision 2: "Invalid entries throw at startup — fail-fast over
+// skip-and-warn"). The env vars are parsed + VALIDATED EAGERLY here, ABOVE the host try/catch,
+// so a bad IP/CIDR throws BEFORE the host is even built and the raw InvalidOperationException
+// propagates straight out of Main (it is intentionally NOT inside the try/catch that converts
+// fatal startup errors into a logged exit-1 — a misconfigured proxy allow-list must surface the
+// offending entry to the operator, not be masked behind a generic "terminated unexpectedly").
+// The validated lists are reused by both the Configure<> lambda AND the startup-count log so the
+// two can never diverge (the previous bug validated lazily inside the Configure lambda — which
+// only ran on the first request — while the startup log counted via TryParse, which never throws,
+// so a typo'd allow-list booted healthy, logged trustedProxies=0, then 500'd on first request).
+//
+// DEVIATION (plan 16-01 important_implementation_note): the CONTEXT.md pinned shape called
+// Microsoft.AspNetCore.HttpOverrides.IPNetwork.TryParse, but on .NET 10
+// ForwardedHeadersOptions.KnownIPNetworks is IList<System.Net.IPNetwork> (the BCL type), NOT the
+// HttpOverrides type. We use System.Net.IPNetwork.TryParse (BCL) — identical parse-CIDR-then-add
+// behavior; matches the existing test factories that already construct System.Net.IPNetwork.
+var knownProxiesRaw = Environment.GetEnvironmentVariable("ForwardedHeaders__KnownProxies");
+var knownNetworksRaw = Environment.GetEnvironmentVariable("ForwardedHeaders__KnownNetworks");
+var forwardedHeadersEnabled =
+    !string.IsNullOrWhiteSpace(knownProxiesRaw) ||
+    !string.IsNullOrWhiteSpace(knownNetworksRaw);
+
+var validatedProxies = new List<System.Net.IPAddress>();
+var validatedNetworks = new List<System.Net.IPNetwork>();
+
+if (forwardedHeadersEnabled)
+{
+    foreach (var entry in (knownProxiesRaw ?? "")
+        .Split(',')
+        .Select(s => s.Trim())
+        .Where(s => s.Length > 0))
+    {
+        if (!System.Net.IPAddress.TryParse(entry, out var ip))
+        {
+            throw new InvalidOperationException(
+                $"ForwardedHeaders__KnownProxies contains invalid IP: '{entry}'");
+        }
+        validatedProxies.Add(ip);
+    }
+
+    foreach (var entry in (knownNetworksRaw ?? "")
+        .Split(',')
+        .Select(s => s.Trim())
+        .Where(s => s.Length > 0))
+    {
+        if (!System.Net.IPNetwork.TryParse(entry, out var net))
+        {
+            throw new InvalidOperationException(
+                $"ForwardedHeaders__KnownNetworks contains invalid CIDR: '{entry}'");
+        }
+        validatedNetworks.Add(net);
+    }
+}
+
+// Startup-log counts reflect the EAGERLY-VALIDATED set (same lists the Configure lambda below
+// consumes). Because invalid entries already threw above, these counts can never silently
+// under-count a misconfigured allow-list.
+var forwardedProxyCount = validatedProxies.Count;
+var forwardedNetworkCount = validatedNetworks.Count;
+
 try
 {
     Log.Information("ApStatsForOpenWrt starting");
@@ -294,32 +359,16 @@ try
     //     ForwardedHeaders + UI password hasher + OUI lookup + UI services.
     //     RESEARCH §Code Examples §1; Pitfalls 3 + 4 + 8 + 9 binding.
 
-    // M-SEC-05 / plan 16-01 — ForwardedHeaders conditional registration. Default
-    // LAN-HTTP case: middleware NOT registered; RemoteIpAddress reflects the actual
-    // TCP peer. When at least one of ForwardedHeaders__KnownProxies (comma-separated
-    // IPs) or ForwardedHeaders__KnownNetworks (comma-separated CIDRs) is set, the
-    // middleware is registered with that allow-list. Invalid entries throw at
-    // startup (fail-fast over skip-and-warn — CONTEXT.md Decision 2).
+    // M-SEC-05 / plan 16-01 — ForwardedHeaders conditional registration. The env vars were
+    // read + VALIDATED EAGERLY above the host try/catch (fail-fast); here we only register the
+    // Configure<> lambda, which consumes the PRE-VALIDATED lists. The lambda still runs lazily
+    // (first IOptions resolution inside UseForwardedHeaders()), but it can no longer throw — all
+    // validation already happened eagerly, so the lazy path is now a pure copy of an
+    // already-proven-good set.
     //
-    // Pitfall 4 ordering preserved: app.UseForwardedHeaders() at line ~527 runs
-    // BEFORE app.UseRateLimiter() so the per-IP partition key consumes the
-    // rewritten RemoteIpAddress when the middleware IS active.
-    //
-    // DEVIATION (plan 16-01 important_implementation_note): the CONTEXT.md pinned shape
-    // called Microsoft.AspNetCore.HttpOverrides.IPNetwork.TryParse, but on .NET 10
-    // ForwardedHeadersOptions.KnownIPNetworks is IList<System.Net.IPNetwork> (the BCL
-    // type), NOT the HttpOverrides type. We use System.Net.IPNetwork.TryParse (BCL) —
-    // identical parse-CIDR-then-add behavior; matches the existing test factories that
-    // already construct System.Net.IPNetwork instances.
-    var knownProxiesRaw = Environment.GetEnvironmentVariable("ForwardedHeaders__KnownProxies");
-    var knownNetworksRaw = Environment.GetEnvironmentVariable("ForwardedHeaders__KnownNetworks");
-    var forwardedHeadersEnabled =
-        !string.IsNullOrWhiteSpace(knownProxiesRaw) ||
-        !string.IsNullOrWhiteSpace(knownNetworksRaw);
-
-    int forwardedProxyCount = 0;
-    int forwardedNetworkCount = 0;
-
+    // Pitfall 4 ordering preserved: app.UseForwardedHeaders() runs BEFORE app.UseRateLimiter()
+    // so the per-IP partition key consumes the rewritten RemoteIpAddress when the middleware IS
+    // active.
     if (forwardedHeadersEnabled)
     {
         builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(opts =>
@@ -330,49 +379,10 @@ try
             opts.KnownProxies.Clear();
             opts.KnownIPNetworks.Clear();
 
-            foreach (var entry in (knownProxiesRaw ?? "")
-                .Split(',')
-                .Select(s => s.Trim())
-                .Where(s => s.Length > 0))
-            {
-                if (!System.Net.IPAddress.TryParse(entry, out var ip))
-                {
-                    throw new InvalidOperationException(
-                        $"ForwardedHeaders__KnownProxies contains invalid IP: '{entry}'");
-                }
-                opts.KnownProxies.Add(ip);
-            }
-
-            foreach (var entry in (knownNetworksRaw ?? "")
-                .Split(',')
-                .Select(s => s.Trim())
-                .Where(s => s.Length > 0))
-            {
-                if (!System.Net.IPNetwork.TryParse(entry, out var net))
-                {
-                    throw new InvalidOperationException(
-                        $"ForwardedHeaders__KnownNetworks contains invalid CIDR: '{entry}'");
-                }
-                opts.KnownIPNetworks.Add(net);
-            }
+            foreach (var ip in validatedProxies) opts.KnownProxies.Add(ip);
+            foreach (var net in validatedNetworks) opts.KnownIPNetworks.Add(net);
         });
     }
-
-    // Count the accepted entries up-front for the startup log line. The Configure<>
-    // lambda above runs LAZILY (first IOptions<ForwardedHeadersOptions> resolution, inside
-    // UseForwardedHeaders()), so its in-lambda counts are not yet populated when the log
-    // line below fires. Re-split the raw strings here using the same accept-path predicate
-    // (IPAddress.TryParse / IPNetwork.TryParse) the Configure lambda uses.
-    static int CountAcceptableEntries(string? raw, Func<string, bool> tryParse) =>
-        (raw ?? "")
-            .Split(',')
-            .Select(s => s.Trim())
-            .Count(s => s.Length > 0 && tryParse(s));
-
-    forwardedProxyCount = CountAcceptableEntries(knownProxiesRaw,
-        s => System.Net.IPAddress.TryParse(s, out _));
-    forwardedNetworkCount = CountAcceptableEntries(knownNetworksRaw,
-        s => System.Net.IPNetwork.TryParse(s, out _));
 
     // M-SEC-07 / plan 16-05 — baseline security response headers middleware.
     // Registered as transient per IMiddleware pattern. Pipeline registration below
