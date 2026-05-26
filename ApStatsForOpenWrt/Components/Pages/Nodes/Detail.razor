@@ -252,11 +252,24 @@ else
         w.Enabled = enabled;
         _savedFlashId = w.Id;
         await InvokeAsync(StateHasChanged);
+        // W4 race-with-Dispose discipline (mirrors OnCycleAsync). This fire-and-forget flash
+        // timer can outlive the circuit: if the operator toggles a WLAN switch then navigates
+        // away within 2s, the delayed InvokeAsync would otherwise run against a torn-down renderer
+        // and throw ObjectDisposedException on a discarded (unobserved) Task. Guard on _disposed
+        // and swallow the disposal race the same way the rest of the component does.
         _ = Task.Run(async () =>
         {
             await Task.Delay(2000);
+            if (_disposed) return;     // W4: skip if dispose already happened
             _savedFlashId = null;
-            await InvokeAsync(StateHasChanged);
+            try
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (ObjectDisposedException)
+            {
+                // W4: race between the flash timer and Dispose() -- renderer is gone, swallow.
+            }
         });
     }
 
