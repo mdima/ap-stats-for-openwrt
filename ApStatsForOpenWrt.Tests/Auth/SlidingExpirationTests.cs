@@ -37,7 +37,12 @@ namespace ApStatsForOpenWrt.Tests.Auth;
 /// what an operator actually experiences.
 /// </para>
 /// </summary>
-[Collection("Integration")]
+// M-SEC-05 / plan 16-01 Task 3 — joined to the RateLimitSerial collection (was "Integration")
+// so this suite serializes with the other forwarded-headers env-var mutators. The factory sets
+// the process-wide ForwardedHeaders__KnownNetworks env var; serializing avoids cross-collection
+// contamination of the ForwardedHeadersConditionalTests matrix cells. This suite creates its own
+// isolated WebApplicationFactory, so the collection move is behavior-neutral.
+[Collection("RateLimitSerial")]
 [Trait("Category", "SecurityFix")]
 public sealed class SlidingExpirationTests
 {

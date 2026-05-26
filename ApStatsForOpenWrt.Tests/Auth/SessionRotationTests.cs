@@ -32,7 +32,14 @@ namespace ApStatsForOpenWrt.Tests.Auth;
 /// Uses the shared <see cref="SmokeFactoryFixture"/>. Each test resets the relevant state
 /// in try/finally to keep the in-memory DB clean for sibling tests.
 /// </summary>
-[Collection("Integration")]
+// M-SEC-05 / plan 16-01 Task 3 — joined to the RateLimitSerial collection (was "Integration")
+// so this suite serializes with the other forwarded-headers env-var mutators
+// (LoginGlobalRateLimitTests + ForwardedHeadersConditionalTests). The factory sets the
+// process-wide ForwardedHeaders__KnownNetworks env var; running it in parallel with the
+// ForwardedHeadersConditionalTests disabled/CIDR-mode cases caused cross-collection env-var
+// contamination flakes. This suite uses its own isolated WebApplicationFactory (not the shared
+// Integration fixture), so the collection move is behavior-neutral.
+[Collection("RateLimitSerial")]
 [Trait("Category", "SecurityFix")]
 public sealed class SessionRotationTests(SessionRotationTests.ForwardedHeadersTrustingFactory factory)
     : IClassFixture<SessionRotationTests.ForwardedHeadersTrustingFactory>
