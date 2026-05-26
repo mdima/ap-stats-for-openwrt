@@ -79,10 +79,14 @@ public sealed class IndexTests
 
     private sealed class CapturingNodeRepo : INodeRepo
     {
-        public bool ClearAllCalled;
-        public Task ClearAllHostKeyFingerprintsAsync(CancellationToken ct = default) { ClearAllCalled = true; return Task.CompletedTask; }
+        // M-SEC-06 (plan 16-04): the bulk-clear UI surface was removed; this stub no longer
+        // captures a Clear-all invocation. The obsolete contract method is still implemented
+        // (warning-suppressed) so the stub satisfies INodeRepo until the v0.13 method removal.
+#pragma warning disable CS0618
+        public Task ClearAllHostKeyFingerprintsAsync(CancellationToken ct = default) => Task.CompletedTask;
+#pragma warning restore CS0618
 
-        // Every other method returns a default — this stub is only consumed for the bulk-clear path.
+        // Every other method returns a default — this stub is only consumed by the Settings page render.
         public Task<IReadOnlyList<WiFiNode>> GetAllAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<WiFiNode>>(Array.Empty<WiFiNode>());
         public Task<WiFiNode?> GetByIdAsync(int id, CancellationToken ct = default) => Task.FromResult<WiFiNode?>(null);
         public Task AddAsync(WiFiNode node, CancellationToken ct = default) => Task.CompletedTask;
@@ -142,19 +146,24 @@ public sealed class IndexTests
         using (ctx)
         {
             var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
-            // D-17 + Phase 10 D-05/D-03/D-04 — five cards in the locked order:
-            // Live polling / Active enrichment / Local domain suffixes / UI password / SSH known-hosts.
+            // D-17 + Phase 10 D-05/D-03/D-04 — cards in the locked order.
+            // M-SEC-06 (plan 16-04): the "SSH known-hosts cache" card was REMOVED; the
+            // remaining order is Live polling / Active enrichment / Local domain suffixes /
+            // UI password / UI preferences.
             var markup = cut.Markup;
             var i1 = markup.IndexOf(">Live polling interval</h5>", StringComparison.Ordinal);
             var i2 = markup.IndexOf(">Active enrichment interval</h5>", StringComparison.Ordinal);
             var i3 = markup.IndexOf(">Local domain suffixes</h5>", StringComparison.Ordinal);
             var i4 = markup.IndexOf(">UI password</h5>", StringComparison.Ordinal);
-            var i5 = markup.IndexOf(">SSH known-hosts cache</h5>", StringComparison.Ordinal);
+            var i5 = markup.IndexOf(">UI preferences</h5>", StringComparison.Ordinal);
             Assert.True(i1 >= 0, "Card 1 (Live polling interval) header missing");
             Assert.True(i2 > i1, "Card 2 (Active enrichment interval) header missing or out of order");
             Assert.True(i3 > i2, "Card 3 (Local domain suffixes) header missing or out of order");
             Assert.True(i4 > i3, "Card 4 (UI password) header missing or out of order");
-            Assert.True(i5 > i4, "Card 5 (SSH known-hosts cache) header missing or out of order");
+            Assert.True(i5 > i4, "Card 5 (UI preferences) header missing or out of order");
+
+            // M-SEC-06 — the bulk SSH known-hosts cache card is gone.
+            Assert.DoesNotContain(">SSH known-hosts cache</h5>", markup, StringComparison.Ordinal);
 
             // D-05 verbatim: the OLD bare "Polling interval" title is gone.
             Assert.DoesNotContain(">Polling interval</h5>", markup, StringComparison.Ordinal);
@@ -199,14 +208,18 @@ public sealed class IndexTests
         }
     }
 
+    // M-SEC-06 (plan 16-04): the "Clear all host keys" bulk surface was REMOVED. The
+    // deprecation-gate assertions live in ClearAllHostKeysButtonNotReachableTests; this
+    // test pins the negative here too so the IndexTests render-contract stays self-consistent.
     [Fact]
-    public void Card3_AlwaysShowsClearAllHostKeysButton()
+    public void Card3_SshKnownHostsCache_RemovedEntirely_M_SEC_06()
     {
         var (ctx, _, _, _) = Build();
         using (ctx)
         {
             var cut = ctx.Render<ApStatsForOpenWrt.Components.Pages.Settings.Index>();
-            Assert.Contains("Clear all host keys", cut.Markup);
+            Assert.DoesNotContain("Clear all host keys", cut.Markup);
+            Assert.DoesNotContain("SSH known-hosts cache", cut.Markup);
         }
     }
 
