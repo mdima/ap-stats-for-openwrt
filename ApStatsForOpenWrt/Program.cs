@@ -643,9 +643,12 @@ try
     app.UseMiddleware<ApStatsForOpenWrt.Services.Security.SecurityHeadersMiddleware>();
     app.UseStaticFiles();           // serves /lib/adminlte/* /lib/bootstrap-icons/* /lib/source-sans-3/* /app.css /favicon.ico
     app.UseAntiforgery();
-    // D-07: Auto-redirect first-run operator to the onboarding wizard.
+    // D-07: Auto-redirect first-run operator to the onboarding wizard (GET / only).
     // Placed after UseStaticFiles (assets bypass it) and after UseAntiforgery,
-    // but BEFORE UseAuthentication so anonymous GET / is handled before the auth pipeline.
+    // but BEFORE UseAuthentication so the anonymous first-run GET / is handled before
+    // the auth pipeline. The /setup/* anti-takeover 404 gate is a SEPARATE middleware
+    // (WizardSetupGateMiddleware) registered AFTER UseAuthentication so it can be
+    // auth-aware — see debug session wizard-lockout-regression.
     app.UseMiddleware<WizardRedirectMiddleware>();
 
     // D-07 / D-08 / W4 — /health response writer + FormatAge helper. Hand-written
@@ -703,6 +706,18 @@ try
     }).AllowAnonymous();
 
     app.UseAuthentication();        // reads "ApStatsForOpenWrt.Auth" cookie
+
+    // M-SEC-02 — AUTH-AWARE wizard /setup/* anti-takeover 404 gate. Registered AFTER
+    // UseAuthentication() (so context.User reflects the validated auth cookie) but
+    // BEFORE UseAuthorization() (so the friendly 404 for an anonymous committed-state
+    // /setup/* request is served VERBATIM, not pre-empted by the ConditionalAuth
+    // fallback policy's OnRedirectToLogin 302). The just-signed-in operator (post
+    // step 1 submit-password SignInAsync) traverses /setup/nodes + /setup/wlans;
+    // anonymous callers still get the friendly 404 once committed (anyNodes ||
+    // hasPassword). Fixes wizard-lockout-regression; the independent M-SEC-01 POST
+    // gate on /setup/submit-password + /setup/skip is untouched.
+    app.UseMiddleware<WizardSetupGateMiddleware>();
+
     app.UseAuthorization();         // applies fallback ConditionalAuthRequirement
     app.UseRateLimiter();           // sees rewritten IP (Pitfall 4)
 
