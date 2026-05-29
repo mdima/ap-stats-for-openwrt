@@ -756,11 +756,17 @@ try
             return Microsoft.AspNetCore.Http.Results.BadRequest();
         }
 
-        // M-SEC-01 — refuse 404 once a real commitment exists. WizardDismissed is NOT in
-        // the gate (Option B resumability).
+        // M-SEC-01 auth-aware gate (debug skip-setup-404-auth-blind, sibling of
+        // wizard-lockout-regression): refuse 404 once committed ONLY for ANONYMOUS callers
+        // (anti-takeover). The authenticated operator is mid-onboarding: step 1
+        // (submit-password) flips hasPassword == true AND signs them in, so an auth-blind
+        // gate 404'd their legitimate "Skip for now" on steps 2/3. This MapPost runs after
+        // UseAuthentication()/UseAuthorization(), so ctx.User is populated. WizardDismissed
+        // is NOT in the gate (Option B resumability).
+        var isAuthenticated = ctx.User?.Identity?.IsAuthenticated == true;
         var anyNodes = await nodeRepo.AnyAsync(ctx.RequestAborted);
         var hasPassword = !string.IsNullOrEmpty(settings.UIPasswordHash);
-        if (anyNodes || hasPassword)
+        if (!isAuthenticated && (anyNodes || hasPassword))
             return Microsoft.AspNetCore.Http.Results.NotFound();
 
         await settings.SetWizardDismissedAsync(true, ctx.RequestAborted);
