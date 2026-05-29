@@ -17,8 +17,13 @@ namespace ApStatsForOpenWrt.Tests.Auth;
 ///
 /// <list type="number">
 ///   <item>Antiforgery rejection on each endpoint when no token is supplied -> 400.</item>
-///   <item>Commitment 404 on /setup/submit-password and /setup/skip once a real
-///   commitment exists (UIPasswordHash set OR any WiFiNode row).</item>
+///   <item>/setup/submit-password commitment 404: refuses an anonymous POST once a real
+///   commitment exists (UIPasswordHash set OR any WiFiNode row) - the M-SEC-01 takeover
+///   boundary, deliberately kept on the hasPassword OR semantics.</item>
+///   <item>/setup/skip anti-takeover 404 (AND semantics, wizard-gate-and-semantics): an
+///   anonymous skip is refused ONLY once the system is genuinely complete (password set AND
+///   any WiFiNode row). In the password-only or node-only window the anonymous skip succeeds
+///   (302 /, WizardDismissed set).</item>
 ///   <item>Option B resumability: WizardDismissed=true alone does NOT close the POST
 ///   endpoints (operator can still re-submit the wizard until a real commitment lands).</item>
 ///   <item>Regression: first-run flow still succeeds end-to-end.</item>
@@ -201,15 +206,19 @@ public sealed class SetupPostEndpointTests(SmokeFactoryFixture factory)
         }
     }
 
-    // ── Anti-takeover lock (regression): ANONYMOUS skip on a committed system 404s ──
+    // ── /setup/skip AND semantics (wizard-gate-and-semantics) ───────────────────
+    // Anonymous skip is refused ONLY when the system is genuinely complete (password AND
+    // AP). In the single-condition windows the anonymous skip succeeds; the complete-state
+    // 404 is the preserved anti-takeover regression lock.
 
     [Fact]
-    public async Task Skip_WithValidToken_WhenPasswordAlreadySet_Returns404()
+    public async Task Skip_AnonymousCaller_WhenPasswordOnly_Succeeds_AndDismissesWizard()
     {
-        // (b) Anti-takeover regression lock for the PRESERVED behavior. The client never
-        // authenticates — the password hash is written directly to the DB to model a
-        // committed system seen by an anonymous caller. This must 404 both before and
-        // after the auth-aware fix (skip-setup-404-auth-blind).
+        // AND semantics: password set, NO AP yet -> skip gate OFF. The client never
+        // authenticates; the password hash is written directly to the DB to model the
+        // password-only intermediate window seen by an anonymous caller. Under the new AND
+        // contract this must SUCCEED (302 /, WizardDismissed set), NOT 404. (Under the old
+        // OR contract this returned 404.)
         var ct = TestContext.Current.CancellationToken;
         await ResetStateAsync(ct);
 
@@ -219,6 +228,8 @@ public sealed class SetupPostEndpointTests(SmokeFactoryFixture factory)
             HandleCookies = true,
         });
 
+        // Token must be harvested BEFORE the password is set (afterwards the wizard page
+        // GET no longer serves a token form in the password-only window - it 302s /Login).
         var token = await AcquireAntiforgeryTokenFromSetupPasswordAsync(client, ct);
 
         using (var scope = _factory.Services.CreateScope())
@@ -232,7 +243,17 @@ public sealed class SetupPostEndpointTests(SmokeFactoryFixture factory)
             var resp = await PostFormAsync(client, "/setup/skip", token,
                 Array.Empty<KeyValuePair<string, string>>(), ct);
 
-            Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+            Assert.True(
+                resp.StatusCode == HttpStatusCode.Redirect ||
+                resp.StatusCode == HttpStatusCode.Found,
+                $"anonymous password-only skip should 302 to /, got {(int)resp.StatusCode} {resp.StatusCode}.");
+            Assert.NotNull(resp.Headers.Location);
+            Assert.Equal("/", resp.Headers.Location!.ToString());
+
+            using var scope = _factory.Services.CreateScope();
+            var settings = scope.ServiceProvider.GetRequiredService<IAppSettingsService>();
+            Assert.True(settings.WizardDismissed,
+                "anonymous password-only skip must set WizardDismissed = true.");
         }
         finally
         {
@@ -241,10 +262,11 @@ public sealed class SetupPostEndpointTests(SmokeFactoryFixture factory)
     }
 
     [Fact]
-    public async Task Skip_AnonymousCaller_WhenAnyNodeExists_Returns404()
+    public async Task Skip_AnonymousCaller_WhenNodeOnly_Succeeds_AndDismissesWizard()
     {
-        // (b) Anti-takeover regression lock — committed via a real WiFiNode rather than a
-        // password. Anonymous + committed must still 404 after the auth-aware fix.
+        // AND semantics: an AP exists but NO password (unreachable in practice) -> skip gate
+        // OFF (AND false). Anonymous skip must SUCCEED, NOT 404. (Under the old OR contract
+        // this returned 404.) With no password the wizard page is reachable to harvest a token.
         var ct = TestContext.Current.CancellationToken;
         await ResetStateAsync(ct);
 
@@ -263,6 +285,62 @@ public sealed class SetupPostEndpointTests(SmokeFactoryFixture factory)
             var node = new WiFiNode
             {
                 Hostname = "ap-anon.local",
+                Username = "root",
+                Password = "encrypted-blob",
+            };
+            await nodeRepo.AddAsync(node, ct);
+            seededId = node.Id;
+        }
+
+        try
+        {
+            var resp = await PostFormAsync(client, "/setup/skip", token,
+                Array.Empty<KeyValuePair<string, string>>(), ct);
+
+            Assert.True(
+                resp.StatusCode == HttpStatusCode.Redirect ||
+                resp.StatusCode == HttpStatusCode.Found,
+                $"anonymous node-only skip should 302 to /, got {(int)resp.StatusCode} {resp.StatusCode}.");
+            Assert.NotNull(resp.Headers.Location);
+            Assert.Equal("/", resp.Headers.Location!.ToString());
+        }
+        finally
+        {
+            using var scope = _factory.Services.CreateScope();
+            var nodeRepo = scope.ServiceProvider.GetRequiredService<INodeRepo>();
+            await nodeRepo.DeleteAsync(seededId, ct);
+            await ResetStateAsync(ct);
+        }
+    }
+
+    [Fact]
+    public async Task Skip_AnonymousCaller_WhenComplete_PasswordAndNode_Returns404()
+    {
+        // (b) Anti-takeover regression lock for the PRESERVED behavior under AND. The client
+        // never authenticates; a password hash AND a WiFiNode are written directly to the DB
+        // to model a genuinely COMPLETE system seen by an anonymous caller. This MUST 404.
+        var ct = TestContext.Current.CancellationToken;
+        await ResetStateAsync(ct);
+
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            HandleCookies = true,
+        });
+
+        // Harvest a token from the fresh state before committing (post-commit the GET 404s).
+        var token = await AcquireAntiforgeryTokenFromSetupPasswordAsync(client, ct);
+
+        int seededId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var settings = scope.ServiceProvider.GetRequiredService<IAppSettingsService>();
+            await settings.SetUIPasswordHashAsync("AQAAA-fake-hash", ct);
+
+            var nodeRepo = scope.ServiceProvider.GetRequiredService<INodeRepo>();
+            var node = new WiFiNode
+            {
+                Hostname = "ap-complete.local",
                 Username = "root",
                 Password = "encrypted-blob",
             };

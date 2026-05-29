@@ -8,9 +8,19 @@ namespace ApStatsForOpenWrt.Services.Onboarding;
 ///
 /// <para>
 /// Serves the pinned friendly HTML 404 body for <c>GET /setup/*</c> when the system is
-/// committed (<c>wizardClosed = anyNodes OR hasPassword</c>) AND the caller is NOT
-/// authenticated. The authenticated operator is allowed through so they can complete
-/// the 3-step onboarding wizard — setting the password is step 1, which flips
+/// genuinely complete (<c>wizardClosed = hasPassword AND anyNodes</c>) AND the caller is
+/// NOT authenticated. "Complete" means a password is set <em>and</em> at least one AP
+/// (WiFiNode) exists — neither alone closes this visible gate. The earlier OR semantics
+/// fired too early (the moment a password was set), so the AND form was adopted per the
+/// <c>wizard-gate-and-semantics</c> operator decision. Since adding an AP requires first
+/// setting a password + signing in, <c>hasPassword &amp;&amp; anyNodes</c> is effectively
+/// equivalent to <c>anyNodes</c> in all reachable states; the explicit two-term form is
+/// retained for clarity/defense.
+/// </para>
+///
+/// <para>
+/// The authenticated operator is allowed through so they can complete the 3-step
+/// onboarding wizard — setting the password is step 1, which flips
 /// <c>hasPassword == true</c> and signs the operator in, so an auth-blind gate locked
 /// the operator out of steps 2 (<c>/setup/nodes</c>) and 3 (<c>/setup/wlans</c>). See
 /// debug session <c>wizard-lockout-regression</c>.
@@ -24,8 +34,13 @@ namespace ApStatsForOpenWrt.Services.Onboarding;
 ///
 /// <para>
 /// Anti-takeover preserved: an ANONYMOUS caller still gets the 404 once the system is
-/// committed. The independent M-SEC-01 POST gate on <c>/setup/submit-password</c> and
-/// <c>/setup/skip</c> (Program.cs) is untouched by this middleware.
+/// genuinely complete (password AND AP). In the password-only intermediate window the
+/// gate is OFF, so an anonymous <c>GET /setup/*</c> falls through to the ConditionalAuth
+/// fallback policy (302 /Login) rather than a misleading "setup complete" 404 — anonymous
+/// access stays blocked, only the response shape changes. The independent M-SEC-01 POST
+/// gate on <c>/setup/submit-password</c> (Program.cs) deliberately stays on the
+/// <c>hasPassword</c> boundary (it refuses anonymous re-POST the moment a password exists)
+/// and is untouched by this middleware.
 /// </para>
 ///
 /// <para>
@@ -49,15 +64,18 @@ internal sealed class WizardSetupGateMiddleware(
 
         if (isGet && path.StartsWithSegments("/setup"))
         {
-            // Auth-aware anti-takeover gate. wizardClosed = anyNodes OR hasPassword.
-            // The authenticated operator is allowed through (they are mid-onboarding);
-            // anonymous callers get the friendly 404 once the system is committed.
+            // Auth-aware anti-takeover gate. wizardClosed = hasPassword AND anyNodes —
+            // the system is "complete" only when a password is set AND at least one AP
+            // exists. The authenticated operator is allowed through (they are mid-onboarding);
+            // anonymous callers get the friendly 404 only once the system is genuinely complete.
+            // In the password-only window (no AP yet) the gate is OFF and the request falls
+            // through to the ConditionalAuth fallback (302 /Login).
             var isAuthenticated = context.User?.Identity?.IsAuthenticated == true;
             if (!isAuthenticated)
             {
                 var anyNodes = await nodeRepo.AnyAsync(context.RequestAborted);
                 var hasPassword = !string.IsNullOrEmpty(settings.UIPasswordHash);
-                if (anyNodes || hasPassword)
+                if (anyNodes && hasPassword)
                 {
                     context.Response.StatusCode = StatusCodes.Status404NotFound;
                     context.Response.ContentType = "text/html; charset=utf-8";

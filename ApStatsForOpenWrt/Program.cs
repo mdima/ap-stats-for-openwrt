@@ -709,13 +709,16 @@ try
 
     // M-SEC-02 — AUTH-AWARE wizard /setup/* anti-takeover 404 gate. Registered AFTER
     // UseAuthentication() (so context.User reflects the validated auth cookie) but
-    // BEFORE UseAuthorization() (so the friendly 404 for an anonymous committed-state
+    // BEFORE UseAuthorization() (so the friendly 404 for an anonymous genuinely-complete
     // /setup/* request is served VERBATIM, not pre-empted by the ConditionalAuth
     // fallback policy's OnRedirectToLogin 302). The just-signed-in operator (post
     // step 1 submit-password SignInAsync) traverses /setup/nodes + /setup/wlans;
-    // anonymous callers still get the friendly 404 once committed (anyNodes ||
-    // hasPassword). Fixes wizard-lockout-regression; the independent M-SEC-01 POST
-    // gate on /setup/submit-password + /setup/skip is untouched.
+    // anonymous callers get the friendly 404 only once the system is genuinely complete
+    // (hasPassword AND anyNodes). In the password-only window the gate is OFF and the
+    // anonymous request falls through to the ConditionalAuth 302 /Login. Fixes
+    // wizard-lockout-regression + wizard-gate-and-semantics; the independent M-SEC-01
+    // POST gate on /setup/submit-password is untouched (it deliberately stays on the
+    // hasPassword boundary, distinct from these visible AND gates).
     app.UseMiddleware<WizardSetupGateMiddleware>();
 
     app.UseAuthorization();         // applies fallback ConditionalAuthRequirement
@@ -757,16 +760,18 @@ try
         }
 
         // M-SEC-01 auth-aware gate (debug skip-setup-404-auth-blind, sibling of
-        // wizard-lockout-regression): refuse 404 once committed ONLY for ANONYMOUS callers
-        // (anti-takeover). The authenticated operator is mid-onboarding: step 1
-        // (submit-password) flips hasPassword == true AND signs them in, so an auth-blind
-        // gate 404'd their legitimate "Skip for now" on steps 2/3. This MapPost runs after
-        // UseAuthentication()/UseAuthorization(), so ctx.User is populated. WizardDismissed
-        // is NOT in the gate (Option B resumability).
+        // wizard-lockout-regression; AND semantics per wizard-gate-and-semantics): refuse
+        // 404 only once the system is GENUINELY COMPLETE (hasPassword AND anyNodes) and ONLY
+        // for ANONYMOUS callers (anti-takeover). In the password-only window the gate is OFF,
+        // so an anonymous skip succeeds (sets WizardDismissed, 302 /). The authenticated
+        // operator is mid-onboarding: step 1 (submit-password) flips hasPassword == true AND
+        // signs them in, so an auth-blind gate 404'd their legitimate "Skip for now" on
+        // steps 2/3. This MapPost runs after UseAuthentication()/UseAuthorization(), so
+        // ctx.User is populated. WizardDismissed is NOT in the gate (Option B resumability).
         var isAuthenticated = ctx.User?.Identity?.IsAuthenticated == true;
         var anyNodes = await nodeRepo.AnyAsync(ctx.RequestAborted);
         var hasPassword = !string.IsNullOrEmpty(settings.UIPasswordHash);
-        if (!isAuthenticated && (anyNodes || hasPassword))
+        if (!isAuthenticated && (anyNodes && hasPassword))
             return Microsoft.AspNetCore.Http.Results.NotFound();
 
         await settings.SetWizardDismissedAsync(true, ctx.RequestAborted);
@@ -791,7 +796,11 @@ try
         }
 
         // M-SEC-01 — refuse 404 once a real commitment exists. WizardDismissed is NOT in
-        // the gate (Option B resumability).
+        // the gate (Option B resumability). This gate DELIBERATELY stays on the hasPassword
+        // boundary (anyNodes || hasPassword), distinct from the visible AND gates (GET
+        // /setup/* + POST /setup/skip): tightening it to AND would reopen the M-SEC-01
+        // anonymous password-takeover window (an attacker could re-POST a password before
+        // the first AP exists). Operator accepted this asymmetry (wizard-gate-and-semantics).
         var anyNodes = await nodeRepo.AnyAsync(ctx.RequestAborted);
         var hasPassword = !string.IsNullOrEmpty(settings.UIPasswordHash);
         if (anyNodes || hasPassword)
