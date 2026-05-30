@@ -58,6 +58,12 @@ public sealed class ClearAllHostKeysButtonNotReachableTests
         public PasswordVerificationResult Verify(string h, string p) => PasswordVerificationResult.Success;
     }
 
+    // Phase 17 M-UPD-05 — no-op checker so the Settings page renders (Update-check card dep).
+    private sealed class NoOpUpdateChecker : ApStatsForOpenWrt.Services.UpdateCheck.IUpdateChecker
+    {
+        public Task CheckOnceAsync(CancellationToken ct = default) => Task.CompletedTask;
+    }
+
     private sealed class StubNodeRepo : INodeRepo
     {
 #pragma warning disable CS0618 // exercising the [Obsolete] deprecation gate from the interface contract
@@ -93,6 +99,10 @@ public sealed class ClearAllHostKeysButtonNotReachableTests
             new ApStatsForOpenWrt.Services.PreferencesService(ctx.JSInterop.JSRuntime));
         ctx.Services.AddSingleton<PollNotifier>();
         ctx.Services.AddSingleton<IForceEnrichmentService, ForceEnrichmentService>();
+        // Phase 17 M-UPD-05 — Settings/Index.razor now injects IUpdateChecker + UpdateNotifier
+        // for the Update-check card. Register no-op seams so the page renders.
+        ctx.Services.AddSingleton<ApStatsForOpenWrt.Services.UpdateCheck.IUpdateChecker, NoOpUpdateChecker>();
+        ctx.Services.AddSingleton<ApStatsForOpenWrt.Services.UpdateCheck.UpdateNotifier>();
         return ctx;
     }
 

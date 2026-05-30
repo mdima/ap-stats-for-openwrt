@@ -80,6 +80,13 @@ public sealed class IndexTests
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }
 
+    // Phase 17 M-UPD-05 — minimal no-op checker so the page renders; the Update-check card's
+    // own behavior is covered by UpdateCheckCardTests.
+    private sealed class NoOpUpdateChecker : ApStatsForOpenWrt.Services.UpdateCheck.IUpdateChecker
+    {
+        public Task CheckOnceAsync(CancellationToken ct = default) => Task.CompletedTask;
+    }
+
     private sealed class CapturingHasher : IUIPasswordHasher
     {
         public string LastInput = "";
@@ -135,6 +142,11 @@ public sealed class IndexTests
         // Existing tests that don't exercise the Run-now path simply don't touch these services.
         ctx.Services.AddSingleton<PollNotifier>();
         ctx.Services.AddSingleton<IForceEnrichmentService, ForceEnrichmentService>();
+        // Phase 17 M-UPD-05 — the Update-check card injects IUpdateChecker + UpdateNotifier.
+        // Register no-op/real seams so the page renders end-to-end; the UpdateCheckCardTests
+        // suite exercises the card behavior with capturing fakes.
+        ctx.Services.AddSingleton<ApStatsForOpenWrt.Services.UpdateCheck.IUpdateChecker, NoOpUpdateChecker>();
+        ctx.Services.AddSingleton<ApStatsForOpenWrt.Services.UpdateCheck.UpdateNotifier>();
         return (ctx, settings, hasher, nodes);
     }
 

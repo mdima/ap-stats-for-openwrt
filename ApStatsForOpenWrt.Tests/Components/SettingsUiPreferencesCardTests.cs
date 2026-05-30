@@ -67,6 +67,12 @@ public sealed class SettingsUiPreferencesCardTests
                 : Microsoft.AspNetCore.Identity.PasswordVerificationResult.Failed;
     }
 
+    // Phase 17 M-UPD-05 — no-op checker so the Settings page renders (Update-check card dep).
+    private sealed class NoOpUpdateChecker : ApStatsForOpenWrt.Services.UpdateCheck.IUpdateChecker
+    {
+        public Task CheckOnceAsync(CancellationToken ct = default) => Task.CompletedTask;
+    }
+
     private sealed class StubNodeRepo : INodeRepo
     {
         public Task<IReadOnlyList<WiFiNode>> GetAllAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<WiFiNode>>(Array.Empty<WiFiNode>());
@@ -107,6 +113,10 @@ public sealed class SettingsUiPreferencesCardTests
         // are sufficient — these tests do not exercise the Run-now button path.
         ctx.Services.AddSingleton<PollNotifier>();
         ctx.Services.AddSingleton<IForceEnrichmentService, ForceEnrichmentService>();
+        // Phase 17 M-UPD-05 — Settings/Index.razor now injects IUpdateChecker + UpdateNotifier
+        // for the Update-check card. Register no-op seams so the page renders.
+        ctx.Services.AddSingleton<ApStatsForOpenWrt.Services.UpdateCheck.IUpdateChecker, NoOpUpdateChecker>();
+        ctx.Services.AddSingleton<ApStatsForOpenWrt.Services.UpdateCheck.UpdateNotifier>();
 
         // The card under test — real PreferencesService over the bUnit-faked JS module.
         var prefs = new PreferencesService(ctx.JSInterop.JSRuntime);

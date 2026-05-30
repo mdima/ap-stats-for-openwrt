@@ -109,6 +109,12 @@ public sealed class PasswordPolicyBannerTests
         public PasswordVerificationResult Verify(string h, string p) => verifyResult;
     }
 
+    // Phase 17 M-UPD-05 — no-op checker so the Settings page renders (Update-check card dep).
+    private sealed class NoOpUpdateChecker : ApStatsForOpenWrt.Services.UpdateCheck.IUpdateChecker
+    {
+        public Task CheckOnceAsync(CancellationToken ct = default) => Task.CompletedTask;
+    }
+
     private sealed class CapturingNodeRepo : INodeRepo
     {
         public Task<IReadOnlyList<WiFiNode>> GetAllAsync(CancellationToken ct = default) =>
@@ -204,6 +210,10 @@ public sealed class PasswordPolicyBannerTests
         ctx.Services.AddSingleton<INodeRepo>(new CapturingNodeRepo());
         ctx.Services.AddSingleton<PollNotifier>();
         ctx.Services.AddSingleton<IForceEnrichmentService, ForceEnrichmentService>();
+        // Phase 17 M-UPD-05 — Settings/Index.razor now injects IUpdateChecker + UpdateNotifier
+        // for the Update-check card. Register no-op seams so the page renders.
+        ctx.Services.AddSingleton<ApStatsForOpenWrt.Services.UpdateCheck.IUpdateChecker, NoOpUpdateChecker>();
+        ctx.Services.AddSingleton<ApStatsForOpenWrt.Services.UpdateCheck.UpdateNotifier>();
         ctx.Services.AddSingleton<ApStatsForOpenWrt.Services.PreferencesService>(
             new ApStatsForOpenWrt.Services.PreferencesService(ctx.JSInterop.JSRuntime));
 

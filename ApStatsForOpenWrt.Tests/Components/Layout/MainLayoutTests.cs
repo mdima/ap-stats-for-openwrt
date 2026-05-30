@@ -93,6 +93,11 @@ public sealed class MainLayoutTests
             new ToastService(
                 sp.GetRequiredService<INotificationsGate>(),
                 NullLogger<ToastService>.Instance));
+        // Phase 17 D-01 — MainLayout now hosts <UpdateBadge />, which injects UpdateNotifier
+        // (and reads IAppSettingsService, already registered). Register the notifier so the
+        // cluster renders. The badge is DOM-absent by default (StubSettings has no newer
+        // version), so the cluster stays visually identical — the existing assertions hold.
+        ctx.Services.AddSingleton<ApStatsForOpenWrt.Services.UpdateCheck.UpdateNotifier>();
 
         // MainLayout inherits LayoutComponentBase, which exposes the slot as `Body` not
         // `ChildContent`. bUnit's AddChildContent looks for [Parameter] ChildContent on the
