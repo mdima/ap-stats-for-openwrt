@@ -1,0 +1,13 @@
+{
+  "url": "https://api.github.com/repos/mdima/ap-stats-for-openwrt/releases/176543210",
+  "html_url": "https://github.com/mdima/ap-stats-for-openwrt/releases/tag/v1.2.3",
+  "id": 176543210,
+  "tag_name": "v1.2.3",
+  "target_commitish": "master",
+  "name": "v1.2.3",
+  "draft": false,
+  "prerelease": false,
+  "created_at": "2026-04-01T09:00:00Z",
+  "published_at": "2026-04-01T09:10:00Z",
+  "body": "Recorded /releases/latest body — a STABLE tag (prerelease=false). Documents that the GitHub releases/latest contract never returns a -rc tag, so the checker never parses a pre-release suffix."
+}

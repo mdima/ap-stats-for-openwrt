@@ -1,0 +1,13 @@
+{
+  "url": "https://api.github.com/repos/mdima/ap-stats-for-openwrt/releases/187654321",
+  "html_url": "https://github.com/mdima/ap-stats-for-openwrt/releases/tag/v9.9.9",
+  "id": 187654321,
+  "tag_name": "v9.9.9",
+  "target_commitish": "master",
+  "name": "v9.9.9",
+  "draft": false,
+  "prerelease": false,
+  "created_at": "2026-05-30T12:00:00Z",
+  "published_at": "2026-05-30T12:05:00Z",
+  "body": "Recorded /releases/latest body for the update-check newer-version path (M-UPD-01)."
+}
