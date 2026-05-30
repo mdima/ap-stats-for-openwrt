@@ -566,6 +566,104 @@ public sealed class SetupPostEndpointTests(SmokeFactoryFixture factory)
         }
     }
 
+    // ── Auth-aware submit-password WRITE (wizard-resume-pw-reset-404 RED→GREEN) ────
+    // The returning operator who set a password in a prior step 1, then skipped the
+    // wizard, may resume and RE-SET the password on step 1 (action=set). The pre-fix
+    // gate (anyNodes || hasPassword) was NOT auth-aware, so it 404'd the AUTHENTICATED
+    // operator's legitimate re-set the moment a password existed — dead-ending the
+    // wizard at step 1. The gate must apply ONLY to ANONYMOUS callers once a commitment
+    // exists (M-SEC-01 anti-takeover, covered by the lock test above). The authenticated
+    // operator may set/re-set the password and advance to /setup/nodes. The handler
+    // re-issues the auth cookie with the bumped SessionVersion (M-SEC-04), so the
+    // re-set does NOT self-logout.
+
+    [Fact]
+    public async Task SubmitPassword_AuthenticatedOperator_ActionSet_WhenPasswordAlreadySet_Advances_NotFound404()
+    {
+        // RED against the pre-fix auth-blind gate: the operator completes step 1
+        // (action=set), which sets hasPassword AND signs them in. On a resumed step 1
+        // they RE-SET the password (action=set, a NEW valid password). The pre-fix gate
+        // (anyNodes || hasPassword) runs with no auth check and 404s the re-set. After
+        // the fix the authenticated re-set must 302 → /setup/nodes, write the new hash,
+        // and re-issue the cookie (no self-logout).
+        var ct = TestContext.Current.CancellationToken;
+        await ResetStateAsync(ct);
+
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            HandleCookies = true,
+        });
+
+        // Step 1: set the password the way the wizard does — sets hasPassword AND issues
+        // the auth cookie the client carries forward.
+        var step1Token = await AcquireAntiforgeryTokenFromSetupPasswordAsync(client, ct);
+        var step1 = await PostFormAsync(client, "/setup/submit-password", step1Token, new[]
+        {
+            new KeyValuePair<string, string>("action", "set"),
+            new KeyValuePair<string, string>("Password", "Password1"),
+            new KeyValuePair<string, string>("ConfirmPassword", "Password1"),
+        }, ct);
+
+        Assert.True(
+            step1.StatusCode == HttpStatusCode.Redirect ||
+            step1.StatusCode == HttpStatusCode.Found,
+            $"step 1 submit-password should 302 to /setup/nodes, got {(int)step1.StatusCode}.");
+
+        // Capture the hash set by step 1 so we can prove the re-set actually overwrote it.
+        string? hashAfterStep1;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var settings = scope.ServiceProvider.GetRequiredService<IAppSettingsService>();
+            hashAfterStep1 = settings.UIPasswordHash;
+        }
+        Assert.False(string.IsNullOrEmpty(hashAfterStep1),
+            "step 1 must have written a password hash.");
+
+        try
+        {
+            // Resume: GET /setup/password as the authenticated operator (password-only
+            // window → AND gate OFF → [AllowAnonymous] page renders 200 with a fresh token).
+            var resumeToken = await AcquireAntiforgeryTokenFromAuthenticatedStepAsync(
+                client, "/setup/password", ct);
+
+            // RE-SET the password (action=set) with a DIFFERENT valid value.
+            var resp = await PostFormAsync(client, "/setup/submit-password", resumeToken, new[]
+            {
+                new KeyValuePair<string, string>("action", "set"),
+                new KeyValuePair<string, string>("Password", "Different1"),
+                new KeyValuePair<string, string>("ConfirmPassword", "Different1"),
+            }, ct);
+
+            Assert.True(
+                resp.StatusCode == HttpStatusCode.Redirect ||
+                resp.StatusCode == HttpStatusCode.Found,
+                $"authenticated action=set re-set should 302 to /setup/nodes, got "
+                + $"{(int)resp.StatusCode} {resp.StatusCode}.");
+            Assert.NotNull(resp.Headers.Location);
+            Assert.Equal("/setup/nodes", resp.Headers.Location!.ToString());
+
+            // The handler must re-issue the auth cookie (M-SEC-04 — no self-logout). A
+            // Set-Cookie carrying the app auth cookie (Program.cs: o.Cookie.Name =
+            // "ApStatsForOpenWrt.Auth") must be present on the re-set response so the
+            // re-issued SessionVersion claim validates on the next request.
+            Assert.Contains(
+                resp.Headers.TryGetValues("Set-Cookie", out var setCookies) ? setCookies : Array.Empty<string>(),
+                c => c.Contains("ApStatsForOpenWrt.Auth", StringComparison.OrdinalIgnoreCase));
+
+            // The new hash must have replaced the step-1 hash (real overwrite by the operator).
+            using var scope = _factory.Services.CreateScope();
+            var settings = scope.ServiceProvider.GetRequiredService<IAppSettingsService>();
+            Assert.False(string.IsNullOrEmpty(settings.UIPasswordHash),
+                "the re-set must leave a password hash.");
+            Assert.NotEqual(hashAfterStep1, settings.UIPasswordHash);
+        }
+        finally
+        {
+            await ResetStateAsync(ct);
+        }
+    }
+
     // ── Option B resumability: WizardDismissed alone does NOT close the endpoints ──
 
     [Fact]

@@ -810,17 +810,29 @@ try
         if (action != "set")
             return Microsoft.AspNetCore.Http.Results.Redirect("/setup/nodes");
 
-        // M-SEC-01 — refuse the password WRITE once a real commitment exists. WizardDismissed
-        // is NOT in the gate (Option B resumability). This WRITE gate DELIBERATELY stays on
-        // the hasPassword boundary (anyNodes || hasPassword), distinct from the visible AND
-        // gates (GET /setup/* + POST /setup/skip): tightening it to AND would reopen the
-        // M-SEC-01 anonymous password-takeover window (an attacker could re-POST a NEW
-        // password before the first AP exists). Operator accepted this asymmetry
-        // (wizard-gate-and-semantics). The gate is scoped to action=set only so the harmless
-        // action=skip advance above is never 404'd (debug wizard-resume-404-after-skip).
+        // M-SEC-01 — refuse the password WRITE once a real commitment exists, but ONLY for
+        // ANONYMOUS callers (auth-aware gate, debug wizard-resume-pw-reset-404). WizardDismissed
+        // is NOT in the gate (Option B resumability). This WRITE gate DELIBERATELY stays on the
+        // hasPassword boundary (anyNodes || hasPassword), distinct from the visible AND gates
+        // (GET /setup/* + POST /setup/skip): tightening it to AND would reopen the M-SEC-01
+        // anonymous password-takeover window (an attacker could re-POST a NEW password before
+        // the first AP exists). Operator accepted this asymmetry (wizard-gate-and-semantics).
+        //
+        // The !isAuthenticated guard mirrors the existing auth-aware pattern in
+        // WizardSetupGateMiddleware + POST /setup/skip: the AUTHENTICATED operator (signed in
+        // by step 1's SignInAsync) may set/re-set the password and complete the wizard on a
+        // resume — they were 404'd before the moment a password existed, dead-ending step 1.
+        // An ANONYMOUS caller is STILL 404'd once a password exists, so the anti-takeover
+        // boundary is PRESERVED (M-SEC-01: no anonymous overwrite in the password-only window).
+        // This MapPost runs after UseAuthentication()/UseAuthorization(), so ctx.User is
+        // populated. The handler re-issues the auth cookie with the bumped SessionVersion below
+        // (M-SEC-04), so an authenticated re-set does NOT self-logout. The gate is scoped to
+        // action=set only so the harmless action=skip advance above is never 404'd (debug
+        // wizard-resume-404-after-skip).
+        var isAuthenticated = ctx.User?.Identity?.IsAuthenticated == true;
         var anyNodes = await nodeRepo.AnyAsync(ctx.RequestAborted);
         var hasPassword = !string.IsNullOrEmpty(settings.UIPasswordHash);
-        if (anyNodes || hasPassword)
+        if (!isAuthenticated && (anyNodes || hasPassword))
             return Microsoft.AspNetCore.Http.Results.NotFound();
 
         var password = form["Password"].ToString();
