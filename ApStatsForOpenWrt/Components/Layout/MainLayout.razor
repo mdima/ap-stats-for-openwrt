@@ -28,11 +28,16 @@
                originally reserved by Phase 3 for "Phase 6" is claimed by Phase 5; Phase 6
                will swap the gate source (DI replacement of ICircuitGate impl) without
                touching this markup. Phase 8 (REQ-UI-31, 08-UI-SPEC §Topbar replacement)
-               appends <ThemeToggle /> as the LAST child of the cluster — ordering
-               LivePausedBadge -> PollCountdown -> ThemeToggle is locked. *@
+               appends <ThemeToggle /> as the LAST child of the cluster.
+               Phase 17 D-01 (M-UPD-03) inserts <UpdateBadge /> BETWEEN <PollCountdown />
+               and <ThemeToggle />. The locked cluster order is now:
+               LivePausedBadge -> PollCountdown -> UpdateBadge -> ThemeToggle. UpdateBadge is
+               DOM-absent unless an upstream release is newer AND the toggle is on (D-02), so
+               in steady state the cluster is visually identical to Phase 8. *@
             <li class="nav-item d-flex align-items-center gap-2 me-3">
                 <LivePausedBadge />
                 <PollCountdown />
+                <UpdateBadge />
                 <ThemeToggle />
             </li>
             <AuthorizeView>
@@ -101,6 +106,14 @@
    layout-singleton lockdown: every page rendered under MainLayout sees toasts
    without per-page mounts (which would duplicate the queue). *@
 <ToastHost />
+
+@* Phase 17 D-04 (M-UPD-04) — the one-shot discovery toast is emitted by the SINGLETON
+   UpdateToastBroadcaster (Services/UpdateToastBroadcaster.cs), which subscribes to
+   UpdateNotifier.UpdateAvailable ONCE per process and calls the singleton ToastService.Show
+   exactly once per raise. The singleton ToastService then broadcasts the entry to EVERY
+   circuit's ToastHost (the single mount above) for free. A per-circuit Blazor subscriber was
+   rejected: with N open circuits it would call ToastService.Show N times per raise (N×N
+   fan-out). The broadcaster mirrors EventDetectionService exactly (eager-started singleton). *@
 
 </div>
 

@@ -1,0 +1,132 @@
+@using System.Reflection
+@using ApStatsForOpenWrt.Services.Settings
+@using ApStatsForOpenWrt.Services.UpdateCheck
+@implements IDisposable
+
+@inject IAppSettingsService Settings
+@inject UpdateNotifier Notifier
+
+@* UpdateBadge.razor — Phase 17 Plan 03 / M-UPD-03. UI-SPEC §UpdateBadge.
+   Mirrors the LivePausedBadge register (Pattern 2): subscribe in OnInitialized,
+   unsubscribe in Dispose; handlers return Task and wrap the mutation in
+   await InvokeAsync(StateHasChanged) (Pitfall 7).
+
+   D-02 — DOM-ABSENT GATE: the badge renders NOTHING unless
+   (LatestKnownVersion parses to a System.Version > the running assembly version)
+   AND Settings.UpdateCheckEnabled. Up-to-date OR toggle-off ⇒ no element at all,
+   so the navbar is visually identical to today.
+
+   T-17-03-01 / T-17-03-03 — the href is Blazor-attribute-encoded and Plan-02 already
+   validated LatestReleaseUrl as an absolute https://github.com/ URL before persisting;
+   target="_blank" + rel="noopener" prevents reverse-tabnabbing. The version string in
+   the tooltip/aria-label is a System.Version.ToString() (numeric dotted form), so
+   data-bs-html="true" cannot render injected markup.
+
+   The discovery TOAST is wired separately in MainLayout (D-04) so it routes through the
+   singleton ToastService + broadcasts to every circuit's ToastHost. This component owns
+   only the steady-state badge. It subscribes to BOTH Notifier.UpdateAvailable (live
+   discovery) AND Settings.Changed (so toggling the feature off hides the badge on the
+   next render, and a check that advances the version shows it). *@
+
+@if (ShouldShow)
+{
+    <a href="@Settings.LatestReleaseUrl" target="_blank" rel="noopener"
+       class="badge text-bg-info d-inline-flex align-items-center text-decoration-none"
+       aria-label="Update available: version @_latestVersionString"
+       data-bs-toggle="tooltip" data-bs-html="true"
+       title="@Tooltip">
+        <i class="bi bi-arrow-up-circle me-1" aria-hidden="true"></i>
+        <span>Update</span>
+    </a>
+}
+
+@code {
+    // Computed once: the running assembly version is the comparison floor. Mirrors the
+    // MainLayout footer idiom (typeof(...).Assembly.GetName().Version). NO literal version
+    // string anywhere (260518-vbs).
+    private static readonly Version? CurrentVersion =
+        typeof(UpdateBadge).Assembly.GetName().Version;
+
+    private Version? _latest;
+    private string _latestVersionString = string.Empty;
+
+    /// <summary>
+    /// D-02 render gate. True only when LatestKnownVersion parses to a System.Version
+    /// strictly greater than the running assembly version AND the feature toggle is on.
+    /// System.Version compare (NOT string compare) so v1.10.0 &gt; v1.9.0 holds.
+    /// </summary>
+    private bool ShouldShow =>
+        Settings.UpdateCheckEnabled
+        && CurrentVersion is not null
+        && Version.TryParse(StripLeadingV(Settings.LatestKnownVersion), out _latest)
+        && _latest > CurrentVersion;
+
+    private string Tooltip =>
+        $"Version {_latestVersionString} available<br>discovered {RelativeTime(Settings.LastCheckedAtUtc ?? default)}";
+
+    protected override void OnInitialized()
+    {
+        RecomputeLatestString();
+        Notifier.UpdateAvailable += OnUpdateAvailableAsync;
+        Settings.Changed += OnSettingsChanged;
+    }
+
+    // Func<UpdateInfo, Task> handler — async Task (NOT async void; Pitfall 7).
+    private async Task OnUpdateAvailableAsync(UpdateInfo _)
+    {
+        await InvokeAsync(() =>
+        {
+            RecomputeLatestString();
+            StateHasChanged();
+        });
+    }
+
+    // Settings.Changed is Action<IAppSettingsService> (synchronous). Adapt to the
+    // InvokeAsync re-render path; fire-and-forget the returned Task — the renderer
+    // owns its own lifetime and InvokeAsync is exception-safe under teardown.
+    private void OnSettingsChanged(IAppSettingsService settings)
+    {
+        _ = InvokeAsync(() =>
+        {
+            RecomputeLatestString();
+            StateHasChanged();
+        });
+    }
+
+    // Keep the displayed version string in sync with the current setting. Evaluated for
+    // the aria-label + tooltip; ShouldShow re-parses independently as the render gate.
+    private void RecomputeLatestString()
+    {
+        _latestVersionString =
+            Version.TryParse(StripLeadingV(Settings.LatestKnownVersion), out var v)
+                ? v.ToString()
+                : string.Empty;
+    }
+
+    // Plan-02 stores tags with the leading v/V already stripped, but be defensive: the
+    // badge must never depend on the checker's normalisation to render correctly.
+    private static string? StripLeadingV(string? tag)
+    {
+        if (string.IsNullOrWhiteSpace(tag)) return tag;
+        return tag is ['v' or 'V', .. var rest] ? rest : tag;
+    }
+
+    // Replicated from Dashboard.razor:684-696. SpecifyKind(Utc) is MANDATORY — SQLite /
+    // the AppSetting round-trip returns Kind=Unspecified; ToUniversalTime() on an
+    // Unspecified value would subtract the local offset (off-by-N hours bug).
+    private static string RelativeTime(DateTime t)
+    {
+        if (t == default) return "Never";
+        var d = DateTime.UtcNow - DateTime.SpecifyKind(t, DateTimeKind.Utc);
+        if (d.TotalSeconds < 60) return "just now";
+        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes}m ago";
+        if (d.TotalHours < 24)   return $"{(int)d.TotalHours}h ago";
+        return $"{(int)d.TotalDays}d ago";
+    }
+
+    public void Dispose()
+    {
+        Notifier.UpdateAvailable -= OnUpdateAvailableAsync;
+        Settings.Changed -= OnSettingsChanged;
+    }
+}
