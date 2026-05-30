@@ -10,7 +10,7 @@
 [![Blazor Server](https://img.shields.io/badge/Blazor-InteractiveServer-512BD4?logo=blazor&logoColor=white)](https://learn.microsoft.com/aspnet/core/blazor/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](#try-it-in-60-seconds)
 [![SQLite](https://img.shields.io/badge/SQLite-EF%20Core%2010-003B57?logo=sqlite&logoColor=white)](#architecture-at-a-glance)
-[![Version](https://img.shields.io/badge/version-0.11-blue)](Directory.Build.props)
+[![Version](https://img.shields.io/badge/version-0.12-blue)](Directory.Build.props)
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue)](LICENSE)
 
 ---
