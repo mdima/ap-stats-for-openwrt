@@ -5,7 +5,9 @@
    Owns the common chrome only:
      - outer .login-page bg-body-secondary
      - a centered box whose class/style the caller controls (login-box vs setup-wizard-box)
-     - the .login-logo with the CANONICAL brand "AP Stats for OpenWrt"
+     - a centered brand block: a bg-primary circular badge wrapping /img/logo.svg, with the
+       .login-logo CANONICAL brand wordmark "AP Stats for OpenWrt" link below it (theme-aware:
+       Bootstrap utility classes only, so it reads correctly in AdminLTE light and dark mode)
      - an optional @AboveCard slot (wizard breadcrumb)
      - the .card / .card-body wrapper around @ChildContent
      - an optional @BelowCard slot (wizard "Skip for now" form + helper text)
@@ -14,8 +16,13 @@
 
 <div class="login-page bg-body-secondary">
     <div class="@BoxClass" style="@BoxStyle">
-        <div class="login-logo mb-4">
-            <a href="/"><strong>AP Stats</strong> for OpenWrt</a>
+        <div class="text-center mb-4">
+            <div class="d-inline-flex align-items-center justify-content-center rounded-circle bg-primary mb-3" style="width:72px;height:72px;box-shadow:0 .375rem 1rem rgba(0,0,0,.18);">
+                <img src="/img/logo.svg" alt="AP Stats for OpenWrt logo" width="40" height="40" />
+            </div>
+            <div class="login-logo m-0">
+                <a href="/" class="text-decoration-none"><strong>AP Stats</strong> for OpenWrt</a>
+            </div>
         </div>
 
         @AboveCard
