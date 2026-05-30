@@ -33,14 +33,27 @@ namespace ApStatsForOpenWrt.Services.Onboarding;
 /// </para>
 ///
 /// <para>
-/// Anti-takeover preserved: an ANONYMOUS caller still gets the 404 once the system is
-/// genuinely complete (password AND AP). In the password-only intermediate window the
-/// gate is OFF, so an anonymous <c>GET /setup/*</c> falls through to the ConditionalAuth
-/// fallback policy (302 /Login) rather than a misleading "setup complete" 404 — anonymous
-/// access stays blocked, only the response shape changes. The independent M-SEC-01 POST
-/// gate on <c>/setup/submit-password</c> (Program.cs) deliberately stays on the
-/// <c>hasPassword</c> boundary (it refuses anonymous re-POST the moment a password exists)
-/// and is untouched by this middleware.
+/// Anti-takeover preserved: an ANONYMOUS caller still gets the friendly 404 once the system
+/// is genuinely complete (password AND AP). In the password-only intermediate window
+/// (password set, no AP yet) the visible gate is OFF, and the response then depends on each
+/// <c>/setup</c> page's OWN authorization — it is NOT uniformly blocked:
+/// <list type="bullet">
+///   <item><description><c>/setup/nodes</c> and <c>/setup/wlans</c> are NOT
+///   <c>[AllowAnonymous]</c>, so the ConditionalAuth fallback policy 302-redirects an
+///   anonymous caller to <c>/Login</c>.</description></item>
+///   <item><description><c>/setup/password</c> carries <c>[AllowAnonymous]</c> (it must be
+///   reachable on FIRST run, before any password exists), which EXEMPTS it from that
+///   fallback — so an anonymous <c>GET /setup/password</c> renders <c>200</c> even with a
+///   password already set. That is a DELIBERATE, tested decision (commit <c>19cefee</c>,
+///   debug session <c>wizard-gate-and-semantics</c>; regression-locked by
+///   <c>WizardRedirectMiddlewareTests.GetSetupPassword_WhenPasswordOnly_*</c>): viewing the
+///   wizard form is not a takeover vector. The takeover boundary is the M-SEC-01 POST gate on
+///   <c>/setup/submit-password</c> (Program.cs), which refuses an anonymous re-POST the moment
+///   <c>hasPassword</c> — that gate is independent of this middleware and unchanged.</description></item>
+/// </list>
+/// So the friendly "setup complete" 404 is shown ONLY when the wizard is genuinely finished;
+/// the password-form GET staying anonymously reachable in the interim is accepted by design
+/// (confirmed in UAT 16-7 surface B, 2026-05-30 — POST correctly 404'd, GET intentionally 200).
 /// </para>
 ///
 /// <para>
