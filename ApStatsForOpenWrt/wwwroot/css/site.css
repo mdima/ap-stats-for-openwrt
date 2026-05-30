@@ -5,6 +5,17 @@
    Link order (App.razor): adminlte.min.css → site.css → app.css.
    site.css MUST come AFTER adminlte.min.css so :root variable overrides win the cascade. */
 
+/* v0.12 NOTE (2026-05-30, operator decision — supersedes the 05-UI-SPEC §Visual Identity
+   claim that the amber --bs-primary is "applied to every btn-primary"):
+   The --bs-primary override below DOES recolor CSS-variable-consuming accents — the active
+   sidebar-nav left-border, .table links, the active KPI tile, the row-status fade, and the
+   amber table-hover. It does NOT recolor .btn-primary or .bg-primary: Bootstrap 5.3 compiles
+   .btn-primary to a literal hex (--bs-btn-bg:#0d6efd) and .bg-primary reads --bs-primary-rgb
+   (13,110,253), neither of which this :root override touches. So primary BUTTONS and badges
+   render Bootstrap blue — the ACCEPTED shipped identity as of v0.12 (operator chose to keep
+   blue rather than force amber app-wide). The login "Sign in" button + logo badge are blue
+   by this same accepted behavior. */
+
 :root {
   /* Warning = Primary by design (Pi.Alert palette).
      Same hex value across two semantic tokens is intentional;
