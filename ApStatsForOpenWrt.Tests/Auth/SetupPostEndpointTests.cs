@@ -38,6 +38,16 @@ namespace ApStatsForOpenWrt.Tests.Auth;
 /// operator may skip from any step. The anonymous anti-takeover 404 is preserved.
 /// </para>
 ///
+/// <para>
+/// Action-aware /setup/submit-password ADVANCE (debug session wizard-resume-404-after-skip):
+/// the "Skip password" button on step 1 POSTs <c>action=skip</c> — a no-op ADVANCE to
+/// step 2 that writes no password. The commitment-404 gate must apply ONLY to a password
+/// WRITE (<c>action=set</c>); the <c>action=skip</c> advance must never 404 once a password
+/// exists, so a returning operator can complete the wizard. The M-SEC-01 boundary is
+/// preserved: an ANONYMOUS <c>action=set</c> with a password already set still 404s (no
+/// overwrite/takeover).
+/// </para>
+///
 /// Uses the shared <see cref="SmokeFactoryFixture"/> with the in-memory SQLite database.
 /// Each test resets the relevant state in try/finally to keep the fixture's shared DB
 /// state clean for sibling tests.
@@ -422,6 +432,133 @@ public sealed class SetupPostEndpointTests(SmokeFactoryFixture factory)
             var settings = scope.ServiceProvider.GetRequiredService<IAppSettingsService>();
             Assert.True(settings.WizardDismissed,
                 "authenticated skip must set WizardDismissed = true.");
+        }
+        finally
+        {
+            await ResetStateAsync(ct);
+        }
+    }
+
+    // ── Auth-aware submit-password ADVANCE (wizard-resume-404-after-skip RED→GREEN) ──
+    // The "Skip password" button on wizard step 1 (Password.razor: <button name="action"
+    // value="skip">) POSTs /setup/submit-password with action=skip — a no-op ADVANCE to
+    // step 2 (/setup/nodes) that writes NO password. A returning operator who set a
+    // password in a prior step 1, then skipped the wizard, lands back on step 1 and clicks
+    // "Skip password" to advance. The commitment-404 gate (anyNodes || hasPassword) ran
+    // BEFORE the action branch, so it 404'd the harmless action=skip advance the moment a
+    // password existed — blocking wizard completion. The gate must apply ONLY to a password
+    // WRITE (action=set), never to the action=skip advance, while keeping the M-SEC-01
+    // anonymous-takeover boundary intact (anonymous action=set with a password already set
+    // must STILL 404 — no overwrite). See the M-SEC-01 lock test below.
+
+    [Fact]
+    public async Task SubmitPassword_AuthenticatedOperator_ActionSkip_WhenPasswordSet_Advances_NotFound404()
+    {
+        // RED against the pre-fix gate: the operator completes step 1 (submit-password
+        // action=set), which sets hasPassword AND signs them in. On a resumed step 1 they
+        // click "Skip password" → POST /setup/submit-password with action=skip. The pre-fix
+        // gate (anyNodes || hasPassword) runs before the action branch and 404s the advance.
+        // After the fix the action=skip advance must 302 → /setup/nodes (NOT 404), letting
+        // the returning operator complete the wizard.
+        var ct = TestContext.Current.CancellationToken;
+        await ResetStateAsync(ct);
+
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            HandleCookies = true,
+        });
+
+        // Step 1: set the password the way the wizard does — sets hasPassword AND issues
+        // the auth cookie the client carries forward.
+        var step1Token = await AcquireAntiforgeryTokenFromSetupPasswordAsync(client, ct);
+        var step1 = await PostFormAsync(client, "/setup/submit-password", step1Token, new[]
+        {
+            new KeyValuePair<string, string>("action", "set"),
+            new KeyValuePair<string, string>("Password", "Password1"),
+            new KeyValuePair<string, string>("ConfirmPassword", "Password1"),
+        }, ct);
+
+        Assert.True(
+            step1.StatusCode == HttpStatusCode.Redirect ||
+            step1.StatusCode == HttpStatusCode.Found,
+            $"step 1 submit-password should 302 to /setup/nodes, got {(int)step1.StatusCode}.");
+
+        try
+        {
+            // Resume: GET /setup/password as the authenticated operator (password-only
+            // window → AND gate OFF → [AllowAnonymous] page renders 200 with a fresh token).
+            var resumeToken = await AcquireAntiforgeryTokenFromAuthenticatedStepAsync(
+                client, "/setup/password", ct);
+
+            // Click "Skip password" — action=skip is a pure ADVANCE, writes no password.
+            var resp = await PostFormAsync(client, "/setup/submit-password", resumeToken, new[]
+            {
+                new KeyValuePair<string, string>("action", "skip"),
+            }, ct);
+
+            Assert.True(
+                resp.StatusCode == HttpStatusCode.Redirect ||
+                resp.StatusCode == HttpStatusCode.Found,
+                $"authenticated action=skip advance should 302 to /setup/nodes, got "
+                + $"{(int)resp.StatusCode} {resp.StatusCode}.");
+            Assert.NotNull(resp.Headers.Location);
+            Assert.Equal("/setup/nodes", resp.Headers.Location!.ToString());
+
+            // The advance must NOT have written/altered the password (still set, unchanged).
+            using var scope = _factory.Services.CreateScope();
+            var settings = scope.ServiceProvider.GetRequiredService<IAppSettingsService>();
+            Assert.False(string.IsNullOrEmpty(settings.UIPasswordHash),
+                "action=skip advance must not clear the existing password.");
+        }
+        finally
+        {
+            await ResetStateAsync(ct);
+        }
+    }
+
+    [Fact]
+    public async Task SubmitPassword_Anonymous_ActionSet_WhenPasswordAlreadySet_Returns404_MSec01Preserved()
+    {
+        // M-SEC-01 anti-takeover lock (must HOLD before and after the wizard-resume fix):
+        // an ANONYMOUS caller attempting to WRITE a new password (action=set) once one
+        // already exists must STILL receive 404 — no overwrite/takeover. The wizard-resume
+        // fix only unblocks the action=skip ADVANCE; the action=set WRITE stays on the
+        // hasPassword || anyNodes M-SEC-01 boundary.
+        var ct = TestContext.Current.CancellationToken;
+        await ResetStateAsync(ct);
+
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            HandleCookies = true,
+        });
+
+        // Harvest a token from the fresh state BEFORE committing (post-commit the GET 404s
+        // for the anonymous caller). The client never authenticates.
+        var token = await AcquireAntiforgeryTokenFromSetupPasswordAsync(client, ct);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var settings = scope.ServiceProvider.GetRequiredService<IAppSettingsService>();
+            await settings.SetUIPasswordHashAsync("AQAAA-fake-hash", ct);
+        }
+
+        try
+        {
+            var resp = await PostFormAsync(client, "/setup/submit-password", token, new[]
+            {
+                new KeyValuePair<string, string>("action", "set"),
+                new KeyValuePair<string, string>("Password", "Different1"),
+                new KeyValuePair<string, string>("ConfirmPassword", "Different1"),
+            }, ct);
+
+            Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+
+            // The original password must be untouched (no overwrite).
+            using var scope = _factory.Services.CreateScope();
+            var settings = scope.ServiceProvider.GetRequiredService<IAppSettingsService>();
+            Assert.Equal("AQAAA-fake-hash", settings.UIPasswordHash);
         }
         finally
         {

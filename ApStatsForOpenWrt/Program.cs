@@ -795,22 +795,33 @@ try
             return Microsoft.AspNetCore.Http.Results.BadRequest();
         }
 
-        // M-SEC-01 — refuse 404 once a real commitment exists. WizardDismissed is NOT in
-        // the gate (Option B resumability). This gate DELIBERATELY stays on the hasPassword
-        // boundary (anyNodes || hasPassword), distinct from the visible AND gates (GET
-        // /setup/* + POST /setup/skip): tightening it to AND would reopen the M-SEC-01
-        // anonymous password-takeover window (an attacker could re-POST a password before
-        // the first AP exists). Operator accepted this asymmetry (wizard-gate-and-semantics).
+        // ACTION-AWARE gate split (debug wizard-resume-404-after-skip). The form carries
+        // two actions: action=set (WRITE a password) and action=skip (a no-op ADVANCE to
+        // step 2 that writes nothing — the "Skip password" button on step 1). Read the
+        // action FIRST, so the commitment-404 gate below applies ONLY to the password WRITE.
+        var form   = ctx.Request.Form;
+        var action = form["action"].ToString();
+
+        // action=skip is a pure ADVANCE — it never writes a password, so the M-SEC-01
+        // anti-takeover gate must NOT 404 it. A returning operator whose step 1 already
+        // set a password (then skipped the wizard) clicks "Skip password" to advance to
+        // /setup/nodes; gating this on hasPassword dead-ended wizard completion. Letting
+        // the advance through does NOT reopen M-SEC-01 (no password write occurs here).
+        if (action != "set")
+            return Microsoft.AspNetCore.Http.Results.Redirect("/setup/nodes");
+
+        // M-SEC-01 — refuse the password WRITE once a real commitment exists. WizardDismissed
+        // is NOT in the gate (Option B resumability). This WRITE gate DELIBERATELY stays on
+        // the hasPassword boundary (anyNodes || hasPassword), distinct from the visible AND
+        // gates (GET /setup/* + POST /setup/skip): tightening it to AND would reopen the
+        // M-SEC-01 anonymous password-takeover window (an attacker could re-POST a NEW
+        // password before the first AP exists). Operator accepted this asymmetry
+        // (wizard-gate-and-semantics). The gate is scoped to action=set only so the harmless
+        // action=skip advance above is never 404'd (debug wizard-resume-404-after-skip).
         var anyNodes = await nodeRepo.AnyAsync(ctx.RequestAborted);
         var hasPassword = !string.IsNullOrEmpty(settings.UIPasswordHash);
         if (anyNodes || hasPassword)
             return Microsoft.AspNetCore.Http.Results.NotFound();
-
-        var form   = ctx.Request.Form;
-        var action = form["action"].ToString();
-
-        if (action != "set")
-            return Microsoft.AspNetCore.Http.Results.Redirect("/setup/nodes");
 
         var password = form["Password"].ToString();
         var confirm  = form["ConfirmPassword"].ToString();
