@@ -35,7 +35,7 @@ public sealed class CsprojReferencesTests
     [Fact]
     public void UsesXUnitV3_NoCoverlet()
     {
-        // CI-02: locked test stack. xUnit v3 3.2.2, bUnit 2.7.2, Microsoft.Testing.Extensions.CodeCoverage 18.6.2.
+        // CI-02: locked test stack. xUnit v3 3.2.2, bUnit 2.7.2, Microsoft.Testing.Extensions.CodeCoverage 18.7.0.
         // ZERO coverlet.* references — neither the legacy collector/msbuild integrations nor the
         // new coverlet.MTP MTP-native variant. CONTEXT.md CI-02 pins Microsoft.Testing.Extensions.CodeCoverage
         // exclusively for v1. A future planner who wants coverlet.MTP must update CONTEXT.md FIRST.
@@ -54,7 +54,7 @@ public sealed class CsprojReferencesTests
         // Locked pins — exact strings.
         Assert.Contains(pkgRefs, r => r.Include == "xunit.v3" && r.Version == "3.2.2");
         Assert.Contains(pkgRefs, r => r.Include == "bunit"    && r.Version == "2.7.2");
-        Assert.Contains(pkgRefs, r => r.Include == "Microsoft.Testing.Extensions.CodeCoverage" && r.Version == "18.6.2");
+        Assert.Contains(pkgRefs, r => r.Include == "Microsoft.Testing.Extensions.CodeCoverage" && r.Version == "18.7.0");
 
         // Forbidden — ANY coverlet.* variant (CI-02). Even the new coverlet.MTP integration is
         // excluded for v1 because CONTEXT.md CI-02 pins Microsoft.Testing.Extensions.CodeCoverage
