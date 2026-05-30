@@ -885,10 +885,20 @@ try
     // wwwroot/ (AdminLTE, Bootstrap Icons, Source Sans 3, app.css, favicons). MapStaticAssets only
     // owns the publish-time static-web-assets manifest endpoints.
     // Mapped here (after the auth/wizard endpoints, immediately before MapRazorComponents) so the
-    // framework asset endpoints inherit the same routing context as Blazor itself; the static-web-
-    // assets endpoints carry their own AllowAnonymous metadata so the ConditionalAuthRequirement
-    // fallback policy does not redirect them to /Login.
-    app.MapStaticAssets();
+    // framework asset endpoints inherit the same routing context as Blazor itself.
+    //
+    // .AllowAnonymous() is LOAD-BEARING (quick task 260530-9mg, live debug 2026-05-30). On .NET 10,
+    // MapStaticAssets() does NOT auto-tag its endpoints with AllowAnonymous metadata — the prior
+    // comment here asserted it did, which is false. Without the explicit .AllowAnonymous() below,
+    // every static-asset endpoint (blazor.web.js, the scoped-CSS bundle ApStatsForOpenWrt.styles.css,
+    // /lib/*, /css/site.css, favicons) inherits the AddAuthorization FallbackPolicy
+    // (ConditionalAuthRequirement). Once a UI password is set that policy engages and 302-redirects
+    // each asset to /Login — confirmed live against the running container: only /health (which
+    // carries its own .AllowAnonymous(), mapped above) returned 200 while every asset 302'd to
+    // /Login?ReturnUrl=.... The 302 (not 404) proves the endpoints matched and were auth-gated, not
+    // unresolved. Tagging the static-asset endpoints anonymous exempts them from the fallback policy
+    // so they serve before any auth check — matching the /health pattern.
+    app.MapStaticAssets().AllowAnonymous();
 
     app.MapRazorComponents<ApStatsForOpenWrt.Components.App>()
         .AddInteractiveServerRenderMode();
