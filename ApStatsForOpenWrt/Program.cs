@@ -447,61 +447,54 @@ try
 
     builder.Services.AddRateLimiter(opts =>
     {
-        // Existing per-IP LoginPolicy — UNCHANGED. Applied via [EnableRateLimiting("LoginPolicy")]
-        // on Login.razor. SEC-06 / D-03 contract: 5 requests per minute per source IP.
-        opts.AddPolicy("LoginPolicy", ctx =>
-            System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                partitionKey: ctx.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
-                factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
-                {
-                    PermitLimit = 5,                                    // SEC-06 / D-03
-                    Window = TimeSpan.FromMinutes(1),
-                    QueueLimit = 0,
-                    AutoReplenishment = true
-                }));
-        // M-SEC-03 / plan 15-05 — LoginGlobalPolicy: distributed brute-force ceiling on /Login.
-        // Single _global_ partition; 30 requests/minute server-wide regardless of source IP.
-        // CONTEXT.md Decision 2 PINNED shape (FixedWindow, PermitLimit=30, Window=1min,
-        // QueueLimit=0, AutoReplenishment=true, partitionKey="_global_") — mirrors LoginPolicy
-        // verbatim except for the global partition key and the higher permit limit.
+        // M-SEC-03 brute-force limiter — POST-ONLY contract
+        // (debug login-429-counts-page-views, operator-approved 2026-05-30).
         //
-        // NOTE: This standalone policy registration preserves CONTEXT.md Decision 2's shape
-        // verbatim and makes the policy directly applicable via [EnableRateLimiting(...)] on
-        // any future endpoint. Login.razor itself enforces BOTH partitions via the GlobalLimiter
-        // below (see deviation note) because EnableRateLimitingAttribute is AllowMultiple=false.
-        opts.AddPolicy("LoginGlobalPolicy", _ =>
-            System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                partitionKey: "_global_",
-                factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
-                {
-                    PermitLimit = 30,
-                    Window = TimeSpan.FromMinutes(1),
-                    QueueLimit = 0,
-                    AutoReplenishment = true
-                }));
+        // The limiter counts submitted sign-in ATTEMPTS (POST /Login), never page VIEWS
+        // (GET /Login) or any other method. PRIOR shape attached the per-IP budget via
+        // [EnableRateLimiting("LoginPolicy")] on Login.razor (which the attribute applies to
+        // the Razor page endpoint's GET render too) AND gated the global budget on
+        // Path.StartsWithSegments("/Login") with NO method check — so GET page views consumed
+        // both budgets and a legitimate operator who merely viewed/reloaded /Login (e.g. the
+        // sign-out → /Login redirect chain) got 429'd on the 6th view. Live repro from deb509a:
+        // 7 rapid GET /Login → 200,200,200,200,200,429,429.
+        //
+        // FIX: fold BOTH budgets into opts.GlobalLimiter via PartitionedRateLimiter.CreateChained,
+        // with each partition predicate gated on Method == "POST" && Path == /Login. Non-matching
+        // requests (any GET, any non-/Login path) → GetNoLimiter (pay no cost). The
+        // [EnableRateLimiting("LoginPolicy")] attribute is REMOVED from Login.razor because an
+        // EnableRateLimiting attribute on a Razor page endpoint cannot be method-scoped — the
+        // attribute is exactly why GET was counted. The two standalone opts.AddPolicy(...)
+        // registrations (LoginPolicy / LoginGlobalPolicy) are removed: both budgets now live in
+        // this chained GlobalLimiter, leaving no dangling [EnableRateLimiting] reference.
+        //
+        // M-SEC-03 / CONTEXT.md Decision 2 budget NUMBERS are UNCHANGED — per-IP PermitLimit=5,
+        // global PermitLimit=30, FixedWindow=1min, QueueLimit=0, AutoReplenishment=true. ONLY the
+        // trigger condition tightens to POST /Login.
+        //
+        // Pitfall 4 ordering preserved: app.UseForwardedHeaders() (when registered) runs BEFORE
+        // app.UseRateLimiter(), so the per-IP partition key sees the rewritten RemoteIpAddress.
+        static bool IsLoginPost(HttpContext ctx) =>
+            HttpMethods.IsPost(ctx.Request.Method) &&
+            ctx.Request.Path.StartsWithSegments("/Login");
 
-        // M-SEC-03 / plan 15-05 — DEVIATION FROM PLAN ATTRIBUTE-CHAIN SHAPE.
-        //
-        // Plan 15-05 prescribed two stacked [EnableRateLimiting] attributes on Login.razor
-        // (LoginPolicy + LoginGlobalPolicy). EnableRateLimitingAttribute is marked
-        // [AttributeUsage(..., AllowMultiple = false)] in ASP.NET Core 10 (verified via
-        // reflection against the 10.0.8 runtime assembly), producing CS0579 ("Duplicate
-        // attribute") when two attributes of the same type stack on a Razor page. The
-        // attribute-chain approach is structurally impossible.
-        //
-        // Resolution: enforce the LoginGlobalPolicy budget via opts.GlobalLimiter, gated to
-        // /Login only. Combined with the per-IP [EnableRateLimiting("LoginPolicy")] attribute
-        // still present on Login.razor, this yields IDENTICAL observable behavior to the
-        // attribute-chain design: every /Login request consumes BOTH budgets, and either
-        // budget over-limit → 429 via the shared RejectionStatusCode below. Non-/Login
-        // endpoints (every other route) hit RateLimitPartition.GetNoLimiter and pay no cost.
-        //
-        // CONTEXT.md Decision 2's PINNED partition parameters are preserved verbatim. The
-        // PartitionedRateLimiter.CreateChained shape is the .NET 10 canonical way to
-        // independently evaluate multiple partition budgets on a single endpoint.
         opts.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.CreateChained(
+            // Per-IP ceiling: 5 POST /Login attempts per minute per source IP (SEC-06 / D-03).
             System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
-                ctx.Request.Path.StartsWithSegments("/Login")
+                IsLoginPost(ctx)
+                    ? System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: ctx.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 5,                                 // SEC-06 / D-03
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0,
+                            AutoReplenishment = true
+                        })
+                    : System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter<string>("non-login-post")),
+            // Global ceiling: 30 POST /Login attempts per minute server-wide (M-SEC-03 plan 15-05).
+            System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+                IsLoginPost(ctx)
                     ? System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                         partitionKey: "_global_",                            // M-SEC-03 plan 15-05
                         factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
@@ -511,7 +504,7 @@ try
                             QueueLimit = 0,
                             AutoReplenishment = true
                         })
-                    : System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter<string>("non-login")));
+                    : System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter<string>("non-login-post")));
 
         opts.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     });

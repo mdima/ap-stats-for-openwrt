@@ -33,12 +33,12 @@ namespace ApStatsForOpenWrt.Tests.Auth;
 ///         after a 302 redirect from /setup/submit-password with Error= URL-encoded
 ///         message in the query string (integration test, since the policy throw is
 ///         caught in Program.cs's MapPost lambda).</item>
-///   <item>Login.razor reflection gate — asserts the per-IP rate-limit attribute
-///         [EnableRateLimiting("LoginPolicy")] is present. The global ceiling
-///         (LoginGlobalPolicy, 30/min, partition "_global_") is enforced via
-///         opts.GlobalLimiter (path-gated to /Login) per the documented plan deviation
-///         (EnableRateLimitingAttribute is AllowMultiple=false in ASP.NET Core 10);
-///         the LoginGlobalRateLimitTests integration suite pins the behavioral
+///   <item>Login.razor reflection gate — asserts NO [EnableRateLimiting] attribute is
+///         present (login-429-counts-page-views POST-only fix). M-SEC-03 brute-force
+///         limiting is enforced ENTIRELY in Program.cs via opts.GlobalLimiter (chained
+///         per-IP 5/min + global 30/min, both gated on Method == "POST" && Path == /Login),
+///         so GET page views are free and POST attempts stay capped; the
+///         LoginGlobalRateLimitTests + Integration.RateLimitTests suites pin the behavioral
 ///         consequence end-to-end.</item>
 /// </list>
 ///
@@ -215,46 +215,39 @@ public sealed class PasswordPolicyBannerTests
         Assert.Null(settings.UIPasswordHash);
     }
 
-    // ── Fact 3: Login.razor static-shape gate — the per-IP rate-limit attribute ──
+    // ── Fact 3: Login.razor static-shape gate — NO rate-limit attribute (POST-only) ──
 
     /// <summary>
-    /// Asserts via reflection that Login.razor carries the
-    /// <see cref="Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute"/> with
-    /// policy name "LoginPolicy" (the per-IP partition; 5/min, partition key =
-    /// RemoteIpAddress). This regression-guards against a future contributor accidentally
-    /// dropping the rate-limit attribute from the Login route.
+    /// Asserts via reflection that Login.razor carries NO
+    /// <see cref="Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute"/>.
     ///
     /// <para>
-    /// The original plan called for TWO stacked attributes (LoginPolicy + LoginGlobalPolicy).
-    /// EnableRateLimitingAttribute is [AttributeUsage(AllowMultiple=false)] in ASP.NET
-    /// Core 10 — verified by reflection against the 10.0.8 runtime assembly. Per the
-    /// documented plan deviation, the global ceiling is enforced via opts.GlobalLimiter
-    /// in Program.cs (path-gated to /Login). The behavioral consequence is pinned by
-    /// LoginGlobalRateLimitTests (integration). This test pins the static shape of the
-    /// per-IP attribute that remains on the Razor page.
+    /// login-429-counts-page-views (operator-approved 2026-05-30): M-SEC-03 brute-force
+    /// limiting is now POST-ONLY and enforced ENTIRELY in Program.cs via opts.GlobalLimiter
+    /// (chained per-IP 5/min + global 30/min, both gated on Method == "POST" &&
+    /// Path == /Login). The PRIOR [EnableRateLimiting("LoginPolicy")] attribute applied to the
+    /// Razor page endpoint's GET render too, so GET page views (the sign-out → /Login redirect
+    /// chain, reloads) consumed the per-IP budget and 429'd legitimate operators on the 6th
+    /// view. The attribute was REMOVED because an EnableRateLimiting attribute on a Razor page
+    /// endpoint cannot be method-scoped.
+    /// </para>
+    ///
+    /// <para>
+    /// This test is the static-shape regression lock for the POST-only fix: re-adding any
+    /// [EnableRateLimiting] attribute to Login.razor would re-introduce the GET-page-view
+    /// lockout. The BEHAVIORAL contract (GET free, POST capped at 5/IP/min + 30/min global) is
+    /// pinned by LoginGlobalRateLimitTests + Integration.RateLimitTests.
     /// </para>
     /// </summary>
     [Fact]
-    public void Login_StaticShape_HasLoginPolicyRateLimitAttribute()
+    public void Login_StaticShape_HasNoRateLimitAttribute_PostOnlyContract()
     {
         var loginType = typeof(ApStatsForOpenWrt.Components.Pages.Login);
         var attrs = loginType
             .GetCustomAttributes<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>(false)
             .ToArray();
 
-        Assert.Single(attrs);
-        Assert.Equal("LoginPolicy", attrs[0].PolicyName);
-
-        // Pin the AllowMultiple=false framework invariant that drove the deviation — if a
-        // future framework flip ever inverts this, the executor of a follow-up plan can
-        // safely add the second [EnableRateLimiting("LoginGlobalPolicy")] attribute
-        // without re-hitting CS0579.
-        var au = typeof(Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute)
-            .GetCustomAttributes<AttributeUsageAttribute>(false)
-            .Single();
-        Assert.False(au.AllowMultiple,
-            "If this fails, EnableRateLimitingAttribute now permits AllowMultiple=true; " +
-            "the plan-15-05 deviation can be reverted to the two-attribute design.");
+        Assert.Empty(attrs);
     }
 
     // ── Fact 4: Setup/Password.razor — integration test (POST + 302 redirect) ─

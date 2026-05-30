@@ -222,6 +222,84 @@ public sealed class LoginGlobalRateLimitTests
             await factory.DisposeAsync();
         }
     }
+
+    // ── Fact 3: 6 POSTs from ONE IP → the 6th returns 429 (per-IP 5/min) ────────
+
+    [Fact]
+    public async Task SixPostsFromOneIp_SixthReturns429_PerIpCeilingPreserved()
+    {
+        // login-429-counts-page-views — POST-only contract, per-IP half. M-SEC-03 / SEC-06 /
+        // D-03 still caps SUBMITTED ATTEMPTS at 5 per IP per minute. All six POSTs carry the
+        // SAME X-Forwarded-For value so they land in one per-IP partition; the 6th must 429.
+        // (Six POSTs also consume six of the 30/min global budget — well under the ceiling, so
+        // the per-IP partition is the one that rejects.)
+        var ct = TestContext.Current.CancellationToken;
+        await using var factory = new GlobalRateLimitFactory();
+        await factory.InitializeAsync();
+        try
+        {
+            await SeedPasswordAsync(factory, ct);
+            var client = CreateClient(factory);
+            const string oneIp = "203.0.113.7";   // single fixed source IP
+            var statuses = new System.Collections.Generic.List<int>();
+            for (int i = 1; i <= 6; i++)
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Post, "/Login")
+                {
+                    Content = new FormUrlEncodedContent(new[]
+                    {
+                        new KeyValuePair<string, string>("form.Password", "AnyPassword1!"),
+                    }),
+                };
+                req.Headers.Add("X-Forwarded-For", oneIp);
+                using var resp = await client.SendAsync(req, ct);
+                statuses.Add((int)resp.StatusCode);
+            }
+
+            // First five POSTs from this IP must NOT be 429; the 6th MUST be.
+            Assert.DoesNotContain(429, statuses.GetRange(0, 5));
+            Assert.Equal(429, statuses[5]);
+        }
+        finally
+        {
+            await factory.DisposeAsync();
+        }
+    }
+
+    // ── Fact 4: many GETs from ONE IP → NONE 429 (page views are free) ─────────
+
+    [Fact]
+    public async Task ManyGetsFromOneIp_NeverReturn429_PageViewsAreFree()
+    {
+        // login-429-counts-page-views — POST-only contract, the GET-is-free half, asserted under
+        // the SAME forwarded-headers per-IP partition machinery as the POST facts (so this proves
+        // GET is free SPECIFICALLY because of the Method=="POST" gate, not because the per-IP
+        // partition key happened to vary). 10 GETs from one fixed IP — far past the 5/min budget
+        // that POST would trip — must produce ZERO 429s.
+        var ct = TestContext.Current.CancellationToken;
+        await using var factory = new GlobalRateLimitFactory();
+        await factory.InitializeAsync();
+        try
+        {
+            await SeedPasswordAsync(factory, ct);
+            var client = CreateClient(factory);
+            const string oneIp = "203.0.113.42";
+            int statusFor429 = 0;
+            for (int i = 1; i <= 10; i++)
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, "/Login");
+                req.Headers.Add("X-Forwarded-For", oneIp);
+                using var resp = await client.SendAsync(req, ct);
+                if ((int)resp.StatusCode == 429) statusFor429++;
+            }
+
+            Assert.Equal(0, statusFor429);
+        }
+        finally
+        {
+            await factory.DisposeAsync();
+        }
+    }
 }
 
 /// <summary>

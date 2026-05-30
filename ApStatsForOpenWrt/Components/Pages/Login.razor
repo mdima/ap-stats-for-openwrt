@@ -2,20 +2,16 @@
 @layout LoginLayout
 @attribute [AllowAnonymous]
 @attribute [ExcludeFromInteractiveRouting]
-@attribute [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("LoginPolicy")]
-@* Pitfall 2: opt out of D-06 global InteractiveServer — sign-in needs static SSR roundtrip
-   Pitfall 3 / M-SEC-03 (plan 15-05): per-IP rate-limit applied via [EnableRateLimiting("LoginPolicy")]
-   (5 requests/IP/minute, partition key = RemoteIpAddress).
+@* Pitfall 2: opt out of D-06 global InteractiveServer — sign-in needs static SSR roundtrip.
 
-   The distributed brute-force ceiling (LoginGlobalPolicy / 30 requests/minute server-wide,
-   partition key = "_global_") is enforced via opts.GlobalLimiter in Program.cs, gated to
-   /Login only. Plan 15-05 originally specified two stacked [EnableRateLimiting] attributes,
-   but EnableRateLimitingAttribute carries [AttributeUsage(AllowMultiple = false)] in
-   ASP.NET Core 10 (verified by reflection against the runtime assembly), producing CS0579
-   "Duplicate attribute" when stacked. The GlobalLimiter + path-gate shape preserves
-   CONTEXT.md Decision 2's intent verbatim — every /Login request consumes BOTH the per-IP
-   budget (this attribute) AND the global budget (GlobalLimiter in Program.cs); either over
-   budget yields a 429 via the shared opts.RejectionStatusCode. *@
+   M-SEC-03 brute-force limiting is POST-ONLY (debug login-429-counts-page-views,
+   operator-approved 2026-05-30) and is enforced ENTIRELY in Program.cs via opts.GlobalLimiter
+   (chained per-IP 5/min + global 30/min partitions, both gated on Method == "POST" &&
+   Path == /Login). There is deliberately NO [EnableRateLimiting] attribute on this page: an
+   EnableRateLimiting attribute on a Razor page endpoint cannot be method-scoped, so it counted
+   GET page views (the sign-out → /Login redirect chain, reloads) against the per-IP budget and
+   429'd legitimate operators on the 6th view. Removing it makes GET /Login free while POST
+   attempts stay capped at the unchanged M-SEC-03 numbers. *@
 @using System.Security.Claims
 @using Microsoft.AspNetCore.Authentication
 @using Microsoft.AspNetCore.Authentication.Cookies
