@@ -172,7 +172,7 @@ public sealed class AuthGateTests(SmokeFactoryFixture factory) : IClassFixture<S
         using var scope = _factory.Services.CreateScope();
         var settings = scope.ServiceProvider.GetRequiredService<IAppSettingsService>();
         var hasher = scope.ServiceProvider.GetRequiredService<ApStatsForOpenWrt.Services.Auth.IUIPasswordHasher>();
-        var hash = hasher.Hash("operator-pw");
+        var hash = hasher.Hash("Operator-Pw1");
         await settings.SetUIPasswordHashAsync(hash, ct);
 
         try
@@ -204,7 +204,7 @@ public sealed class AuthGateTests(SmokeFactoryFixture factory) : IClassFixture<S
                 fields.Add(new KeyValuePair<string, string>(m.Groups["name"].Value, m.Groups["value"].Value));
             }
             // Plus the password input the operator types.
-            fields.Add(new KeyValuePair<string, string>("form.Password", "operator-pw"));
+            fields.Add(new KeyValuePair<string, string>("form.Password", "Operator-Pw1"));
 
             var postResp = await client.PostAsync("/Login", new System.Net.Http.FormUrlEncodedContent(fields), ct);
 

@@ -47,7 +47,14 @@ public interface INodeRepo
     /// <summary>
     /// D-18 SET-03 bulk path. Sets <c>HostKeyFingerprint = null</c> on every <see cref="WiFiNode"/>.
     /// CR-02-safe: single-property <c>ExecuteUpdateAsync</c> — never touches Password.
+    /// <para>
+    /// M-SEC-06 / v0.12 (plan 16-04): marked Obsolete. The "Clear all host keys" button was
+    /// removed from <c>Settings/Index.razor</c>; the per-node Re-trust button on
+    /// <c>Nodes/Detail.razor</c> is the sole remaining re-trust path. v0.13 will delete this
+    /// method and its deprecation-gate tests in a single mechanical sweep.
+    /// </para>
     /// </summary>
+    [Obsolete("Removed in v0.13. Use ClearHostKeyFingerprintAsync(int nodeId) instead. The bulk Clear-all-host-keys path is no longer reachable from the UI.")]
     Task ClearAllHostKeyFingerprintsAsync(CancellationToken ct = default);
 
     /// <summary>

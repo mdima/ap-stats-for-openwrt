@@ -89,6 +89,9 @@ public sealed class StaleHysteresisTests
         public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetRefreshIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default) => Task.CompletedTask;
+        public int SessionVersion => 0;
+        public Task SetSessionVersionAsync(int version, CancellationToken ct = default) => Task.CompletedTask;
+        public Task BumpSessionVersionAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }

@@ -52,10 +52,10 @@ else if (_nodeCount == 0)
                     ? "Add your first OpenWRT access point to start monitoring connected stations."
                     : "Your access points are not configured yet. Continue the setup wizard to get started.")"
                 CtaLabel="@(_wizardDismissed ? "Add your first OpenWRT node" : "Continue setup")"
-                CtaHref="@(_wizardDismissed ? "/Nodes/Add" : "/setup/password")"
+                CtaHref="@(_wizardDismissed ? "/Nodes/Add" : ResumeSetupHref)"
                 CtaIconClass="@(_wizardDismissed ? "bi-plus-lg" : "bi-arrow-right-circle")"
                 SecondaryLabel="@(_wizardDismissed ? "Continue setup" : "")"
-                SecondaryHref="@(_wizardDismissed ? "/setup/password" : "")"
+                SecondaryHref="@(_wizardDismissed ? ResumeSetupHref : "")"
                 SecondaryIconClass="@(_wizardDismissed ? "bi-arrow-right-circle" : "")" />
 }
 else if (!_anyEnabledWlan)
@@ -195,6 +195,14 @@ else
     private bool _anyEnabledWlan;
     private int _firstNodeId;
     private bool _wizardDismissed;
+    private bool _hasPassword;
+
+    // Smarter wizard resume (debug wizard-resume-pw-reset-404): the "Continue setup" link
+    // resumes at the first INCOMPLETE step instead of always dumping the returning operator
+    // back onto step 1. This empty-state only renders when _nodeCount == 0, so the wizard is
+    // never genuinely complete here: if a password already exists, step 1 is done -> resume
+    // at /setup/nodes (step 2); otherwise start at /setup/password (step 1).
+    private string ResumeSetupHref => _hasPassword ? "/setup/nodes" : "/setup/password";
 
     private IReadOnlyList<WiFiNode> _nodes = Array.Empty<WiFiNode>();
     private List<DashboardRow> _rows = new();
@@ -294,6 +302,7 @@ else
         _nodes = allNodes;
         _nodeCount = allNodes.Count;
         _wizardDismissed = Settings.WizardDismissed;
+        _hasPassword = !string.IsNullOrEmpty(Settings.UIPasswordHash);
 
         if (_nodeCount > 0)
         {

@@ -105,7 +105,12 @@ public sealed class SettingsRoundTripTests(SmokeFactoryFixture factory) : IClass
         await nodes.AddAsync(n1, ct);
         await nodes.AddAsync(n2, ct);
 
+        // M-SEC-06 (plan 16-04): the method is [Obsolete] (v0.13 removal target). This
+        // round-trip test still exercises the CR-02-safe bulk-clear repo behavior until the
+        // v0.13 mechanical sweep removes the method + this test together.
+#pragma warning disable CS0618
         await nodes.ClearAllHostKeyFingerprintsAsync(ct);
+#pragma warning restore CS0618
 
         var f1 = await nodes.GetByIdAsync(n1.Id, ct);
         var f2 = await nodes.GetByIdAsync(n2.Id, ct);

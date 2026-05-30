@@ -3,19 +3,8 @@
 @* LoginLayout.razor — UI-SPEC §LoginLayout. No sidebar, no top-nav. Used ONLY by
    Components/Pages/Login.razor (Plan 03-03) via @layout LoginLayout directive.
 
-   DEVIATION: the UI-SPEC verbatim wraps the content in <body>, but App.razor already owns
-   the page <body>. Wrapping the content in a <div> with the same login-page utility class
-   gives the same visual result without nested-body Razor compilation issues. *@
+   Phase 16 v0.12: the common chrome now lives in the shared AuthCardShell (also used
+   by SetupLayout) so login + wizard share the same wizard-style card layout. The login
+   logo is now the canonical brand "AP Stats for OpenWrt" via the shell. *@
 
-<div class="login-page bg-body-secondary">
-    <div class="login-box">
-        <div class="login-logo">
-            <a href="/"><strong>OpenWRT</strong>-AP-Stats</a>
-        </div>
-        <div class="card">
-            <div class="card-body login-card-body">
-                @Body
-            </div>
-        </div>
-    </div>
-</div>
+<AuthCardShell>@Body</AuthCardShell>

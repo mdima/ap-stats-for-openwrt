@@ -5,20 +5,14 @@
 
 <PageTitle>AP Stats for OpenWrt — Setup</PageTitle>
 
-<div class="login-page bg-body-secondary">
-    <div class="setup-wizard-box mx-auto" style="max-width: 720px; padding: 20px 0;">
-        <div class="login-logo mb-4">
-            <a href="/"><strong>AP Stats</strong> for OpenWRT</a>
-        </div>
-
+@* Phase 16 v0.12: wizard chrome now renders through the shared AuthCardShell (also used
+   by LoginLayout). The breadcrumb is the AboveCard slot; the "Skip for now" form + helper
+   text is the BelowCard slot. Wizard step logic + skip-form action are unchanged. *@
+<AuthCardShell BoxClass="setup-wizard-box mx-auto" BoxStyle="max-width: 720px; padding: 20px 0;">
+    <AboveCard>
         <WizardBreadcrumb CurrentStep="@CurrentStep" />
-
-        <div class="card">
-            <div class="card-body">
-                @Body
-            </div>
-        </div>
-
+    </AboveCard>
+    <BelowCard>
         <div class="text-center mt-3">
             @* Skip-for-now is rendered as a form POST so it works on both static-SSR (Step 1)
                and InteractiveServer (Steps 2/3) without a circuit. D-08. *@
@@ -28,8 +22,11 @@
             </form>
             <small class="text-body-secondary">You can always finish setup later from the dashboard.</small>
         </div>
-    </div>
-</div>
+    </BelowCard>
+    <ChildContent>
+        @Body
+    </ChildContent>
+</AuthCardShell>
 
 @code {
     // Route-detection approach: SetupLayout infers the breadcrumb step from the URI

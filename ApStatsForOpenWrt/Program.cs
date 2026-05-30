@@ -1,6 +1,8 @@
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using ApStatsForOpenWrt.Data;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
@@ -19,6 +21,71 @@ Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
     .WriteTo.Console()
     .CreateBootstrapLogger();
+
+// M-SEC-05 / plan 16-01 — ForwardedHeaders conditional registration. Default LAN-HTTP case:
+// middleware NOT registered; RemoteIpAddress reflects the actual TCP peer. When at least one of
+// ForwardedHeaders__KnownProxies (comma-separated IPs) or ForwardedHeaders__KnownNetworks
+// (comma-separated CIDRs) is set, the middleware is registered with that allow-list.
+//
+// FAIL-FAST (CONTEXT.md Decision 2: "Invalid entries throw at startup — fail-fast over
+// skip-and-warn"). The env vars are parsed + VALIDATED EAGERLY here, ABOVE the host try/catch,
+// so a bad IP/CIDR throws BEFORE the host is even built and the raw InvalidOperationException
+// propagates straight out of Main (it is intentionally NOT inside the try/catch that converts
+// fatal startup errors into a logged exit-1 — a misconfigured proxy allow-list must surface the
+// offending entry to the operator, not be masked behind a generic "terminated unexpectedly").
+// The validated lists are reused by both the Configure<> lambda AND the startup-count log so the
+// two can never diverge (the previous bug validated lazily inside the Configure lambda — which
+// only ran on the first request — while the startup log counted via TryParse, which never throws,
+// so a typo'd allow-list booted healthy, logged trustedProxies=0, then 500'd on first request).
+//
+// DEVIATION (plan 16-01 important_implementation_note): the CONTEXT.md pinned shape called
+// Microsoft.AspNetCore.HttpOverrides.IPNetwork.TryParse, but on .NET 10
+// ForwardedHeadersOptions.KnownIPNetworks is IList<System.Net.IPNetwork> (the BCL type), NOT the
+// HttpOverrides type. We use System.Net.IPNetwork.TryParse (BCL) — identical parse-CIDR-then-add
+// behavior; matches the existing test factories that already construct System.Net.IPNetwork.
+var knownProxiesRaw = Environment.GetEnvironmentVariable("ForwardedHeaders__KnownProxies");
+var knownNetworksRaw = Environment.GetEnvironmentVariable("ForwardedHeaders__KnownNetworks");
+var forwardedHeadersEnabled =
+    !string.IsNullOrWhiteSpace(knownProxiesRaw) ||
+    !string.IsNullOrWhiteSpace(knownNetworksRaw);
+
+var validatedProxies = new List<System.Net.IPAddress>();
+var validatedNetworks = new List<System.Net.IPNetwork>();
+
+if (forwardedHeadersEnabled)
+{
+    foreach (var entry in (knownProxiesRaw ?? "")
+        .Split(',')
+        .Select(s => s.Trim())
+        .Where(s => s.Length > 0))
+    {
+        if (!System.Net.IPAddress.TryParse(entry, out var ip))
+        {
+            throw new InvalidOperationException(
+                $"ForwardedHeaders__KnownProxies contains invalid IP: '{entry}'");
+        }
+        validatedProxies.Add(ip);
+    }
+
+    foreach (var entry in (knownNetworksRaw ?? "")
+        .Split(',')
+        .Select(s => s.Trim())
+        .Where(s => s.Length > 0))
+    {
+        if (!System.Net.IPNetwork.TryParse(entry, out var net))
+        {
+            throw new InvalidOperationException(
+                $"ForwardedHeaders__KnownNetworks contains invalid CIDR: '{entry}'");
+        }
+        validatedNetworks.Add(net);
+    }
+}
+
+// Startup-log counts reflect the EAGERLY-VALIDATED set (same lists the Configure lambda below
+// consumes). Because invalid entries already threw above, these counts can never silently
+// under-count a misconfigured allow-list.
+var forwardedProxyCount = validatedProxies.Count;
+var forwardedNetworkCount = validatedNetworks.Count;
 
 try
 {
@@ -291,13 +358,36 @@ try
     // 5c. Phase 3 — Cookie auth + conditional fallback policy + rate limiter +
     //     ForwardedHeaders + UI password hasher + OUI lookup + UI services.
     //     RESEARCH §Code Examples §1; Pitfalls 3 + 4 + 8 + 9 binding.
-    builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(opts =>
+
+    // M-SEC-05 / plan 16-01 — ForwardedHeaders conditional registration. The env vars were
+    // read + VALIDATED EAGERLY above the host try/catch (fail-fast); here we only register the
+    // Configure<> lambda, which consumes the PRE-VALIDATED lists. The lambda still runs lazily
+    // (first IOptions resolution inside UseForwardedHeaders()), but it can no longer throw — all
+    // validation already happened eagerly, so the lazy path is now a pure copy of an
+    // already-proven-good set.
+    //
+    // Pitfall 4 ordering preserved: app.UseForwardedHeaders() runs BEFORE app.UseRateLimiter()
+    // so the per-IP partition key consumes the rewritten RemoteIpAddress when the middleware IS
+    // active.
+    if (forwardedHeadersEnabled)
     {
-        opts.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
-                              | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
-        opts.KnownIPNetworks.Clear();  // D-04 — operator's job to harden if exposed publicly (KnownNetworks is deprecated in .NET 10 — ASPDEPR005)
-        opts.KnownProxies.Clear();
-    });
+        builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(opts =>
+        {
+            opts.ForwardedHeaders =
+                Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor |
+                Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+            opts.KnownProxies.Clear();
+            opts.KnownIPNetworks.Clear();
+
+            foreach (var ip in validatedProxies) opts.KnownProxies.Add(ip);
+            foreach (var net in validatedNetworks) opts.KnownIPNetworks.Add(net);
+        });
+    }
+
+    // M-SEC-07 / plan 16-05 — baseline security response headers middleware.
+    // Registered as transient per IMiddleware pattern. Pipeline registration below
+    // (immediately before app.UseStaticFiles()).
+    builder.Services.AddTransient<ApStatsForOpenWrt.Services.Security.SecurityHeadersMiddleware>();
 
     builder.Services.AddAuthentication(Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme)
         .AddCookie(o =>
@@ -308,9 +398,42 @@ try
             o.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest;
             o.LoginPath = "/Login";
             o.LogoutPath = "/Logout";
-            o.ExpireTimeSpan = TimeSpan.FromDays(7);
-            o.SlidingExpiration = true;
+            o.ExpireTimeSpan = TimeSpan.FromDays(7);          // M-SEC-04 — UNCHANGED from v0.11
+            o.SlidingExpiration = true;                        // M-SEC-04 — UNCHANGED from v0.11
+
+            // M-SEC-04 / plan 15-04 — session-version claim check on every request.
+            // Per CONTEXT.md Decision 1, missing claim is treated as a mismatch (every v0.11
+            // cookie at v0.12 deploy) — one-time UX cost; operators re-auth once on deploy.
+            //
+            // Documented deviation from Decision 1's pinned shape (15-04 truths block):
+            // adds `SignOutAsync` AFTER `RejectPrincipal` so the now-invalid cookie is also
+            // wiped from the browser via a Set-Cookie deletion header. RejectPrincipal alone
+            // leaves the stale cookie in place — every subsequent request would pay the full
+            // validation cost before rejection. Additive mitigation; does not weaken the gate.
+            //
+            // IAppSettingsService is resolved PER-REQUEST via ctx.HttpContext.RequestServices
+            // — NOT captured at registration time (CONTEXT.md code_context "OnValidatePrincipal").
+            o.Events.OnValidatePrincipal = static async ctx =>
+            {
+                var settings = ctx.HttpContext.RequestServices.GetRequiredService<IAppSettingsService>();
+                var sv = ctx.Principal?.FindFirst("session_version")?.Value;
+                if (sv is null || !int.TryParse(sv, out var claimVersion) || claimVersion != settings.SessionVersion)
+                {
+                    ctx.RejectPrincipal();
+                    await ctx.HttpContext.SignOutAsync(
+                        Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme);
+                }
+            };
         });
+
+    // M-SEC-04 / plan 15-04 — bind the DI-resolved TimeProvider onto CookieAuthenticationOptions
+    // via IPostConfigureOptions. The AddCookie lambda above runs at registration time with no
+    // scope (cannot resolve TimeProvider directly); IPostConfigureOptions runs AFTER the options
+    // instance is constructed, inside a scope where TimeProvider is resolvable.
+    // TimeProvider.System is already registered as a Singleton above (Phase 10 ORCH-07);
+    // SlidingExpirationTests swaps it for a FakeTimeProvider via ConfigureTestServices.
+    builder.Services.AddSingleton<IPostConfigureOptions<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions>>(
+        sp => new ApStatsForOpenWrt.Services.Auth.CookieAuthTimeProviderConfigurator(sp.GetRequiredService<TimeProvider>()));
 
     builder.Services.AddCascadingAuthenticationState();
     builder.Services.AddAuthorization(o =>
@@ -324,16 +447,65 @@ try
 
     builder.Services.AddRateLimiter(opts =>
     {
-        opts.AddPolicy("LoginPolicy", ctx =>
-            System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                partitionKey: ctx.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
-                factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
-                {
-                    PermitLimit = 5,                                    // SEC-06 / D-03
-                    Window = TimeSpan.FromMinutes(1),
-                    QueueLimit = 0,
-                    AutoReplenishment = true
-                }));
+        // M-SEC-03 brute-force limiter — POST-ONLY contract
+        // (debug login-429-counts-page-views, operator-approved 2026-05-30).
+        //
+        // The limiter counts submitted sign-in ATTEMPTS (POST /Login), never page VIEWS
+        // (GET /Login) or any other method. PRIOR shape attached the per-IP budget via
+        // [EnableRateLimiting("LoginPolicy")] on Login.razor (which the attribute applies to
+        // the Razor page endpoint's GET render too) AND gated the global budget on
+        // Path.StartsWithSegments("/Login") with NO method check — so GET page views consumed
+        // both budgets and a legitimate operator who merely viewed/reloaded /Login (e.g. the
+        // sign-out → /Login redirect chain) got 429'd on the 6th view. Live repro from deb509a:
+        // 7 rapid GET /Login → 200,200,200,200,200,429,429.
+        //
+        // FIX: fold BOTH budgets into opts.GlobalLimiter via PartitionedRateLimiter.CreateChained,
+        // with each partition predicate gated on Method == "POST" && Path == /Login. Non-matching
+        // requests (any GET, any non-/Login path) → GetNoLimiter (pay no cost). The
+        // [EnableRateLimiting("LoginPolicy")] attribute is REMOVED from Login.razor because an
+        // EnableRateLimiting attribute on a Razor page endpoint cannot be method-scoped — the
+        // attribute is exactly why GET was counted. The two standalone opts.AddPolicy(...)
+        // registrations (LoginPolicy / LoginGlobalPolicy) are removed: both budgets now live in
+        // this chained GlobalLimiter, leaving no dangling [EnableRateLimiting] reference.
+        //
+        // M-SEC-03 / CONTEXT.md Decision 2 budget NUMBERS are UNCHANGED — per-IP PermitLimit=5,
+        // global PermitLimit=30, FixedWindow=1min, QueueLimit=0, AutoReplenishment=true. ONLY the
+        // trigger condition tightens to POST /Login.
+        //
+        // Pitfall 4 ordering preserved: app.UseForwardedHeaders() (when registered) runs BEFORE
+        // app.UseRateLimiter(), so the per-IP partition key sees the rewritten RemoteIpAddress.
+        static bool IsLoginPost(HttpContext ctx) =>
+            HttpMethods.IsPost(ctx.Request.Method) &&
+            ctx.Request.Path.StartsWithSegments("/Login");
+
+        opts.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.CreateChained(
+            // Per-IP ceiling: 5 POST /Login attempts per minute per source IP (SEC-06 / D-03).
+            System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+                IsLoginPost(ctx)
+                    ? System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: ctx.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 5,                                 // SEC-06 / D-03
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0,
+                            AutoReplenishment = true
+                        })
+                    : System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter<string>("non-login-post")),
+            // Global ceiling: 30 POST /Login attempts per minute server-wide (M-SEC-03 plan 15-05).
+            System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+                IsLoginPost(ctx)
+                    ? System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: "_global_",                            // M-SEC-03 plan 15-05
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 30,                                // CONTEXT.md Decision 2
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0,
+                            AutoReplenishment = true
+                        })
+                    : System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter<string>("non-login-post")));
+
         opts.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     });
 
@@ -419,16 +591,57 @@ try
 
     var app = builder.Build();
 
+    // M-SEC-05 / plan 16-01 — startup posture log line. Operator-grep-friendly prefix
+    // matches the M-SEC-NN: convention established in Phase 15 (M-SEC-04 banner / M-SEC-10
+    // ASPNETCORE warning) and continues in 16-02 (algo negotiation) + 16-03 (TOFU capture).
+    {
+        var startupLog = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+        startupLog.LogInformation(
+            "M-SEC-05: ForwardedHeaders middleware: mode={Mode} trustedProxies={ProxyCount} trustedNetworks={NetworkCount}",
+            forwardedHeadersEnabled ? "enabled" : "disabled",
+            forwardedProxyCount,
+            forwardedNetworkCount);
+    }
+
+    // M-SEC-10 / plan 15-04 — Warning when ASPNETCORE_ENVIRONMENT=Development is set,
+    // so an operator who accidentally ships the dev env flag into a production container
+    // sees it in docker logs at boot. The verbatim message is pinned by
+    // DevelopmentEnvironmentWarningTests (em-dash is U+2014, NOT a hyphen).
+    if (app.Environment.IsDevelopment())
+    {
+        var startupLog = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+        startupLog.LogWarning(
+            "ASPNETCORE_ENVIRONMENT=Development is set. This should never be true in production deployments — verify your container/orchestrator config.");
+    }
+
     // Middleware pipeline — order is LOAD-BEARING (RESEARCH §Pitfall 4):
     // UseForwardedHeaders MUST run before UseAuthentication (so cookie sees the rewritten
     // RemoteIpAddress) AND before UseRateLimiter (so the partition key is correct).
-    app.UseForwardedHeaders();
+    //
+    // M-SEC-05 / plan 16-01 — only register the middleware when the operator has pinned at
+    // least one trusted proxy or network. Default LAN-HTTP case: NOT registered;
+    // RemoteIpAddress reflects the actual TCP peer; forged X-Forwarded-For headers are
+    // ignored because the middleware never runs. When registered, UseForwardedHeaders()
+    // still runs here (before UseRateLimiter / UseAuthentication) so the partition key +
+    // auth cookie see the rewritten RemoteIpAddress (Pitfall 4 ordering preserved).
+    if (forwardedHeadersEnabled)
+    {
+        app.UseForwardedHeaders();
+    }
     app.UseSerilogRequestLogging();
+    // M-SEC-07 / plan 16-05 — baseline security headers. Placed BEFORE UseStaticFiles
+    // so static-asset responses (/lib/*, /app.css, /favicon.ico) also carry the
+    // 5 headers. Headers omitted by charter: Strict-Transport-Security AND CSP
+    // upgrade-insecure-requests (both fight HTTP-on-LAN deployment).
+    app.UseMiddleware<ApStatsForOpenWrt.Services.Security.SecurityHeadersMiddleware>();
     app.UseStaticFiles();           // serves /lib/adminlte/* /lib/bootstrap-icons/* /lib/source-sans-3/* /app.css /favicon.ico
     app.UseAntiforgery();
-    // D-07: Auto-redirect first-run operator to the onboarding wizard.
+    // D-07: Auto-redirect first-run operator to the onboarding wizard (GET / only).
     // Placed after UseStaticFiles (assets bypass it) and after UseAntiforgery,
-    // but BEFORE UseAuthentication so anonymous GET / is handled before the auth pipeline.
+    // but BEFORE UseAuthentication so the anonymous first-run GET / is handled before
+    // the auth pipeline. The /setup/* anti-takeover 404 gate is a SEPARATE middleware
+    // (WizardSetupGateMiddleware) registered AFTER UseAuthentication so it can be
+    // auth-aware — see debug session wizard-lockout-regression.
     app.UseMiddleware<WizardRedirectMiddleware>();
 
     // D-07 / D-08 / W4 — /health response writer + FormatAge helper. Hand-written
@@ -486,39 +699,134 @@ try
     }).AllowAnonymous();
 
     app.UseAuthentication();        // reads "ApStatsForOpenWrt.Auth" cookie
+
+    // M-SEC-02 — AUTH-AWARE wizard /setup/* anti-takeover 404 gate. Registered AFTER
+    // UseAuthentication() (so context.User reflects the validated auth cookie) but
+    // BEFORE UseAuthorization() (so the friendly 404 for an anonymous genuinely-complete
+    // /setup/* request is served VERBATIM, not pre-empted by the ConditionalAuth
+    // fallback policy's OnRedirectToLogin 302). The just-signed-in operator (post
+    // step 1 submit-password SignInAsync) traverses /setup/nodes + /setup/wlans;
+    // anonymous callers get the friendly 404 only once the system is genuinely complete
+    // (hasPassword AND anyNodes). In the password-only window the gate is OFF and the
+    // anonymous request falls through to the ConditionalAuth 302 /Login. Fixes
+    // wizard-lockout-regression + wizard-gate-and-semantics; the independent M-SEC-01
+    // POST gate on /setup/submit-password is untouched (it deliberately stays on the
+    // hasPassword boundary, distinct from these visible AND gates).
+    app.UseMiddleware<WizardSetupGateMiddleware>();
+
     app.UseAuthorization();         // applies fallback ConditionalAuthRequirement
     app.UseRateLimiter();           // sees rewritten IP (Pitfall 4)
 
     // /Logout — minimal endpoint; SignOut + redirect (RESEARCH §Open Question #1 recommendation).
-    // The user-menu form posts the antiforgery token; we validate it by default.
-    app.MapPost("/Logout", async (HttpContext ctx) =>
+    // M-SEC-01 — explicit antiforgery validation because `ctx.Request.Form` binding bypasses
+    // `app.UseAntiforgery()` auto-validation. The user-menu form posts the antiforgery token;
+    // we validate it explicitly here. No commitment-404 gate on /Logout — sign-out is always
+    // legitimate for an authenticated principal.
+    app.MapPost("/Logout", async (
+        IAntiforgery antiforgery,
+        HttpContext ctx) =>
     {
+        try { await antiforgery.ValidateRequestAsync(ctx); }
+        catch (AntiforgeryValidationException)
+        {
+            return Microsoft.AspNetCore.Http.Results.BadRequest();
+        }
         await ctx.SignOutAsync(Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme);
         return Microsoft.AspNetCore.Http.Results.Redirect("/");
     });
 
     // D-08: "Skip for now" POST handler. Sets WizardDismissed = true and redirects to dashboard.
     // Works from all three wizard steps (even Step 1 static SSR via the SetupLayout form POST).
+    // M-SEC-01 — explicit antiforgery validation + commitment-404 gate. WizardDismissed is NOT
+    // in the gate (Option B resumability — dismissed-only state must still allow skip to be
+    // re-issued until a real commitment lands).
     app.MapPost("/setup/skip", async (
+        IAntiforgery antiforgery,
         IAppSettingsService settings,
+        INodeRepo nodeRepo,
         HttpContext ctx) =>
     {
+        try { await antiforgery.ValidateRequestAsync(ctx); }
+        catch (AntiforgeryValidationException)
+        {
+            return Microsoft.AspNetCore.Http.Results.BadRequest();
+        }
+
+        // M-SEC-01 auth-aware gate (debug skip-setup-404-auth-blind, sibling of
+        // wizard-lockout-regression; AND semantics per wizard-gate-and-semantics): refuse
+        // 404 only once the system is GENUINELY COMPLETE (hasPassword AND anyNodes) and ONLY
+        // for ANONYMOUS callers (anti-takeover). In the password-only window the gate is OFF,
+        // so an anonymous skip succeeds (sets WizardDismissed, 302 /). The authenticated
+        // operator is mid-onboarding: step 1 (submit-password) flips hasPassword == true AND
+        // signs them in, so an auth-blind gate 404'd their legitimate "Skip for now" on
+        // steps 2/3. This MapPost runs after UseAuthentication()/UseAuthorization(), so
+        // ctx.User is populated. WizardDismissed is NOT in the gate (Option B resumability).
+        var isAuthenticated = ctx.User?.Identity?.IsAuthenticated == true;
+        var anyNodes = await nodeRepo.AnyAsync(ctx.RequestAborted);
+        var hasPassword = !string.IsNullOrEmpty(settings.UIPasswordHash);
+        if (!isAuthenticated && (anyNodes && hasPassword))
+            return Microsoft.AspNetCore.Http.Results.NotFound();
+
         await settings.SetWizardDismissedAsync(true, ctx.RequestAborted);
         return Microsoft.AspNetCore.Http.Results.Redirect("/");
     }).AllowAnonymous();
 
     // Step 1 password submission — auth needs the HTTP response pipeline, not the Blazor circuit.
     // Password.razor is a normal InteractiveServer page; this endpoint handles the POST.
+    // M-SEC-01 — explicit antiforgery validation + commitment-404 gate. WizardDismissed is NOT
+    // in the gate (Option B resumability).
     app.MapPost("/setup/submit-password", async (
+        IAntiforgery antiforgery,
         ApStatsForOpenWrt.Services.Auth.IUIPasswordHasher hasher,
         IAppSettingsService settings,
+        INodeRepo nodeRepo,
         HttpContext ctx) =>
     {
+        try { await antiforgery.ValidateRequestAsync(ctx); }
+        catch (AntiforgeryValidationException)
+        {
+            return Microsoft.AspNetCore.Http.Results.BadRequest();
+        }
+
+        // ACTION-AWARE gate split (debug wizard-resume-404-after-skip). The form carries
+        // two actions: action=set (WRITE a password) and action=skip (a no-op ADVANCE to
+        // step 2 that writes nothing — the "Skip password" button on step 1). Read the
+        // action FIRST, so the commitment-404 gate below applies ONLY to the password WRITE.
         var form   = ctx.Request.Form;
         var action = form["action"].ToString();
 
+        // action=skip is a pure ADVANCE — it never writes a password, so the M-SEC-01
+        // anti-takeover gate must NOT 404 it. A returning operator whose step 1 already
+        // set a password (then skipped the wizard) clicks "Skip password" to advance to
+        // /setup/nodes; gating this on hasPassword dead-ended wizard completion. Letting
+        // the advance through does NOT reopen M-SEC-01 (no password write occurs here).
         if (action != "set")
             return Microsoft.AspNetCore.Http.Results.Redirect("/setup/nodes");
+
+        // M-SEC-01 — refuse the password WRITE once a real commitment exists, but ONLY for
+        // ANONYMOUS callers (auth-aware gate, debug wizard-resume-pw-reset-404). WizardDismissed
+        // is NOT in the gate (Option B resumability). This WRITE gate DELIBERATELY stays on the
+        // hasPassword boundary (anyNodes || hasPassword), distinct from the visible AND gates
+        // (GET /setup/* + POST /setup/skip): tightening it to AND would reopen the M-SEC-01
+        // anonymous password-takeover window (an attacker could re-POST a NEW password before
+        // the first AP exists). Operator accepted this asymmetry (wizard-gate-and-semantics).
+        //
+        // The !isAuthenticated guard mirrors the existing auth-aware pattern in
+        // WizardSetupGateMiddleware + POST /setup/skip: the AUTHENTICATED operator (signed in
+        // by step 1's SignInAsync) may set/re-set the password and complete the wizard on a
+        // resume — they were 404'd before the moment a password existed, dead-ending step 1.
+        // An ANONYMOUS caller is STILL 404'd once a password exists, so the anti-takeover
+        // boundary is PRESERVED (M-SEC-01: no anonymous overwrite in the password-only window).
+        // This MapPost runs after UseAuthentication()/UseAuthorization(), so ctx.User is
+        // populated. The handler re-issues the auth cookie with the bumped SessionVersion below
+        // (M-SEC-04), so an authenticated re-set does NOT self-logout. The gate is scoped to
+        // action=set only so the harmless action=skip advance above is never 404'd (debug
+        // wizard-resume-404-after-skip).
+        var isAuthenticated = ctx.User?.Identity?.IsAuthenticated == true;
+        var anyNodes = await nodeRepo.AnyAsync(ctx.RequestAborted);
+        var hasPassword = !string.IsNullOrEmpty(settings.UIPasswordHash);
+        if (!isAuthenticated && (anyNodes || hasPassword))
+            return Microsoft.AspNetCore.Http.Results.NotFound();
 
         var password = form["Password"].ToString();
         var confirm  = form["ConfirmPassword"].ToString();
@@ -531,10 +839,31 @@ try
             return Microsoft.AspNetCore.Http.Results.Redirect(
                 "/setup/password?Error=" + Uri.EscapeDataString("Passwords do not match."));
 
-        var hash = hasher.Hash(password);
+        // M-SEC-03 / plan 15-05 — policy rejection. UIPasswordHasher.Hash (plan 15-02) throws
+        // ArgumentException with the verbatim operator-facing message when the plaintext fails
+        // the four-part policy (>=8 chars + upper + lower + digit-or-symbol). Setup/Password.razor
+        // renders the Error query param via its alert-danger block; redirect there with the
+        // pinned message preserved through URL-encoding. No DB write, no session bump, no SignIn.
+        string hash;
+        try
+        {
+            hash = hasher.Hash(password);
+        }
+        catch (ArgumentException ex)
+        {
+            return Microsoft.AspNetCore.Http.Results.Redirect(
+                "/setup/password?Error=" + Uri.EscapeDataString(ex.Message));
+        }
         await settings.SetUIPasswordHashAsync(hash, ctx.RequestAborted);
 
-        var claims   = new[] { new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, "operator") };
+        // M-SEC-04 / plan 15-04 — stamp the post-bump SessionVersion as a claim. SetUIPasswordHashAsync
+        // bumps the version atomically (plan 15-01), so settings.SessionVersion here is the new value;
+        // the freshly-issued cookie validates cleanly against OnValidatePrincipal on the next request.
+        var claims   = new[]
+        {
+            new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, "operator"),
+            new System.Security.Claims.Claim("session_version", settings.SessionVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+        };
         var identity = new System.Security.Claims.ClaimsIdentity(
             claims,
             Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme);
@@ -556,10 +885,20 @@ try
     // wwwroot/ (AdminLTE, Bootstrap Icons, Source Sans 3, app.css, favicons). MapStaticAssets only
     // owns the publish-time static-web-assets manifest endpoints.
     // Mapped here (after the auth/wizard endpoints, immediately before MapRazorComponents) so the
-    // framework asset endpoints inherit the same routing context as Blazor itself; the static-web-
-    // assets endpoints carry their own AllowAnonymous metadata so the ConditionalAuthRequirement
-    // fallback policy does not redirect them to /Login.
-    app.MapStaticAssets();
+    // framework asset endpoints inherit the same routing context as Blazor itself.
+    //
+    // .AllowAnonymous() is LOAD-BEARING (quick task 260530-9mg, live debug 2026-05-30). On .NET 10,
+    // MapStaticAssets() does NOT auto-tag its endpoints with AllowAnonymous metadata — the prior
+    // comment here asserted it did, which is false. Without the explicit .AllowAnonymous() below,
+    // every static-asset endpoint (blazor.web.js, the scoped-CSS bundle ApStatsForOpenWrt.styles.css,
+    // /lib/*, /css/site.css, favicons) inherits the AddAuthorization FallbackPolicy
+    // (ConditionalAuthRequirement). Once a UI password is set that policy engages and 302-redirects
+    // each asset to /Login — confirmed live against the running container: only /health (which
+    // carries its own .AllowAnonymous(), mapped above) returned 200 while every asset 302'd to
+    // /Login?ReturnUrl=.... The 302 (not 404) proves the endpoints matched and were auth-gated, not
+    // unresolved. Tagging the static-asset endpoints anonymous exempts them from the fallback policy
+    // so they serve before any auth check — matching the /health pattern.
+    app.MapStaticAssets().AllowAnonymous();
 
     app.MapRazorComponents<ApStatsForOpenWrt.Components.App>()
         .AddInteractiveServerRenderMode();

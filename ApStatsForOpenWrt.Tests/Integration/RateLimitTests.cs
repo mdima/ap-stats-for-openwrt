@@ -6,8 +6,20 @@ using Xunit;
 namespace ApStatsForOpenWrt.Tests.Integration;
 
 /// <summary>
-/// SEC-06 + Pitfall 3 + Pitfall 4 integration suite. Drives the named "LoginPolicy"
-/// fixed-window rate limiter (5/IP/min) end-to-end.
+/// SEC-06 + Pitfall 3 + Pitfall 4 integration suite. Drives the M-SEC-03 login
+/// brute-force limiter (per-IP 5/min + global 30/min) end-to-end.
+///
+/// <para>
+/// <b>POST-only contract (debug login-429-counts-page-views, 2026-05-30).</b> The
+/// brute-force limiter counts submitted ATTEMPTS (POST /Login), never page VIEWS
+/// (GET /Login) or any other method. A legitimate operator who merely views/reloads
+/// the login page (e.g. the sign-out → /Login flow) must NEVER be locked out, so GET
+/// /Login is free regardless of frequency. Both budgets live in
+/// <c>opts.GlobalLimiter</c> (Program.cs), gated on
+/// <c>Request.Method == "POST" &amp;&amp; Path.StartsWithSegments("/Login")</c>; the per-IP
+/// 5/min trip is exercised by <see cref="ApStatsForOpenWrt.Tests.Auth.LoginGlobalRateLimitTests"/>
+/// in the RateLimitSerial collection (which needs the X-Forwarded-For partition trick).
+/// </para>
 /// </summary>
 [Collection("Integration")]
 public sealed class RateLimitTests(SmokeFactoryFixture factory) : IClassFixture<SmokeFactoryFixture>
@@ -17,11 +29,7 @@ public sealed class RateLimitTests(SmokeFactoryFixture factory) : IClassFixture<
     [Fact]
     public async Task BlazorAndStaticFiles_NotRateLimited()
     {
-        // Pitfall 3: rate limit is on /Login POST only (when wired) — /lib/* must not 429.
-        // Phase 3 Plan 03-03 attaches the limiter via AddRateLimiter only; the
-        // RequireRateLimiting attribute is left for the form route to opt-in (Plan 03-04
-        // wires the EditForm route binding). For now we assert the LIMITER IS REGISTERED
-        // (UseRateLimiter middleware is in pipeline) AND that static files are not throttled.
+        // Pitfall 3: rate limit is on POST /Login only — /lib/* static assets must not 429.
         var ct = TestContext.Current.CancellationToken;
         var client = _factory.CreateClient();
 
@@ -33,15 +41,17 @@ public sealed class RateLimitTests(SmokeFactoryFixture factory) : IClassFixture<
     }
 
     [Fact]
-    public async Task LoginEndpoint_RateLimited_6thRequestReturns429()
+    public async Task GetLoginPageViews_AreFree_NeverReturn429()
     {
-        // SEC-06 / D-03 (5/IP/min): the policy is wired via [EnableRateLimiting("LoginPolicy")]
-        // on Login.razor at page-route scope (covers both GET and POST). The first 5 requests
-        // from the same client IP are allowed; the 6th returns 429.
-        // Note: WebApplicationFactory's TestServer uses a single synthetic remote IP for all
-        // requests on a given factory, so all sequential requests partition into the same
-        // bucket. Pitfall 4 (X-Forwarded-For partition isolation) is not exercised here —
-        // the operator-doc deferred ideas list documents that.
+        // login-429-counts-page-views — RED→GREEN regression lock for the operator's
+        // primary symptom ("set a password, sign out, /Login returns 429 on the first try").
+        //
+        // BEFORE the POST-only fix, the [EnableRateLimiting("LoginPolicy")] attribute on
+        // Login.razor + the path-only (no method check) GlobalLimiter gate counted GET page
+        // views against the per-IP 5/min budget, so the 6th GET /Login → 429. This test issues
+        // far more than 5 GETs from the same synthetic TestServer peer IP and asserts NONE of
+        // them 429. Page views — including the sign-out → /Login redirect chain and any reloads
+        // — must be free no matter how many.
         var ct = TestContext.Current.CancellationToken;
         using var scope = _factory.Services.CreateScope();
         var settings = scope.ServiceProvider.GetRequiredService<IAppSettingsService>();
@@ -50,22 +60,11 @@ public sealed class RateLimitTests(SmokeFactoryFixture factory) : IClassFixture<
         try
         {
             var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-            var seen429 = false;
-            int firstFailIndex = -1;
-            for (int i = 0; i < 8; i++)
+            for (int i = 0; i < 12; i++)
             {
                 var resp = await client.GetAsync("/Login", ct);
-                if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
-                {
-                    seen429 = true;
-                    firstFailIndex = i;
-                    break;
-                }
+                Assert.NotEqual(System.Net.HttpStatusCode.TooManyRequests, resp.StatusCode);
             }
-            Assert.True(seen429, "Expected at least one 429 within 8 requests to rate-limited /Login");
-            // Allow some flexibility: the 6th request (index 5) is the canonical first 429,
-            // but TestServer scheduling can sometimes delay one. Anything in [4..7] satisfies SEC-06.
-            Assert.InRange(firstFailIndex, 4, 7);
         }
         finally
         {

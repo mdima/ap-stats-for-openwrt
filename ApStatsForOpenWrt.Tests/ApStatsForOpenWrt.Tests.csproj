@@ -52,6 +52,12 @@
          grep gates can only catch surface-level regression. CI-02 permits this package
          (only coverlet.* prefixes are blocked). -->
     <PackageReference Include="Serilog.Sinks.TestCorrelator" Version="4.0.0" />
+    <!-- M-SEC-04 plan 15-04 — FakeTimeProvider lets SlidingExpirationTests drive the
+         cookie auth pipeline's clock without `Thread.Sleep(6 days)`. Matches the existing
+         TimeProvider seam used by PollOrchestrator. Version 9.0.x targets .NET 10 cleanly
+         (10.0.x track ships separately under Microsoft.Extensions.TimeProvider.Testing
+         when the .NET 10 release wave catches up; 9.0.x is the current latest GA). -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="9.0.*" />
     <!-- Phase 7 / Testcontainers for the Docker-smoke fixture (D-06). Targets net10.0 cleanly.
          NO Testcontainers.Xunit (still v2-only as of 4.11.0); use the manual IAsyncLifetime
          pattern with [Collection(DisableParallelization = true)]. Smoke facts are gated by

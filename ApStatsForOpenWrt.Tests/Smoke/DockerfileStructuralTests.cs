@@ -200,16 +200,37 @@ public sealed class DockerfileStructuralTests
     }
 
     [Fact]
-    public void DockerCompose_DoesNotOverrideHealthcheck()
+    public void DockerCompose_OwnsHealthcheckProbe_PerOperator260520Hcc()
     {
-        // RESEARCH Finding #8: a `healthcheck:` block in Compose would OVERRIDE the
-        // Dockerfile's HEALTHCHECK directive (D-03 verbatim). Assert that no non-comment
-        // line introduces a `healthcheck:` key. The leading docs comment in the file mentions
-        // the word but is `#`-prefixed; the regex matches whitespace-then-`healthcheck:`
-        // (no `#`), so the comment is excluded.
+        // Operator-authorised inversion of Phase 7 RESEARCH Finding #8 (which
+        // forbade a Compose `healthcheck:` block on the grounds it would OVERRIDE
+        // the Dockerfile HEALTHCHECK directive). Commit 4e9cbe3 (quick task
+        // 260520-hcc) explicitly chose Compose-as-source-of-truth on 2026-05-20:
+        // "just add the healthcheck in the existing docker compose yaml". The
+        // Dockerfile directive at Dockerfile:67-68 stays in place as the fallback
+        // for `docker run`-only deployments, and shape parity between the two is
+        // the binding contract — probe URL, interval, timeout, start-period, and
+        // retries must match byte-for-byte semantically so behavior is identical
+        // across both paths. This assertion was stale on master from 2026-05-20
+        // until 2026-05-28 and is the deferred item tracked in
+        // .planning/phases/15-auth-surface-hardening/deferred-items.md; closing
+        // it unblocks the v0.12 Phase 16 QUAL-01 fresh-clone gate.
         var t = DockerComposeText();
-        Assert.DoesNotMatch(@"(?m)^\s+healthcheck:\s*$", t);
-        Assert.DoesNotMatch(@"(?m)^\s+healthcheck:\s+\w", t);
+
+        // (a) The healthcheck block must exist under the service mapping.
+        //     Matches whitespace-then-`healthcheck:` (no `#`), so the leading docs
+        //     comment block in the file (which is `#`-prefixed) cannot satisfy this.
+        Assert.Matches(@"(?m)^\s+healthcheck:\s*$", t);
+
+        // (b) The `test:` line must carry the exact shape-parity probe string from
+        //     Dockerfile:67-68. Operator-authorised contract per 4e9cbe3: probe URL
+        //     `http://localhost:8080/health`, exec form (`CMD`, not `CMD-SHELL`),
+        //     curl flags `-fsS`. Any drift breaks parity with the `docker run`
+        //     fallback path (Dockerfile HEALTHCHECK directive).
+        Assert.Contains(
+            "test: [\"CMD\", \"curl\", \"-fsS\", \"http://localhost:8080/health\"]",
+            t,
+            StringComparison.Ordinal);
     }
 
     [Fact]

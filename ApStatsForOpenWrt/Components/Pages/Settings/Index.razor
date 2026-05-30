@@ -7,7 +7,6 @@
    clear), SET-04 (no-restart propagation via IAppSettingsService.Changed event chain).
    Plan 14-02: ENRICH-02 Run-now button on Active enrichment card; D-06 OR-condition
    disable-state subscribed to PollNotifier.CycleStarted / Cycled. *@
-@using ApStatsForOpenWrt.Data.Repositories
 @using ApStatsForOpenWrt.Services.Auth
 @using ApStatsForOpenWrt.Services.Enrichment
 @using ApStatsForOpenWrt.Services.Polling
@@ -15,7 +14,6 @@
 
 @inject IAppSettingsService Settings
 @inject IUIPasswordHasher Hasher
-@inject INodeRepo Nodes
 @* v0.11 ENRICH-02 / CONTEXT 14 §D-05/D-06 — Run-now button injects the force-flag service
    + PollNotifier (cycle-in-flight half of the D-06 OR-condition). *@
 @inject IForceEnrichmentService ForceEnrichment
@@ -187,27 +185,6 @@
     </div>
 </div>
 
-@* ==== Card 3: SSH known-hosts cache (SET-03 bulk) ==== *@
-<div class="card mb-4">
-    <div class="card-header"><h5 class="card-title mb-0">SSH known-hosts cache</h5></div>
-    <div class="card-body">
-        <small class="text-body-secondary d-block mb-3">
-            The fingerprint of each access point is stored on first successful connection. If a host key
-            changes, the next polling cycle will fail until you clear it here or use the per-node
-            "Re-trust" button on a node's detail page.
-        </small>
-
-        @if (!string.IsNullOrEmpty(_hostsBanner))
-        {
-            <div class="alert alert-success" role="alert">@_hostsBanner</div>
-        }
-
-        <button type="button" class="btn btn-outline-danger" @onclick="@(() => _clearHostsModal = true)">
-            Clear all host keys
-        </button>
-    </div>
-</div>
-
 @* ==== Card 4: UI preferences (Phase 8 Plan 08-07 REQ-UI-44) ====
    This card uses PreferencesService ONLY — NEVER IAppSettingsService.
    Per-browser preference (localStorage); CLAUDE.md "DB writes orchestrator-only"
@@ -248,25 +225,12 @@
     </Body>
 </ConfirmationModal>
 
-<ConfirmationModal IsOpen="_clearHostsModal"
-                   IsOpenChanged="@((bool v) => { _clearHostsModal = v; })"
-                   Title="Clear all known host keys?"
-                   ConfirmLabel="Clear all host keys"
-                   OnConfirm="HandleClearHostsAsync">
-    <Body>
-        Every access point will be re-trusted on its next polling cycle. If a host key has actually
-        changed maliciously, this will silently accept the new key. Only do this if you intentionally
-        re-installed an AP.
-    </Body>
-</ConfirmationModal>
-
 @code {
     private IntervalForm _intervalForm = new();
     private RefreshForm _refreshForm = new();
     private SuffixesForm _suffixesForm = new();
     private PasswordForm _passwordForm = new();
     private bool _clearPwdModal;
-    private bool _clearHostsModal;
 
     private string? _intervalBanner;
     private string? _refreshBanner;
@@ -274,7 +238,6 @@
     private string? _suffixesError;
     private string? _passwordBanner;
     private string? _passwordError;
-    private string? _hostsBanner;
 
     // ── v0.11 ENRICH-02 (CONTEXT 14 §D-05/D-06) — Run-now button state ────────
     private string? _runNowBanner;
@@ -430,11 +393,32 @@
         }
 
         var wasSet = !string.IsNullOrEmpty(Settings.UIPasswordHash);
-        var hash = Hasher.Hash(_passwordForm.NewPassword);
+
+        // M-SEC-03 / plan 15-05 — UIPasswordHasher.Hash (plan 15-02) throws ArgumentException
+        // with the verbatim operator-facing policy message when the plaintext fails the
+        // four-part policy (>=8 chars + upper + lower + digit-or-symbol). Surface ex.Message
+        // verbatim via the existing _passwordError -> alert-danger rendering path (above
+        // the alert-success _passwordBanner in the password card template). No DB write,
+        // no session bump, no banner-success — operator sees the verbatim policy reason
+        // and the form is preserved for retry.
+        string hash;
+        try
+        {
+            hash = Hasher.Hash(_passwordForm.NewPassword);
+        }
+        catch (ArgumentException ex)
+        {
+            _passwordError = ex.Message;
+            return;
+        }
         await Settings.SetUIPasswordHashAsync(hash);
 
+        // M-SEC-04 / plan 15-04 — banner copy update. After Plan 15-04, every existing session
+        // is invalidated by the SessionVersion bump (atomic inside SetUIPasswordHashAsync).
+        // The verbatim phrase "All sessions have been signed out." is pinned by REQUIREMENTS.md
+        // line 38 + the integration tests in plan 15-04 (substring assertion).
         _passwordBanner = wasSet
-            ? "Password updated. Existing sessions are still valid; the new password takes effect on the next sign-in."
+            ? "Password updated. All sessions have been signed out."
             : "Password set. Sign-in is now required for all pages except the login screen.";
         _passwordForm = new PasswordForm();   // wipe form
         _ = AutoDismissAsync(() => _passwordBanner = null);
@@ -443,16 +427,11 @@
     private async Task HandleClearPasswordAsync()
     {
         await Settings.SetUIPasswordHashAsync(null);
-        _passwordBanner = "Password cleared. Sign-in is no longer required.";
+        // M-SEC-04 / plan 15-04 — clearing the password ALSO bumps SessionVersion (15-01
+        // symmetric mitigation), so every existing session is invalidated. The pinned phrase
+        // "All sessions have been signed out." appears verbatim as a substring.
+        _passwordBanner = "Password cleared. All sessions have been signed out. Sign-in is no longer required.";
         _ = AutoDismissAsync(() => _passwordBanner = null);
-    }
-
-    // ── Card 3 handler ──────────────────────────────────────────────────────
-    private async Task HandleClearHostsAsync()
-    {
-        await Nodes.ClearAllHostKeyFingerprintsAsync();
-        _hostsBanner = "All known host keys cleared. The next polling cycle will re-establish trust on first contact.";
-        _ = AutoDismissAsync(() => _hostsBanner = null);
     }
 
     private async Task AutoDismissAsync(Action clearAction)

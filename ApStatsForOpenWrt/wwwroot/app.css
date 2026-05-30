@@ -3,3 +3,13 @@
 body { font-family: 'Source Sans 3', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
 .font-monospace { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 .card-title {float: none;}
+
+/* v0.12 login/wizard polish: the auth card's first heading (login <h1>, wizard
+   <h3 class="card-title">) was rendering inside a stray box — a focus outline the
+   enhanced-nav focus manager draws on the first heading after navigation. Headings
+   are non-interactive, so suppressing their border/outline here costs no a11y. */
+.login-page .card-body :is(h1, h2, h3, h4, h5, h6) {
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+}

@@ -2,10 +2,16 @@
 @layout LoginLayout
 @attribute [AllowAnonymous]
 @attribute [ExcludeFromInteractiveRouting]
-@attribute [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("LoginPolicy")]
-@* Pitfall 2: opt out of D-06 global InteractiveServer — sign-in needs static SSR roundtrip
-   Pitfall 3: rate limit attached at the page route level via [EnableRateLimiting] — covers
-   both GET and POST traffic to /Login per SEC-06 / D-03 (5/IP/min). *@
+@* Pitfall 2: opt out of D-06 global InteractiveServer — sign-in needs static SSR roundtrip.
+
+   M-SEC-03 brute-force limiting is POST-ONLY (debug login-429-counts-page-views,
+   operator-approved 2026-05-30) and is enforced ENTIRELY in Program.cs via opts.GlobalLimiter
+   (chained per-IP 5/min + global 30/min partitions, both gated on Method == "POST" &&
+   Path == /Login). There is deliberately NO [EnableRateLimiting] attribute on this page: an
+   EnableRateLimiting attribute on a Razor page endpoint cannot be method-scoped, so it counted
+   GET page views (the sign-out → /Login redirect chain, reloads) against the per-IP budget and
+   429'd legitimate operators on the 6th view. Removing it makes GET /Login free while POST
+   attempts stay capped at the unchanged M-SEC-03 numbers. *@
 @using System.Security.Claims
 @using Microsoft.AspNetCore.Authentication
 @using Microsoft.AspNetCore.Authentication.Cookies
@@ -19,7 +25,8 @@
 
 <PageTitle>AP Stats for OpenWrt — Sign in</PageTitle>
 
-<p class="login-box-msg">Sign in to manage your access points</p>
+<h1 class="h4 fw-semibold text-center mb-1">Sign in</h1>
+<p class="login-box-msg text-body-secondary text-center">Sign in to manage your access points</p>
 
 @if (!string.IsNullOrEmpty(_banner))
 {
@@ -48,7 +55,7 @@
 
     <div class="row mt-3">
         <div class="col-12">
-            <button type="submit" class="btn btn-primary w-100">Sign in</button>
+            <button type="submit" class="btn btn-primary btn-lg w-100">Sign in</button>
         </div>
     </div>
 </EditForm>
@@ -110,13 +117,39 @@
         // Pitfall 8 — re-hash if framework signaled an upgrade is available.
         if (verifyResult == PasswordVerificationResult.SuccessRehashNeeded)
         {
-            var newHash = Hasher.Hash(form.Password ?? "");
-            await Settings.SetUIPasswordHashAsync(newHash, HttpContext.RequestAborted);
+            try
+            {
+                var newHash = Hasher.Hash(form.Password ?? "");
+                await Settings.SetUIPasswordHashAsync(newHash, HttpContext.RequestAborted);
+            }
+            catch (ArgumentException ex)
+            {
+                // M-SEC-03 / plan 15-05 — operator's existing password (just verified by
+                // Hasher.Verify above) does NOT satisfy the new four-part policy. Don't
+                // sign them in; surface the verbatim policy message and keep the legacy
+                // hash in place (no SetUIPasswordHashAsync write happens in the catch path).
+                // They can still authenticate later — they just don't get rehashed mid-sign-in
+                // if their current password is below policy. The pinned operator-facing copy
+                // lives in UIPasswordHasher.PolicyMessage (plan 15-02); ex.Message surfaces
+                // it 1:1 (the framework appends " (Parameter '...)" but the prefix is the
+                // operator-facing literal). PasswordPolicyBannerTests pins this end-to-end.
+                _banner = ex.Message;
+                return;
+            }
         }
 
         // Single shared UI password — no per-user identity. The cookie principal's Name claim
         // is hardcoded to "operator" to match MainLayout's user-menu display label.
-        var claims = new[] { new Claim(ClaimTypes.Name, "operator") };
+        //
+        // M-SEC-04 / plan 15-04 — stamp the current SessionVersion as a claim so a future
+        // password-change (which bumps SessionVersion via 15-01) invalidates this cookie on
+        // the next request via Program.cs's OnValidatePrincipal event. Claim store is
+        // string-typed; OnValidatePrincipal parses back via int.TryParse.
+        var claims = new[]
+        {
+            new Claim(ClaimTypes.Name, "operator"),
+            new Claim("session_version", Settings.SessionVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+        };
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         await HttpContext.SignInAsync(
             CookieAuthenticationDefaults.AuthenticationScheme,

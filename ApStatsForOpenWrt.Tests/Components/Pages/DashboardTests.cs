@@ -87,13 +87,14 @@ public sealed class DashboardTests
 
     private sealed class StubSettings : IAppSettingsService
     {
-        public StubSettings(bool wizardDismissed = false, IReadOnlyList<string>? localDomainSuffixes = null)
+        public StubSettings(bool wizardDismissed = false, IReadOnlyList<string>? localDomainSuffixes = null, string? uiPasswordHash = null)
         {
             WizardDismissed = wizardDismissed;
             LocalDomainSuffixes = localDomainSuffixes ?? Array.Empty<string>();
+            UIPasswordHash = uiPasswordHash;
         }
         public int     PollingIntervalSeconds { get; } = 30;
-        public string? UIPasswordHash         { get; } = null;
+        public string? UIPasswordHash         { get; }
         public bool    WizardDismissed        { get; }
         public int     RefreshIntervalSeconds { get; } = 3600;
         public IReadOnlyList<string> LocalDomainSuffixes { get; }
@@ -102,12 +103,15 @@ public sealed class DashboardTests
         public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetRefreshIntervalSecondsAsync(int seconds, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default) => Task.CompletedTask;
+        public int SessionVersion => 0;
+        public Task SetSessionVersionAsync(int version, CancellationToken ct = default) => Task.CompletedTask;
+        public Task BumpSessionVersionAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }
 
     private static (BunitContext ctx, StubNodeRepo nodes, StubNetworkRepo nets, StubStationRepo stations, StubOuiLookup oui)
-        Build(IEnumerable<WiFiNode> nodes, IEnumerable<WLANStation> stations, bool anyEnabled, Dictionary<int, List<WiFiNetwork>>? networkMap = null, bool wizardDismissed = false, IReadOnlyList<string>? localDomainSuffixes = null)
+        Build(IEnumerable<WiFiNode> nodes, IEnumerable<WLANStation> stations, bool anyEnabled, Dictionary<int, List<WiFiNetwork>>? networkMap = null, bool wizardDismissed = false, IReadOnlyList<string>? localDomainSuffixes = null, string? uiPasswordHash = null)
     {
         var ctx = new BunitContext();
         // Phase 8: Dashboard.razor injects PreferencesService for view-state restore + persistence.
@@ -123,7 +127,7 @@ public sealed class DashboardTests
         }
         var sr = new StubStationRepo(stations);
         var oui = new StubOuiLookup();
-        var settings = new StubSettings(wizardDismissed, localDomainSuffixes);
+        var settings = new StubSettings(wizardDismissed, localDomainSuffixes, uiPasswordHash);
         ctx.Services.AddSingleton<INodeRepo>(nr);
         ctx.Services.AddSingleton<INetworkRepo>(nws);
         ctx.Services.AddSingleton<IStationRepo>(sr);
@@ -288,6 +292,39 @@ public sealed class DashboardTests
             var secondaryIdx = cut.Markup.IndexOf("Continue setup", StringComparison.Ordinal);
             Assert.True(primaryIdx >= 0 && secondaryIdx > primaryIdx,
                 $"secondary 'Continue setup' link must render after the primary CTA. primaryIdx={primaryIdx}, secondaryIdx={secondaryIdx}");
+        }
+    }
+
+    // ── Smarter resume (wizard-resume-pw-reset-404) ───────────────────────────
+    // When the wizard was dismissed and a password is already set (but no nodes exist),
+    // the "Continue setup" link must resume at the first INCOMPLETE step — /setup/nodes
+    // (step 2) — instead of dumping the returning operator back onto /setup/password to
+    // re-enter a password they already set. With NO password it still targets
+    // /setup/password (covered by the test above, which uses the default null hash).
+
+    [Fact]
+    public void ZeroNodes_WizardDismissed_HasPassword_ContinueSetupResumesAtNodesStep()
+    {
+        var (ctx, _, _, _, _) = Build(
+            Array.Empty<WiFiNode>(),
+            Array.Empty<WLANStation>(),
+            anyEnabled: false,
+            wizardDismissed: true,
+            uiPasswordHash: "AQAAA-fake-hash");
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+
+            // Primary CTA unchanged (add your first node).
+            Assert.Contains("Add your first OpenWRT node", cut.Markup);
+            Assert.Contains("href=\"/Nodes/Add\"", cut.Markup);
+
+            // Secondary "Continue setup" resumes at the first incomplete step: /setup/nodes.
+            Assert.Contains("Continue setup", cut.Markup);
+            Assert.Contains("href=\"/setup/nodes\"", cut.Markup);
+
+            // Must NOT send the operator back to step 1 to re-enter the existing password.
+            Assert.DoesNotContain("href=\"/setup/password\"", cut.Markup);
         }
     }
 

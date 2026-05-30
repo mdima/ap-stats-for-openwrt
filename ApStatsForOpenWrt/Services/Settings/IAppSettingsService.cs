@@ -15,6 +15,15 @@ public interface IAppSettingsService
     bool    WizardDismissed        { get; }
 
     /// <summary>
+    /// M-SEC-04 — monotonic counter incremented on every UI-password change (set or
+    /// clear). The cookie auth pipeline stamps this value as a <c>session_version</c> claim
+    /// at sign-in and the <c>OnValidatePrincipal</c> event compares the claim against this
+    /// property on every request; mismatch invalidates the cookie. Default 0; persisted as
+    /// a new AppSetting row the first time it is bumped.
+    /// </summary>
+    int SessionVersion { get; }
+
+    /// <summary>
     /// Phase 10 ORCH-01. Cached value of the AppSetting key <c>RefreshIntervalSeconds</c>
     /// (seeded by Phase 9 SCHEMA-06 to default 3600). Editable via Plan 10-02's Settings
     /// page (D-03 — radio preset 15min/30min/1h/6h/24h). Read by PollOrchestrator's
@@ -41,6 +50,21 @@ public interface IAppSettingsService
 
     /// <summary>SET-02 — operator edits as comma-separated text (D-04); the Settings page splits, trims, and discards empties before invoking this.</summary>
     Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default);
+
+    /// <summary>
+    /// M-SEC-04 — explicit setter. Tests use this to set known starting values; production
+    /// code calls <see cref="BumpSessionVersionAsync"/> instead.
+    /// </summary>
+    Task SetSessionVersionAsync(int version, CancellationToken ct = default);
+
+    /// <summary>
+    /// M-SEC-04 — reads the current SessionVersion, increments by 1, persists via the same
+    /// <c>UpsertAndRefreshAsync</c> path as every other setter. Called atomically inside
+    /// <see cref="SetUIPasswordHashAsync"/> (both set and clear paths). The
+    /// orchestrator-only-writes invariant is preserved because the existing
+    /// <c>IAppSettingsRepo.UpsertAsync</c> is the single writer to <c>AppSetting</c> rows.
+    /// </summary>
+    Task BumpSessionVersionAsync(CancellationToken ct = default);
 
     /// <summary>Called once by AppSettingsBootstrapHostedService after migrations complete.</summary>
     Task WarmAsync(CancellationToken ct = default);

@@ -1,0 +1,46 @@
+@* AuthCardShell.razor — Phase 16 v0.12 polish. Shared "auth card" layout shell used by
+   BOTH LoginLayout and SetupLayout so the login page and the onboarding wizard share the
+   same wizard-style chrome (operator-approved "Shared wizard-style layout").
+
+   Owns the common chrome only:
+     - outer .login-page bg-body-secondary
+     - a centered box whose class/style the caller controls (login-box vs setup-wizard-box)
+     - a centered brand block: a bg-primary circular badge wrapping /img/logo.svg, with the
+       .login-logo CANONICAL brand wordmark "AP Stats for OpenWrt" link below it (theme-aware:
+       Bootstrap utility classes only, so it reads correctly in AdminLTE light and dark mode)
+     - an optional @AboveCard slot (wizard breadcrumb)
+     - the .card / .card-body wrapper around @ChildContent
+     - an optional @BelowCard slot (wizard "Skip for now" form + helper text)
+
+   Layout-only: no auth logic, no rate-limiting, no wizard step logic lives here. *@
+
+<div class="login-page bg-body-secondary">
+    <div class="@BoxClass" style="@BoxStyle">
+        <div class="text-center mb-4">
+            <div class="d-inline-flex align-items-center justify-content-center rounded-circle bg-primary mb-3" style="width:72px;height:72px;box-shadow:0 .375rem 1rem rgba(0,0,0,.18);">
+                <img src="/img/logo.svg" alt="AP Stats for OpenWrt logo" width="40" height="40" />
+            </div>
+            <div class="login-logo m-0">
+                <a href="/" class="text-decoration-none"><strong>AP Stats</strong> for OpenWrt</a>
+            </div>
+        </div>
+
+        @AboveCard
+
+        <div class="card">
+            <div class="card-body">
+                @ChildContent
+            </div>
+        </div>
+
+        @BelowCard
+    </div>
+</div>
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public RenderFragment? AboveCard { get; set; }
+    [Parameter] public RenderFragment? BelowCard { get; set; }
+    [Parameter] public string BoxClass { get; set; } = "login-box";
+    [Parameter] public string? BoxStyle { get; set; }
+}

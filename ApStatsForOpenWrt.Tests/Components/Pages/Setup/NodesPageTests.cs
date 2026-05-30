@@ -95,6 +95,9 @@ public sealed class NodesPageTests
         public Task SetWizardDismissedAsync(bool d, CancellationToken ct = default) { WizardDismissed = d; return Task.CompletedTask; }
         public Task SetRefreshIntervalSecondsAsync(int s, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetLocalDomainSuffixesAsync(IReadOnlyList<string> suffixes, CancellationToken ct = default) => Task.CompletedTask;
+        public int SessionVersion => 0;
+        public Task SetSessionVersionAsync(int version, CancellationToken ct = default) => Task.CompletedTask;
+        public Task BumpSessionVersionAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }
