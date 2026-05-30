@@ -89,7 +89,7 @@ volumes:
   apstatsforopenwrt-logs:
 ```
 
-Then open **<http://localhost:8080>** in your browser. The first-run wizard takes over — no environment variables required.
+Then open **<http://localhost:8080>** in your browser. The first-run wizard takes over — no environment variables required. (Optional advanced knobs — reverse proxy, storage paths — are documented under [Configuration](#configuration-environment-variables) below.)
 
 
 ## Volumes & ports
@@ -101,6 +101,39 @@ Then open **<http://localhost:8080>** in your browser. The first-run wizard take
 | `8080/tcp` | HTTP — Blazor UI + `/health` JSON endpoint. | n/a |
 
 > **Note on named volumes vs bind mounts:** Named volumes (the Compose default) inherit the in-image `chown -R app:app` cleanly. If you use a bind mount on Linux, `chown -R 1654:1654` the host path first or the container's non-root user will not be able to write.
+
+## Configuration (environment variables)
+
+> **None of these are required.** With nothing set, the app behaves exactly as described above — first-run wizard, `/data` + `/logs` volumes, visitor-gated polling. These variables exist only for advanced deployments.
+
+### Running behind a reverse proxy
+
+By default the app derives the client IP from the **actual TCP peer** and **ignores** any `X-Forwarded-For` / `X-Forwarded-Proto` header — so a forged `X-Forwarded-For` cannot spoof the source IP that the login rate-limiter keys on. If you put the app behind a reverse proxy or TLS terminator (nginx, Traefik, Caddy, …), declare which proxies to trust so their forwarded headers are honored:
+
+| Variable | Value | Effect |
+|---|---|---|
+| `ForwardedHeaders__KnownProxies` | comma-separated **IP addresses** (e.g. `10.0.0.2,10.0.0.3`) | Honor `X-Forwarded-For` / `-Proto` from these proxy IPs. |
+| `ForwardedHeaders__KnownNetworks` | comma-separated **CIDR ranges** (e.g. `10.0.0.0/24`) | Honor forwarded headers from any peer inside these ranges. |
+
+- Set **either, both, or neither.** Setting at least one turns the forwarded-headers middleware **on**; the default (neither set) leaves it **off** entirely.
+- **Fail-fast:** an invalid IP or CIDR makes the container **refuse to start** and names the offending value in the log — a typo can't silently weaken the trust list.
+- At boot the app logs its posture: `M-SEC-05: ForwardedHeaders middleware: mode=disabled|enabled trustedProxies=N trustedNetworks=M`.
+
+```yaml
+    # docker-compose.yml — trust a LAN reverse-proxy subnet
+    environment:
+      - ForwardedHeaders__KnownNetworks=10.0.0.0/24
+```
+
+> TLS is the reverse proxy's responsibility — deployment is HTTP-on-LAN first-class. The app therefore emits **no** `Strict-Transport-Security` header and its CSP carries **no** `upgrade-insecure-requests`; see [Security posture](#security-posture).
+
+### Other optional variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DATA_ROOT` | `/data` | Storage root for the SQLite DB + Data Protection keyring. Mainly for non-container / local-dev runs; Docker deployments just use the `/data` volume. |
+| `LOGS_ROOT` | `/logs` | Directory for the Serilog daily-rolling log files. |
+| `Polling__GateMode` | *(unset)* | Set to `AlwaysLive` to **disable** the visitor gate so the poller runs continuously even with no browser open (defeats the pause-when-idle behavior). Intended for headless monitoring or smoke tests; leave unset for normal use. |
 
 ## First-run onboarding
 
@@ -155,11 +188,27 @@ The container exposes a plain HTTP `/health` endpoint on port 8080 for liveness 
 
 ## Security posture
 
+> **Threat model:** this is a LAN-side management tool for routers you already operate — a trusted-network deployment, not an internet-facing service. The hardening below raises the bar against opportunistic LAN access and misconfiguration; it does not assume a hostile network path. If you need protection on the wire, terminate TLS at a reverse proxy (see [Configuration](#configuration-environment-variables)).
+
 - **AP passwords:** encrypted at rest via ASP.NET Data Protection, with the keyring persisted under `/data/keys` (`SetApplicationName("ApStatsForOpenWrt")`). Surviving container recreation requires keeping the `/data` volume.
 - **UI password:** stored as a PBKDF2 hash (`PasswordHasher<T>`) — one-way; recoverable only by clearing the row in the SQLite `AppSetting` table.
 - **No telemetry, no phone-home.** The app makes no outbound HTTP calls; the only network egress is SSH to each declared AP.
 - **Single shared site password.** This is a small-scale, self-hosted tool — there is no multi-user / RBAC model, and there is no email-based password reset. That is a deliberate scope decision.
 - **Read-only by design** for the polling plane. The only write-side path against APs is the explicit, confirmation-gated *Disconnect station* action (v0.11), which issues a single deauth/disassoc command over SSH.
+
+### v0.12 security hardening
+
+The v0.12 milestone hardened the operator-facing surfaces. Operator-visible changes:
+
+- **Login throttling + password policy.** A UI password must be at least 8 characters and include upper-case, lower-case, and a digit or symbol. Sign-in *attempts* are rate-limited to 5 per minute per source IP and 30 per minute server-wide; exceeding either ceiling returns HTTP 429. Only `POST` attempts count — viewing or reloading the login page is never throttled.
+- **Session rotation on password change.** Changing or clearing the UI password invalidates every previously issued session cookie on its next request, so other browsers and tabs are bounced back to the login page.
+- **Anti-takeover onboarding.** All wizard form posts require an antiforgery token. The setup wizard stays anonymously reachable only until setup is *genuinely complete* (a password is set **and** at least one AP exists); the password-write endpoint refuses an anonymous re-submission the moment a password exists.
+- **Baseline response headers.** Every response carries `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, a `Permissions-Policy` disabling geolocation/camera/microphone/FLoC, and a `Content-Security-Policy`. Because deployment is HTTP-on-LAN, there is intentionally **no** `Strict-Transport-Security` and **no** CSP `upgrade-insecure-requests` — terminate TLS at a reverse proxy (see [Configuration](#configuration-environment-variables)).
+- **Reverse-proxy IP trust is opt-in.** Forwarded headers are ignored unless you declare trusted proxies/networks (see [Configuration](#configuration-environment-variables)), so the rate-limiter's per-IP key cannot be spoofed by a forged `X-Forwarded-For`.
+- **SSH host-key trust-on-first-use.** The first connection to an AP captures and pins its host-key fingerprint (logged as a warning). The per-AP detail page shows the full SHA256 fingerprint with a `ssh-keyscan <host> | ssh-keygen -lf -` recipe to verify it out-of-band, plus a per-node **Re-trust** action to re-capture after a legitimate key change.
+- **SSH algorithm visibility.** After each connection the negotiated key-exchange / host-key / cipher / MAC algorithms are logged, with a warning if any falls in the SHA-1 family (older Dropbear) so weak APs are easy to spot.
+- **Hardened disconnect command.** The *Disconnect station* action validates the station MAC and interface against strict patterns before issuing any SSH command, so neither field can carry a command-injection payload.
+- **Production-environment check.** Starting the container with `ASPNETCORE_ENVIRONMENT=Development` logs a startup warning, so an accidentally dev-flagged deployment is visible in `docker logs`.
 
 ## Roadmap
 
@@ -170,6 +219,7 @@ This is an actively developed project. The full living roadmap, milestone histor
 - **v0.9.2** — Per-station "first seen" timestamp.
 - **v0.10** — Rebrand to *AP Stats for OpenWrt* (internal).
 - **v0.11** — Operator actions & polish: polling-countdown state machine, on-demand *Run now* enrichment trigger, first-cycle enrichment concurrency audit, *Disconnect station* write-side SSH action.
+- **v0.12** — Security fixes: login throttling + password policy, session rotation on password change, anti-takeover onboarding, baseline response headers, opt-in reverse-proxy header trust, SSH host-key TOFU UX + algorithm visibility, hardened disconnect command. See *Security posture* and *Configuration*.
 - **v1.0** — First public release.
 
 Beyond v1.0, candidates on the deferred list include time-series sighting history, CSV export, station tags, per-AP/WLAN summary cards, and a chiseled base image. See PROJECT.md → *Out of Scope (deferred — vNext candidates)*.
