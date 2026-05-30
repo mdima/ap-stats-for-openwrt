@@ -225,10 +225,29 @@ public sealed class LoginGlobalRateLimitTests
 }
 
 /// <summary>
-/// Serial-execution collection definition for rate-limit tests so the process-wide
-/// "_global_" FixedWindow bucket doesn't bleed across concurrently-executing facts.
-/// xUnit v3 honors collection serialization without an explicit DisableParallelization
-/// flag (one fact at a time within a collection).
+/// Serial-execution collection definition for every test class whose
+/// <see cref="WebApplicationFactory{Program}"/> mutates the PROCESS-WIDE
+/// <c>ForwardedHeaders__KnownProxies</c> / <c>ForwardedHeaders__KnownNetworks</c> env vars
+/// and/or shares the process-wide login-rate-limit <c>"_global_"</c> FixedWindow bucket.
+///
+/// <para>
+/// <b>DisableParallelization is REQUIRED, not optional.</b> <c>[Collection]</c> membership
+/// alone serializes facts only <i>within</i> this collection — xUnit still runs this
+/// collection <i>concurrently with OTHER collections</i> in the assembly. The forwarded-headers
+/// env vars are read in <c>Program.cs</c> at HOST-BUILD time (top-level statements, before
+/// <c>builder.Build()</c>), so while one member's host builds, a parallel sibling collection
+/// can leave the env var in an invalid state — most acutely
+/// <see cref="ApStatsForOpenWrt.Tests.Security.ForwardedHeadersConditionalTests"/> cases 5/6,
+/// which deliberately set invalid values (<c>172.18.0.500</c> / <c>not-a-cidr</c>) that make
+/// <c>Program.cs</c> fail-fast with <see cref="InvalidOperationException"/>. That poisons the
+/// concurrent host build, surfacing as
+/// "The entry point exited without ever building an IHost" and 0&#160;ms fail-fasts of unrelated
+/// members (observed: all 5 SessionRotationTests facts). Concurrent host builds also tripped
+/// "The logger is already frozen". <c>DisableParallelization = true</c> stops this collection
+/// from running in parallel with other collections, closing the cross-collection global-state
+/// race. Mirrors the established pattern on the <c>Integration</c>, <c>Phase10AcceptanceSignalTests</c>,
+/// and <c>DockerSmoke</c> collection definitions.
+/// </para>
 /// </summary>
-[CollectionDefinition("RateLimitSerial")]
+[CollectionDefinition("RateLimitSerial", DisableParallelization = true)]
 public sealed class RateLimitSerialCollection { }
