@@ -18,9 +18,12 @@
 
    T-17-03-01 / T-17-03-03 — the href is Blazor-attribute-encoded and Plan-02 already
    validated LatestReleaseUrl as an absolute https://github.com/ URL before persisting;
-   target="_blank" + rel="noopener" prevents reverse-tabnabbing. The version string in
-   the tooltip/aria-label is a System.Version.ToString() (numeric dotted form), so
-   data-bs-html="true" cannot render injected markup.
+   target="_blank" + rel="noopener" prevents reverse-tabnabbing. The tooltip is a NATIVE
+   `title` attribute — this app initialises no Bootstrap tooltip JS, so a data-bs-toggle
+   tooltip never activates and an HTML "<br>" separator renders literally (260531 UAT fix).
+   The two lines are split by a real newline, which native browser tooltips render. The
+   version string is a System.Version.ToString() (numeric dotted form) and `title` is
+   Blazor attribute-encoded, so no markup can be injected.
 
    The discovery TOAST is wired separately in MainLayout (D-04) so it routes through the
    singleton ToastService + broadcasts to every circuit's ToastHost. This component owns
@@ -33,7 +36,6 @@
     <a href="@Settings.LatestReleaseUrl" target="_blank" rel="noopener"
        class="badge text-bg-info d-inline-flex align-items-center text-decoration-none"
        aria-label="Update available: version @_latestVersionString"
-       data-bs-toggle="tooltip" data-bs-html="true"
        title="@Tooltip">
         <i class="bi bi-arrow-up-circle me-1" aria-hidden="true"></i>
         <span>Update</span>
@@ -62,7 +64,7 @@
         && _latest > CurrentVersion;
 
     private string Tooltip =>
-        $"Version {_latestVersionString} available<br>discovered {RelativeTime(Settings.LastCheckedAtUtc ?? default)}";
+        $"Version {_latestVersionString} available\ndiscovered {RelativeTime(Settings.LastCheckedAtUtc ?? default)}";
 
     protected override void OnInitialized()
     {

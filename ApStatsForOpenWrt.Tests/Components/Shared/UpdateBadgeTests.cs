@@ -160,9 +160,11 @@ public sealed class UpdateBadgeTests
             var title = a.GetAttribute("title") ?? string.Empty;
             Assert.Contains("Version 9.9.9 available", title);
             Assert.Contains("discovered 3h ago", title);
-            // Two-line tooltip uses a <br> separator with data-bs-html.
-            Assert.Contains("<br>", title);
-            Assert.Equal("true", a.GetAttribute("data-bs-html"));
+            // Native `title` tooltip — two lines split by a real newline (NOT a <br>: this app
+            // initialises no Bootstrap tooltip JS, so a <br> renders literally). 260531 UAT fix.
+            Assert.Contains("available\ndiscovered", title);
+            Assert.DoesNotContain("<br>", title);
+            Assert.Null(a.GetAttribute("data-bs-html"));
         }
     }
 
