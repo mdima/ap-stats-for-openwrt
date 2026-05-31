@@ -81,5 +81,10 @@
          from the test bin/Release/net10.0/Fixtures/... path. Plan 02-04 will populate the
          currently-skeleton fixture folders with real captured output. -->
     <None Update="Fixtures\**\*.*" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Phase 17 Plan 17-02: recorded GitHub /releases/latest fixture bodies consumed by
+         UpdateCheckerTests via a stubbed HttpMessageHandler. These live alongside the test
+         (UpdateCheck/Fixtures/...), outside the top-level Fixtures\ glob above, so they need an
+         explicit copy-to-output entry. -->
+    <None Update="UpdateCheck\Fixtures\**\*.*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

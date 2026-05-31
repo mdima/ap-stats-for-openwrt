@@ -11,6 +11,7 @@ using ApStatsForOpenWrt.Services.Onboarding;
 using ApStatsForOpenWrt.Services.Polling;
 using ApStatsForOpenWrt.Services.Polling.Ssh;
 using ApStatsForOpenWrt.Services.Settings;
+using ApStatsForOpenWrt.Services.UpdateCheck;
 using Serilog;
 using Serilog.Formatting.Compact;
 using System.Net;
@@ -188,6 +189,16 @@ try
     //     adds Dashboard subscribers; raising the event from day 1 makes Phase 5 additive only.
     builder.Services.AddSingleton<OpenWrtAdapterCache>();
     builder.Services.AddSingleton<PollNotifier>();
+    // Phase 17 M-UPD-01 / M-UPD-04 — update-check singletons, registered next to PollNotifier.
+    // UpdateNotifier is the PollNotifier twin (Plan 17-01 created the class but did NOT register it
+    // — registered here). IUpdateChecker is the first IHttpClientFactory consumer (the "github"
+    // named client below). The hosted-service loop AND the Settings "Check now" button both resolve
+    // IUpdateChecker — one code path.
+    builder.Services.AddSingleton<UpdateNotifier>();
+    builder.Services.AddSingleton<IUpdateChecker, UpdateChecker>();
+    // First and only AddHttpClient in the app — a named "github" client matching
+    // CreateClient("github") in UpdateChecker. Registers IHttpClientFactory in the DI graph.
+    builder.Services.AddHttpClient("github");
     // Phase 8 D-09 (post-fix 2026-05-08): the gate is the Singleton seam; PreferencesService
     // itself is Scoped because it captures IJSRuntime (Scoped per Blazor circuit). The
     // original Plan 08-01 Singleton registration of PreferencesService was a captive-dep
@@ -219,6 +230,13 @@ try
     // ToastService (its dependency) and BEFORE the polling pipeline registrations so the DI
     // graph remains acyclic.
     builder.Services.AddSingleton<ApStatsForOpenWrt.Services.EventDetectionService>();
+    // Phase 17 Plan 03 M-UPD-04 — UpdateToastBroadcaster subscribes to UpdateNotifier.UpdateAvailable
+    // in its constructor (singleton, eager-started below) and emits ONE discovery toast per raise via
+    // the singleton ToastService. A singleton broadcaster (not a per-circuit Blazor subscriber) is the
+    // only shape that preserves the "one raise → one toast per circuit" contract — a per-circuit
+    // subscriber would call ToastService.Show once per open circuit (N×N fan-out). Mirrors
+    // EventDetectionService. Registered AFTER ToastService + UpdateNotifier (its dependencies).
+    builder.Services.AddSingleton<ApStatsForOpenWrt.Services.UpdateToastBroadcaster>();
     // Phase 10 ORCH-07 — TimeProvider DI lets PollOrchestrator's enrichment loop accept an injected
     // clock (TimeProvider.System in production; a fake in tests). Required for the trigger evaluator
     // and the LastEnrichmentRefreshAt write timestamp.
@@ -581,6 +599,15 @@ try
     // any UI page is opened. Order is irrelevant within the hosted-service group: this shim
     // does no work in StartAsync — DI resolution alone wires up the Cycled subscription.
     builder.Services.AddHostedService<ApStatsForOpenWrt.Services.EventDetectionEagerStartHostedService>(); // 6th — Phase 8
+    // Phase 17 M-UPD-01 — 7th. After AppSettingsBootstrap (4th, so the UpdateCheckEnabled toggle is
+    // warm) and after Polling (5th — a bystander to the polling mission). Registration order =
+    // StartAsync order (Pitfall 10). The 24h visitor-gated loop issues the first check on first visitor.
+    builder.Services.AddHostedService<UpdateCheckHostedService>();          // 7th — Phase 17 (M-UPD-01)
+    // Phase 17 Plan 03 — 8th. Eager-start shim that forces the UpdateToastBroadcaster Singleton to
+    // instantiate (and therefore subscribe to UpdateNotifier.UpdateAvailable) at app startup, before
+    // any UI page is opened. Order is irrelevant within the hosted-service group: StartAsync does no
+    // work — DI resolution alone wires up the subscription. Mirrors EventDetectionEagerStartHostedService.
+    builder.Services.AddHostedService<ApStatsForOpenWrt.Services.UpdateToastBroadcasterEagerStartHostedService>(); // 8th — Phase 17 (M-UPD-04)
 
     // 7. Razor components (Phase 3 starts here). Auth + ratelimit + forwarded headers are
     //    added in Plan 03-03; this Plan 03-01 only lights up the Razor seam so the smoke

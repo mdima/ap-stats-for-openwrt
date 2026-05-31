@@ -50,6 +50,16 @@ public sealed class MainLayoutTests
         public int SessionVersion => 0;
         public Task SetSessionVersionAsync(int version, CancellationToken ct = default) => Task.CompletedTask;
         public Task BumpSessionVersionAsync(CancellationToken ct = default) => Task.CompletedTask;
+        // Phase 17 Plan 17-01 M-UPD-02 — minimal mutable update-check stub members.
+        public bool UpdateCheckEnabled { get; private set; } = true;
+        public string? LatestKnownVersion { get; private set; }
+        public string? LatestReleaseUrl { get; private set; }
+        public DateTime? LastCheckedAtUtc { get; private set; }
+        public Task SetUpdateCheckEnabledAsync(bool enabled, CancellationToken ct = default) { UpdateCheckEnabled = enabled; return Task.CompletedTask; }
+        public Task SetLatestKnownVersionAsync(string? version, CancellationToken ct = default) { LatestKnownVersion = version; return Task.CompletedTask; }
+        public Task SetLatestReleaseUrlAsync(string? url, CancellationToken ct = default) { LatestReleaseUrl = url; return Task.CompletedTask; }
+        public Task SetLastCheckedAtUtcAsync(DateTime? checkedAtUtc, CancellationToken ct = default) { LastCheckedAtUtc = checkedAtUtc; return Task.CompletedTask; }
+        public Task SetLatestReleaseAsync(string version, string url, DateTime checkedAtUtc, CancellationToken ct = default) { LatestKnownVersion = version; LatestReleaseUrl = url; LastCheckedAtUtc = checkedAtUtc; return Task.CompletedTask; }
         public Task WarmAsync(CancellationToken ct = default)                              => Task.CompletedTask;
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }
@@ -83,6 +93,11 @@ public sealed class MainLayoutTests
             new ToastService(
                 sp.GetRequiredService<INotificationsGate>(),
                 NullLogger<ToastService>.Instance));
+        // Phase 17 D-01 — MainLayout now hosts <UpdateBadge />, which injects UpdateNotifier
+        // (and reads IAppSettingsService, already registered). Register the notifier so the
+        // cluster renders. The badge is DOM-absent by default (StubSettings has no newer
+        // version), so the cluster stays visually identical — the existing assertions hold.
+        ctx.Services.AddSingleton<ApStatsForOpenWrt.Services.UpdateCheck.UpdateNotifier>();
 
         // MainLayout inherits LayoutComponentBase, which exposes the slot as `Body` not
         // `ChildContent`. bUnit's AddChildContent looks for [Parameter] ChildContent on the

@@ -21,6 +21,12 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
     private const string KeyRefreshIntervalSeconds = "RefreshIntervalSeconds";
     private const string KeyLocalDomainSuffixes    = "LocalDomainSuffixes";
     private const string KeySessionVersion         = "SessionVersion";
+    // M-UPD-02 — the four update-check keys. RESOLVED FINDING #1 Path B: NO HasData row, NO EF
+    // migration; the warm-time defaults below (UpdateCheckEnabled=true, three nulls) ARE the seed.
+    private const string KeyUpdateCheckEnabled     = "UpdateCheckEnabled";
+    private const string KeyLatestKnownVersion     = "LatestKnownVersion";
+    private const string KeyLatestReleaseUrl       = "LatestReleaseUrl";
+    private const string KeyLastCheckedAtUtc       = "LastCheckedAtUtc";
 
     private static readonly IReadOnlyList<string> EmptySuffixList = Array.Empty<string>();
 
@@ -31,8 +37,14 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
         bool WizardDismissed,
         int RefreshIntervalSeconds,
         IReadOnlyList<string> LocalDomainSuffixes,
-        int SessionVersion);
-    private Snapshot _current = new(30, null, false, 3600, EmptySuffixList, 0); // safe defaults until WarmAsync runs (3600 matches Phase 9 SCHEMA-06 seed; SessionVersion default 0 per M-SEC-04)
+        int SessionVersion,
+        bool UpdateCheckEnabled,
+        string? LatestKnownVersion,
+        string? LatestReleaseUrl,
+        DateTime? LastCheckedAtUtc);
+    // safe defaults until WarmAsync runs (3600 matches Phase 9 SCHEMA-06 seed; SessionVersion default 0 per M-SEC-04;
+    // M-UPD-02 Path B seed — UpdateCheckEnabled=true (D-07 ship-armed) + three nulls, NO DB row required).
+    private Snapshot _current = new(30, null, false, 3600, EmptySuffixList, 0, true, null, null, null);
 
     public int     PollingIntervalSeconds => Volatile.Read(ref _current).PollingIntervalSeconds;
     public string? UIPasswordHash         => Volatile.Read(ref _current).UIPasswordHash;
@@ -40,6 +52,10 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
     public int     RefreshIntervalSeconds => Volatile.Read(ref _current).RefreshIntervalSeconds;
     public IReadOnlyList<string> LocalDomainSuffixes => Volatile.Read(ref _current).LocalDomainSuffixes;
     public int     SessionVersion         => Volatile.Read(ref _current).SessionVersion;
+    public bool    UpdateCheckEnabled     => Volatile.Read(ref _current).UpdateCheckEnabled;
+    public string? LatestKnownVersion     => Volatile.Read(ref _current).LatestKnownVersion;
+    public string? LatestReleaseUrl       => Volatile.Read(ref _current).LatestReleaseUrl;
+    public DateTime? LastCheckedAtUtc      => Volatile.Read(ref _current).LastCheckedAtUtc;
 
     public event Action<IAppSettingsService>? Changed;
 
@@ -62,13 +78,34 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
             }
         }
 
+        // M-UPD-02 LastCheckedAtUtc: AppSetting has no DateTime column, so it is persisted as an
+        // ISO-8601 round-trip (`o`) string. SQLite/EF round-trips DateTimes back with Kind=Unspecified,
+        // so re-attach DateTimeKind.Utc on read (mirrors Dashboard.razor RelativeTime — T-17-01-01).
+        DateTime? lastCheckedAtUtc = null;
+        if (rows.TryGetValue(KeyLastCheckedAtUtc, out var lc)
+            && !string.IsNullOrWhiteSpace(lc.StringValue)
+            && DateTime.TryParse(
+                lc.StringValue,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind,
+                out var parsed))
+        {
+            lastCheckedAtUtc = DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+        }
+
         var snap = new Snapshot(
             PollingIntervalSeconds:    rows.TryGetValue(KeyPollingInterval,        out var pi) ? pi.IntValue ?? 30   : 30,
             UIPasswordHash:            rows.TryGetValue(KeyUIPasswordHash,         out var uh) ? uh.StringValue       : null,
             WizardDismissed:           rows.TryGetValue(KeyWizardDismissed,        out var wd) ? wd.BoolValue ?? false: false,
             RefreshIntervalSeconds:    rows.TryGetValue(KeyRefreshIntervalSeconds, out var ri) ? ri.IntValue ?? 3600 : 3600,
             LocalDomainSuffixes:       suffixes,
-            SessionVersion:            rows.TryGetValue(KeySessionVersion,         out var sv) ? sv.IntValue ?? 0    : 0);
+            SessionVersion:            rows.TryGetValue(KeySessionVersion,         out var sv) ? sv.IntValue ?? 0    : 0,
+            // M-UPD-02 single seeding path: no DB row needed; the in-memory default satisfies M-UPD-02.
+            // UpdateCheckEnabled defaults TRUE (D-07 ship-armed) whether the key is absent OR present-without-a-bool.
+            UpdateCheckEnabled:        rows.TryGetValue(KeyUpdateCheckEnabled,     out var uc) ? uc.BoolValue ?? true : true,
+            LatestKnownVersion:        rows.TryGetValue(KeyLatestKnownVersion,     out var lv) ? lv.StringValue       : null,
+            LatestReleaseUrl:          rows.TryGetValue(KeyLatestReleaseUrl,       out var lu) ? lu.StringValue       : null,
+            LastCheckedAtUtc:          lastCheckedAtUtc);
         Interlocked.Exchange(ref _current, snap);
     }
 
@@ -115,15 +152,78 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
         await UpsertAndRefreshAsync(KeySessionVersion, intValue: next, ct: ct);
     }
 
-    private async Task UpsertAndRefreshAsync(
+    // ── Phase 17 Plan 17-01 M-UPD-02 — the four update-check setters ────────────
+
+    public Task SetUpdateCheckEnabledAsync(bool enabled, CancellationToken ct = default)
+        => UpsertAndRefreshAsync(KeyUpdateCheckEnabled, boolValue: enabled, ct: ct);
+
+    public Task SetLatestKnownVersionAsync(string? version, CancellationToken ct = default)
+        => UpsertAndRefreshAsync(KeyLatestKnownVersion, stringValue: version, ct: ct);
+
+    public Task SetLatestReleaseUrlAsync(string? url, CancellationToken ct = default)
+        => UpsertAndRefreshAsync(KeyLatestReleaseUrl, stringValue: url, ct: ct);
+
+    public Task SetLastCheckedAtUtcAsync(DateTime? checkedAtUtc, CancellationToken ct = default)
+        // Round-trippable ISO-8601 `o` format; null clears the row's StringValue (T-17-01-01).
+        => UpsertAndRefreshAsync(
+            KeyLastCheckedAtUtc,
+            stringValue: checkedAtUtc?.ToString("o", System.Globalization.CultureInfo.InvariantCulture),
+            ct: ct);
+
+    public async Task SetLatestReleaseAsync(string version, string url, DateTime checkedAtUtc, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        ArgumentNullException.ThrowIfNull(url);
+
+        // M-UPD-02 — atomic 3-value advance: upsert all three through the single-writer repo,
+        // THEN re-warm + raise Changed EXACTLY ONCE (not three chained UpsertAndRefreshAsync calls,
+        // which would fire Changed three times → three badge re-renders / spurious toast triggers).
+        await UpsertOnlyAsync(KeyLatestKnownVersion, stringValue: version, ct: ct);
+        await UpsertOnlyAsync(KeyLatestReleaseUrl, stringValue: url, ct: ct);
+        await UpsertOnlyAsync(
+            KeyLastCheckedAtUtc,
+            stringValue: checkedAtUtc.ToString("o", System.Globalization.CultureInfo.InvariantCulture),
+            ct: ct);
+
+        await WarmAsync(ct);
+        Changed?.Invoke(this);
+    }
+
+    private Task UpsertAndRefreshAsync(
         string key,
         string? stringValue = null,
         int?    intValue    = null,
         bool?   boolValue   = null,
         CancellationToken ct = default)
+        => UpsertAndRefreshCoreAsync(key, stringValue, intValue, boolValue, ct);
+
+    private async Task UpsertAndRefreshCoreAsync(
+        string key,
+        string? stringValue,
+        int?    intValue,
+        bool?   boolValue,
+        CancellationToken ct)
     {
+        await UpsertOnlyAsync(key, stringValue, intValue, boolValue, ct);
+
+        // Refresh snapshot from the just-written DB state — single source of truth.
+        await WarmAsync(ct);
+        Changed?.Invoke(this);
+    }
+
+    /// <summary>
+    /// Persists a single AppSetting row via the repo WITHOUT re-warming or raising
+    /// <see cref="Changed"/>. Used by the combined <see cref="SetLatestReleaseAsync"/> so a
+    /// multi-key advance re-warms + fires Changed exactly once at the end.
+    /// </summary>
+    private Task UpsertOnlyAsync(
+        string key,
+        string? stringValue = null,
+        int?    intValue    = null,
+        bool?   boolValue   = null,
+        CancellationToken ct = default)
         // Persist via the repo (PER-04 — only repos touch the DbContext factory).
-        await repo.UpsertAsync(
+        => repo.UpsertAsync(
             key,
             new AppSetting
             {
@@ -133,9 +233,4 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
                 BoolValue   = boolValue
             },
             ct);
-
-        // Refresh snapshot from the just-written DB state — single source of truth.
-        await WarmAsync(ct);
-        Changed?.Invoke(this);
-    }
 }

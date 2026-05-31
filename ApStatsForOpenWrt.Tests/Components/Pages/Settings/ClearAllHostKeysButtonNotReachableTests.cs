@@ -38,6 +38,16 @@ public sealed class ClearAllHostKeysButtonNotReachableTests
         public int SessionVersion => 0;
         public Task SetSessionVersionAsync(int version, CancellationToken ct = default) => Task.CompletedTask;
         public Task BumpSessionVersionAsync(CancellationToken ct = default) => Task.CompletedTask;
+        // Phase 17 Plan 17-01 M-UPD-02 — minimal mutable update-check stub members.
+        public bool UpdateCheckEnabled { get; private set; } = true;
+        public string? LatestKnownVersion { get; private set; }
+        public string? LatestReleaseUrl { get; private set; }
+        public DateTime? LastCheckedAtUtc { get; private set; }
+        public Task SetUpdateCheckEnabledAsync(bool enabled, CancellationToken ct = default) { UpdateCheckEnabled = enabled; return Task.CompletedTask; }
+        public Task SetLatestKnownVersionAsync(string? version, CancellationToken ct = default) { LatestKnownVersion = version; return Task.CompletedTask; }
+        public Task SetLatestReleaseUrlAsync(string? url, CancellationToken ct = default) { LatestReleaseUrl = url; return Task.CompletedTask; }
+        public Task SetLastCheckedAtUtcAsync(DateTime? checkedAtUtc, CancellationToken ct = default) { LastCheckedAtUtc = checkedAtUtc; return Task.CompletedTask; }
+        public Task SetLatestReleaseAsync(string version, string url, DateTime checkedAtUtc, CancellationToken ct = default) { LatestKnownVersion = version; LatestReleaseUrl = url; LastCheckedAtUtc = checkedAtUtc; return Task.CompletedTask; }
         public Task WarmAsync(CancellationToken ct = default) => Task.CompletedTask;
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }
@@ -46,6 +56,12 @@ public sealed class ClearAllHostKeysButtonNotReachableTests
     {
         public string Hash(string plaintext) => "AQAAA-fake-hash";
         public PasswordVerificationResult Verify(string h, string p) => PasswordVerificationResult.Success;
+    }
+
+    // Phase 17 M-UPD-05 — no-op checker so the Settings page renders (Update-check card dep).
+    private sealed class NoOpUpdateChecker : ApStatsForOpenWrt.Services.UpdateCheck.IUpdateChecker
+    {
+        public Task CheckOnceAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class StubNodeRepo : INodeRepo
@@ -83,6 +99,10 @@ public sealed class ClearAllHostKeysButtonNotReachableTests
             new ApStatsForOpenWrt.Services.PreferencesService(ctx.JSInterop.JSRuntime));
         ctx.Services.AddSingleton<PollNotifier>();
         ctx.Services.AddSingleton<IForceEnrichmentService, ForceEnrichmentService>();
+        // Phase 17 M-UPD-05 — Settings/Index.razor now injects IUpdateChecker + UpdateNotifier
+        // for the Update-check card. Register no-op seams so the page renders.
+        ctx.Services.AddSingleton<ApStatsForOpenWrt.Services.UpdateCheck.IUpdateChecker, NoOpUpdateChecker>();
+        ctx.Services.AddSingleton<ApStatsForOpenWrt.Services.UpdateCheck.UpdateNotifier>();
         return ctx;
     }
 

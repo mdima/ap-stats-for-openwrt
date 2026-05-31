@@ -11,6 +11,7 @@
 @using ApStatsForOpenWrt.Services.Enrichment
 @using ApStatsForOpenWrt.Services.Polling
 @using ApStatsForOpenWrt.Services.Settings
+@using ApStatsForOpenWrt.Services.UpdateCheck
 
 @inject IAppSettingsService Settings
 @inject IUIPasswordHasher Hasher
@@ -18,6 +19,10 @@
    + PollNotifier (cycle-in-flight half of the D-06 OR-condition). *@
 @inject IForceEnrichmentService ForceEnrichment
 @inject PollNotifier Notifier
+@* Phase 17 M-UPD-05 — the Update-check card injects the checker seam (Check now button) +
+   the UpdateNotifier (reload-free diagnostic refresh after a successful check). *@
+@inject IUpdateChecker Checker
+@inject UpdateNotifier UpdateNotifier
 @* Phase 8 Plan 08-07 REQ-UI-44 — the new UI preferences card consumes PreferencesService
    ONLY. NEVER IAppSettingsService — per-browser preference, not a DB setting. *@
 @inject ApStatsForOpenWrt.Services.PreferencesService Prefs
@@ -213,6 +218,66 @@
     </div>
 </div>
 
+@* ==== Card 6: Update check (Phase 17 M-UPD-05 / D-03) ====
+   Toggle (immediate DB persist via IAppSettingsService — NOT PreferencesService; this is a
+   DB setting per CONTEXT.md) + read-only diagnostics (greyed when OFF, D-03) + "Check now"
+   (disabled while in-flight AND when the toggle is OFF, D-03; re-enables on success/failure).
+   The diagnostic block refreshes without a page reload via the UpdateNotifier/Settings.Changed
+   subscriptions wired in OnInitializedAsync. *@
+<div class="card mb-4">
+    <div class="card-header"><h5 class="card-title mb-0">Update check</h5></div>
+    <div class="card-body">
+        <small class="text-body-secondary d-block mb-3">Periodically checks GitHub for a newer release and surfaces a calm badge + one-time notification when one is available. Turn off for zero outbound traffic.</small>
+
+        @if (!string.IsNullOrEmpty(_updateCheckBanner))
+        {
+            <div class="alert alert-success" role="alert">@_updateCheckBanner</div>
+        }
+
+        <div class="form-check form-switch mb-3">
+            <input class="form-check-input" type="checkbox" role="switch"
+                   id="update-check-toggle"
+                   checked="@Settings.UpdateCheckEnabled"
+                   @onchange="OnUpdateCheckToggleChangedAsync" />
+            <label class="form-check-label" for="update-check-toggle">
+                <i class="bi @(Settings.UpdateCheckEnabled ? "bi-arrow-repeat" : "bi-pause-circle") me-2" aria-hidden="true"></i>
+                Enable automatic update checks
+            </label>
+        </div>
+
+        @* D-03 — diagnostics greyed/muted when the toggle is OFF. *@
+        <dl class="row mb-3 @(Settings.UpdateCheckEnabled ? string.Empty : "text-body-secondary opacity-50")" id="update-check-diagnostics">
+            <dt class="col-sm-4">Current version</dt>
+            <dd class="col-sm-8">@CurrentVersionString</dd>
+
+            <dt class="col-sm-4">Latest known</dt>
+            <dd class="col-sm-8">@(string.IsNullOrEmpty(Settings.LatestKnownVersion) ? "—" : Settings.LatestKnownVersion)</dd>
+
+            <dt class="col-sm-4">Last checked</dt>
+            <dd class="col-sm-8">@(Settings.LastCheckedAtUtc is null ? "never" : RelativeTime(Settings.LastCheckedAtUtc.Value))</dd>
+        </dl>
+
+        <div class="d-flex align-items-center">
+            <button type="button"
+                    id="check-now-button"
+                    class="btn btn-outline-primary"
+                    @onclick="HandleCheckNowAsync"
+                    disabled="@(_checkInFlight || !Settings.UpdateCheckEnabled)">
+                @if (_checkInFlight)
+                {
+                    <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                    <span>Checking…</span>
+                }
+                else
+                {
+                    <span>Check now</span>
+                }
+            </button>
+            <small class="text-body-secondary ms-3">Runs an update check immediately instead of waiting for the daily cycle.</small>
+        </div>
+    </div>
+</div>
+
 @* ==== Modals ==== *@
 <ConfirmationModal IsOpen="_clearPwdModal"
                    IsOpenChanged="@((bool v) => { _clearPwdModal = v; })"
@@ -269,6 +334,13 @@
         Notifier.CycleStarted += OnCycleStartedAsync;
         Notifier.Cycled       += OnCycledAsync;
 
+        // Phase 17 M-UPD-05 — subscribe BEFORE the await (same paired-adjacency discipline) so a
+        // check completing during WarmAsync still re-renders the diagnostic block without a reload.
+        // UpdateAvailable fires on a real N→N+1 advance; Settings.Changed fires after every setter
+        // (incl. the timestamp-only write on an up-to-date check), covering "Last checked" refresh.
+        UpdateNotifier.UpdateAvailable += OnUpdateAvailableAsync;
+        Settings.Changed += OnSettingsChanged;
+
         // Defensive — Settings should already be warm via AppSettingsBootstrapHostedService;
         // re-warm idempotently to handle edge cases like a fresh in-memory test DB.
         await Settings.WarmAsync();
@@ -302,6 +374,69 @@
     {
         Notifier.CycleStarted -= OnCycleStartedAsync;
         Notifier.Cycled       -= OnCycledAsync;
+        // Phase 17 M-UPD-05 — symmetric unsubscribe (Pattern 2).
+        UpdateNotifier.UpdateAvailable -= OnUpdateAvailableAsync;
+        Settings.Changed -= OnSettingsChanged;
+    }
+
+    // ── Card 6 (Phase 17 M-UPD-05) — Update-check state + handlers ──────────
+    private bool _checkInFlight;
+    private string? _updateCheckBanner;
+
+    // Mirrors the MainLayout footer idiom (typeof(...).Assembly.GetName().Version). The Settings
+    // "Current version" line shows the running assembly version (3-part); NO literal version
+    // string (260518-vbs).
+    private static readonly string CurrentVersionString =
+        typeof(Index).Assembly.GetName().Version?.ToString(3) ?? "unknown";
+
+    private async Task OnUpdateCheckToggleChangedAsync(ChangeEventArgs e)
+    {
+        var newValue = e.Value is bool b && b;
+        // Immediate DB persist (NOT PreferencesService) — Settings.Changed then propagates to the
+        // navbar badge. Mirrors the immediate-persist toggle pattern, NOT the EditForm/Save pattern.
+        await Settings.SetUpdateCheckEnabledAsync(newValue);
+    }
+
+    private async Task HandleCheckNowAsync()
+    {
+        _checkInFlight = true;
+        try
+        {
+            // Single shared code path with the 24h hosted loop. CheckOnceAsync never throws in
+            // production (it wraps the whole fetch+parse in one try/catch), but we still CATCH here
+            // (defense-in-depth, Rule 2): a thrown failure escaping a Blazor event handler tears
+            // down the circuit. Catching keeps the page alive and the finally re-enables the button
+            // on BOTH success and a thrown failure (M-UPD-05 — recover regardless of outcome).
+            await Checker.CheckOnceAsync();
+            _updateCheckBanner = "Update check complete.";
+            _ = AutoDismissAsync(() => _updateCheckBanner = null);
+        }
+        catch
+        {
+            // Swallow — the button must re-enable and the page must survive. The checker already
+            // logs its own failures (Plan 02); there is no operator-actionable detail to surface.
+        }
+        finally
+        {
+            _checkInFlight = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private Task OnUpdateAvailableAsync(UpdateInfo _) => InvokeAsync(StateHasChanged);
+
+    private void OnSettingsChanged(IAppSettingsService settings) => _ = InvokeAsync(StateHasChanged);
+
+    // Replicated from Dashboard.razor:684-696. SpecifyKind(Utc) is mandatory — the AppSetting
+    // round-trip returns Kind=Unspecified; ToUniversalTime() would subtract the local offset.
+    private static string RelativeTime(DateTime t)
+    {
+        if (t == default) return "never";
+        var d = DateTime.UtcNow - DateTime.SpecifyKind(t, DateTimeKind.Utc);
+        if (d.TotalSeconds < 60) return "just now";
+        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes}m ago";
+        if (d.TotalHours < 24)   return $"{(int)d.TotalHours}h ago";
+        return $"{(int)d.TotalDays}d ago";
     }
 
     // ── Card 4 (Phase 8 Plan 08-07 REQ-UI-44) — UI preferences state ────────
