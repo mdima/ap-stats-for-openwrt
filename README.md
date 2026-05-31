@@ -44,6 +44,7 @@ If you run one or more than one OpenWRT access point, you already know the probl
 - **UI standards.** Clickable KPI tiles bidirectionally synced with filter chips, AdminLTE 4 native dark mode, Bootstrap 5 toast notifications for AP/station events, localStorage-backed user preferences.
 - **Encrypted credentials at rest.** Each AP password is encrypted with ASP.NET Data Protection; the optional UI password is stored as a PBKDF2 hash.
 - **Single image, single SQLite file.** Stop the container, copy `/data`, and your entire deployment is portable.
+- **Automatic update check.** Once a day — and only while a browser session is open — the container asks the GitHub Releases API whether a newer version has been published and compares it to its own. When one is available, a calm navbar badge links to the release and a one-time toast announces it; a Settings card shows current / latest-known / last-checked plus a **Check now** button. It is notify-only — actually pulling the new image stays your call (`docker compose pull && docker compose up -d`) — and is one unauthenticated request per day. Switch it off on the Settings page for zero outbound traffic (air-gapped deployments).
 
 ## Deployment
 
@@ -192,7 +193,7 @@ The container exposes a plain HTTP `/health` endpoint on port 8080 for liveness 
 
 - **AP passwords:** encrypted at rest via ASP.NET Data Protection, with the keyring persisted under `/data/keys` (`SetApplicationName("ApStatsForOpenWrt")`). Surviving container recreation requires keeping the `/data` volume.
 - **UI password:** stored as a PBKDF2 hash (`PasswordHasher<T>`) — one-way; recoverable only by clearing the row in the SQLite `AppSetting` table.
-- **No telemetry, no phone-home.** The app makes no outbound HTTP calls; the only network egress is SSH to each declared AP.
+- **No telemetry; one optional update check.** The app sends no usage or telemetry data anywhere. Its only outbound traffic is SSH to each declared AP — plus, if the update check is left enabled (the default), one unauthenticated `GET` per day to the public GitHub Releases API to see whether a newer version has been published. Nothing identifying is sent (a generic `User-Agent` only), and the feature is notify-only; toggle it off on the Settings page for zero outbound HTTP (air-gapped deployments).
 - **Single shared site password.** This is a small-scale, self-hosted tool — there is no multi-user / RBAC model, and there is no email-based password reset. That is a deliberate scope decision.
 - **Read-only by design** for the polling plane. The only write-side path against APs is the explicit, confirmation-gated *Disconnect station* action (v0.11), which issues a single deauth/disassoc command over SSH.
 
@@ -220,6 +221,7 @@ This is an actively developed project. The full living roadmap, milestone histor
 - **v0.10** — Rebrand to *AP Stats for OpenWrt* (internal).
 - **v0.11** — Operator actions & polish: polling-countdown state machine, on-demand *Run now* enrichment trigger, first-cycle enrichment concurrency audit, *Disconnect station* write-side SSH action.
 - **v0.12** — Security fixes: login throttling + password policy, session rotation on password change, anti-takeover onboarding, baseline response headers, opt-in reverse-proxy header trust, SSH host-key TOFU UX + algorithm visibility, hardened disconnect command. See *Security posture* and *Configuration*.
+- **v0.13** — Automatic update check: a daily, visitor-gated query to the GitHub Releases API that surfaces a newer published release via a navbar badge, a one-time toast, and a Settings card (toggle + diagnostics + *Check now*). Notify-only; toggle off for zero outbound traffic. See *Features* and *Security posture*.
 - **v1.0** — First public release.
 
 Beyond v1.0, candidates on the deferred list include time-series sighting history, CSV export, station tags, per-AP/WLAN summary cards, and a chiseled base image. See PROJECT.md → *Out of Scope (deferred — vNext candidates)*.
