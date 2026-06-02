@@ -1,0 +1,102 @@
+@* RssiSparkline.razor — Phase 19 M-HIST-06 (L-03 / L-05 / D-02 / D-03 / D-04).
+
+   Inline per-station RSSI sparkline: SERVER-RENDERED SVG, ZERO JS interop (L-01). Pure
+   parameter→markup shape (mirrors StatusBadge.razor — no lifecycle DI, no Cycled subscription;
+   Blazor's render diff updates it when the parent re-renders on Cycled).
+
+   Construction (RESEARCH §Pattern 3):
+     - fixed viewBox="0 0 100 22" + preserveAspectRatio="none" so the path scales to the ~90×20 CSS box.
+     - one <polyline> per contiguous run of present points; a gap (null Rssi) splits the line into
+       separate segments (L-05 — offline/zero-row bucket = a visible break, distinct from a roam).
+     - x = bucketIndex / (count-1) * 100; y inverts RSSI dBm into the viewBox over a fixed −90..−30
+       domain (clamped), matching the detail chart Y range (L-06) so all sparklines share a scale.
+     - stroke="currentColor" (D-02 — inherits --bs-body-color in both themes, no JS), line-only (no fill).
+     - vector-effect="non-scaling-stroke" keeps the 1.5px stroke crisp despite the none aspect ratio.
+   Zero present points → em-dash span (D-03), no <svg>.
+
+   Both the column header and per-row cell are gated on Settings.HistoryEnabled by the PARENT
+   (Dashboard.razor) — this component renders only when handed Points (D-04). *@
+
+@using ApStatsForOpenWrt.Data.Repositories.History
+
+@if (_segments.Count == 0)
+{
+    @* D-03 — no present points (MAC absent from the map, or all-gap window). *@
+    <span class="text-body-secondary" aria-label="No history yet">—</span>
+}
+else
+{
+    <svg viewBox="0 0 100 22" preserveAspectRatio="none" width="90" height="20"
+         role="img" aria-label="RSSI trend, last ~1 hour" class="rssi-sparkline">
+        @foreach (var seg in _segments)
+        {
+            <polyline fill="none" stroke="currentColor" stroke-width="1.5"
+                      vector-effect="non-scaling-stroke" points="@seg" />
+        }
+    </svg>
+}
+
+@code {
+    /// <summary>The Plan 02 per-MAC sparkline points (ascending; null Rssi == gap/offline bucket, L-05).</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<RssiSparklinePoint> Points { get; set; } = [];
+
+    // Fixed viewBox + RSSI domain (RESEARCH §Pattern 3 / L-06).
+    private const double VbWidth = 100d;
+    private const double VbHeight = 22d;
+    private const double RssiMin = -90d;
+    private const double RssiMax = -30d;
+
+    // One "x,y x,y …" string per contiguous run of present points (gaps split the line).
+    private List<string> _segments = new();
+
+    protected override void OnParametersSet() => _segments = BuildSegments(Points);
+
+    private static List<string> BuildSegments(IReadOnlyList<RssiSparklinePoint> points)
+    {
+        var segments = new List<string>();
+        if (points.Count == 0) return segments;
+
+        // x maps by bucket INDEX across the full point set (gaps still consume an x slot so the
+        // horizontal time axis stays linear). Single point → divide-by-zero guard pins x=0.
+        var span = points.Count > 1 ? points.Count - 1 : 1;
+
+        var current = new System.Text.StringBuilder();
+        var hasCurrent = false;
+
+        void Flush()
+        {
+            if (hasCurrent && current.Length > 0)
+            {
+                segments.Add(current.ToString().TrimEnd());
+            }
+            current.Clear();
+            hasCurrent = false;
+        }
+
+        for (var i = 0; i < points.Count; i++)
+        {
+            var rssi = points[i].Rssi;
+            if (rssi is null)
+            {
+                Flush();   // gap — end the current run
+                continue;
+            }
+
+            var x = (double)i / span * VbWidth;
+            // invert dBm into the viewBox (higher RSSI = nearer the top = smaller y), clamped.
+            var norm = ((double)rssi.Value - RssiMin) / (RssiMax - RssiMin);
+            norm = Math.Clamp(norm, 0d, 1d);
+            var y = VbHeight * (1d - norm);
+
+            current.Append(Fmt(x)).Append(',').Append(Fmt(y)).Append(' ');
+            hasCurrent = true;
+        }
+        Flush();
+
+        return segments;
+    }
+
+    // Invariant-culture, trimmed numeric formatting so the points string is stable + locale-safe.
+    private static string Fmt(double v) =>
+        Math.Round(v, 2).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+}

@@ -1,5 +1,6 @@
 @page "/"
 @using ApStatsForOpenWrt.Components.Shared
+@using ApStatsForOpenWrt.Data.Repositories.History
 @using ApStatsForOpenWrt.Services
 @using ApStatsForOpenWrt.Services.Polling
 @using ApStatsForOpenWrt.Services.Settings
@@ -14,6 +15,8 @@
 @inject IAppSettingsService Settings
 @inject PollNotifier Notifier
 @inject PreferencesService Prefs
+@inject IKpiHistoryQueryService KpiHistory
+@inject IRssiHistoryQueryService RssiHistory
 
 @* Dashboard.razor — Phase 5 live-push view (REORGANIZED Phase 8 — REQ-UI-10..13, REQ-UI-22, REQ-UI-23, REQ-UI-53).
    Phase 5 mechanics (Virtualize table, sort, search predicate, ComputeFilteredRows, IsStale, OnCycledAsync) preserved verbatim.
@@ -74,6 +77,13 @@ else
        synced with the Status FilterChipGroup via _statusFilter. *@
     <KpiTileBar Rows="_lastFilteredKpiRows" Active="_statusFilter" OnActiveChanged="OnKpiSelectedAsync" />
 
+    @* 2b. KPI history chart — Phase 19 M-HIST-05 (L-07). Sibling DIRECTLY beneath the KPI tiles
+       (L-04 — NOT nested). Gated on HistoryEnabled (D-03 — feature off → surface absent, no notices). *@
+    @if (Settings.HistoryEnabled)
+    {
+        <KpiHistoryChart />
+    }
+
     @* 3. Filter card — Phase 8 (REQ-UI-12). AdminLTE card with header "Filters",
        search + 3 chip groups in a 5/7 grid. Reset filters lives in PageHeader actions. *@
     <div class="card mb-3">
@@ -128,6 +138,13 @@ else
                                 <SortHeaderCell Column="ssid"     CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">SSID</SortHeaderCell>
                                 <SortHeaderCell Column="ap"       CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">AP</SortHeaderCell>
                                 <SortHeaderCell Column="rssi"     CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">RSSI</SortHeaderCell>
+                                @* Phase 19 M-HIST-06 / D-04 — non-sortable "RSSI (1h)" sparkline column, AFTER RSSI.
+                                   Plain <th> (NOT a SortHeaderCell — no meaningful single-key sort for a series).
+                                   Gated on HistoryEnabled (D-03 — column entirely absent when history is off). *@
+                                @if (Settings.HistoryEnabled)
+                                {
+                                    <th scope="col">RSSI (1h)</th>
+                                }
                                 <SortHeaderCell Column="lastSeen" CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">Last seen</SortHeaderCell>
                                 <SortHeaderCell Column="status"   CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">Status</SortHeaderCell>
                             </tr>
@@ -163,6 +180,10 @@ else
                                         <td>@row.Ssid</td>
                                         <td class="text-nowrap">@row.ApHostname</td>
                                         <td><RssiCell Rss="row.Rss" /></td>
+                                        @if (Settings.HistoryEnabled)
+                                        {
+                                            <td><RssiSparkline Points="@GetSparkline(row.Mac)" /></td>
+                                        }
                                         <td>@RelativeTime(row.LastSeen)</td>
                                         <td><StatusBadge Status="row.StationStatus" IsStale="@IsStale(row)" /></td>
                                     </tr>
@@ -236,6 +257,11 @@ else
     private List<DashboardKpiRow> _lastFilteredKpiRows = new();                              // projection passed to <KpiTileBar Rows="..."/>
     private readonly HashSet<string> _changedRowMacs = new();                                // REQ-UI-53 row-status-changed hook (one render frame)
     private Dictionary<string, ApStatsForOpenWrt.Data.Models.Status> _prevRowStatus = new();    // diff source for DetectRowStatusChanges
+
+    // --- Phase 19 M-HIST-06 / D-04 — per-MAC sparkline series, fetched ONCE per Cycled (NOT per row).
+    // Keyed by MAC; a MAC with no samples in the ~1 h window is ABSENT (drives the RssiSparkline em-dash, D-03).
+    private IReadOnlyDictionary<string, RssiSparklineSeries> _sparklines =
+        new Dictionary<string, RssiSparklineSeries>();
 
     private string DashTenBody =>
         $"You have {_nodeCount} access point{(_nodeCount == 1 ? "" : "s")} configured, but every WLAN is disabled. Enable at least one WLAN to start seeing connected stations.";
@@ -315,8 +341,31 @@ else
             _rows = await BuildRowsAsync(allNodes);
             _allSsids    = _rows.Select(r => r.Ssid).Where(s => s != "—").Distinct().OrderBy(s => s).ToList();
             _allApLabels = _rows.Select(r => r.ApHostname).Where(a => a != "—").Distinct().OrderBy(a => a).ToList();
+
+            // Phase 19 M-HIST-06 / D-04 — fetch the per-MAC sparkline map ONCE per ReloadAsync
+            // (initial load + each Cycled), scoped to the currently-listed MAC set. NOT a per-row
+            // query (T-19-08 N+1 mitigation). Only when history is enabled (D-03).
+            if (Settings.HistoryEnabled)
+            {
+                var macs = _rows.Select(r => r.Mac).Distinct().ToList();
+                _sparklines = macs.Count > 0
+                    ? await RssiHistory.GetSparklineSeriesAsync(macs, CancellationToken.None)
+                    : new Dictionary<string, RssiSparklineSeries>();
+            }
+            else
+            {
+                _sparklines = new Dictionary<string, RssiSparklineSeries>();
+            }
         }
     }
+
+    /// <summary>
+    /// Phase 19 D-04 — dispatch a station's sparkline series by MAC from the once-per-Cycled map.
+    /// A MAC absent from the map (no samples in the ~1 h window) returns an empty list, which the
+    /// RssiSparkline renders as the em-dash (D-03).
+    /// </summary>
+    private IReadOnlyList<RssiSparklinePoint> GetSparkline(string mac) =>
+        _sparklines.TryGetValue(mac, out var series) ? series.Points : Array.Empty<RssiSparklinePoint>();
 
     private async Task OnCycledAsync(PollSnapshot snapshot)
     {

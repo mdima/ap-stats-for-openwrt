@@ -2,6 +2,7 @@ using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Data.Repositories.History;
 using ApStatsForOpenWrt.Services;
 using ApStatsForOpenWrt.Services.Settings;
 using ApStatsForOpenWrt.Services.Vendor;
@@ -87,11 +88,12 @@ public sealed class DashboardTests
 
     private sealed class StubSettings : IAppSettingsService
     {
-        public StubSettings(bool wizardDismissed = false, IReadOnlyList<string>? localDomainSuffixes = null, string? uiPasswordHash = null)
+        public StubSettings(bool wizardDismissed = false, IReadOnlyList<string>? localDomainSuffixes = null, string? uiPasswordHash = null, bool historyEnabled = true)
         {
             WizardDismissed = wizardDismissed;
             LocalDomainSuffixes = localDomainSuffixes ?? Array.Empty<string>();
             UIPasswordHash = uiPasswordHash;
+            HistoryEnabled = historyEnabled;
         }
         public int     PollingIntervalSeconds { get; } = 30;
         public string? UIPasswordHash         { get; }
@@ -108,7 +110,7 @@ public sealed class DashboardTests
         public Task BumpSessionVersionAsync(CancellationToken ct = default) => Task.CompletedTask;
         // Phase 17 Plan 17-01 M-UPD-02 — minimal mutable update-check stub members.
         public bool UpdateCheckEnabled { get; private set; } = true;
-        public bool HistoryEnabled => true;
+        public bool HistoryEnabled { get; }
         public Task SetHistoryEnabledAsync(bool enabled, CancellationToken ct = default) => Task.CompletedTask;
         public string? LatestKnownVersion { get; private set; }
         public string? LatestReleaseUrl { get; private set; }
@@ -122,8 +124,32 @@ public sealed class DashboardTests
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }
 
+    // Phase 19 stub-churn (RESEARCH §Pitfall 5): Dashboard.razor now injects both history query
+    // services. Hand-rolled stubs (TESTING.md — no mocking framework) returning empty results so
+    // the existing render branches are unaffected and the sparkline column renders the em-dash.
+    private sealed class StubKpiHistory : IKpiHistoryQueryService
+    {
+        public Task<KpiHistoryDto> GetLast12hAsync(CancellationToken ct) =>
+            Task.FromResult(new KpiHistoryDto(Array.Empty<KpiHistoryBucket>(), IsEmpty: true));
+    }
+
+    private sealed class StubRssiHistory : IRssiHistoryQueryService
+    {
+        public Dictionary<string, RssiSparklineSeries> Map { get; } = new();
+        public int SparklineCallCount { get; private set; }
+
+        public Task<IReadOnlyDictionary<string, RssiSparklineSeries>> GetSparklineSeriesAsync(IEnumerable<string> macs, CancellationToken ct)
+        {
+            SparklineCallCount++;
+            return Task.FromResult<IReadOnlyDictionary<string, RssiSparklineSeries>>(Map);
+        }
+
+        public Task<RssiDetailDto> GetDetailSeriesAsync(string mac, CancellationToken ct) =>
+            Task.FromResult(new RssiDetailDto(Array.Empty<DateTime>(), Array.Empty<RssiDetailSeries>(), IsEmpty: true));
+    }
+
     private static (BunitContext ctx, StubNodeRepo nodes, StubNetworkRepo nets, StubStationRepo stations, StubOuiLookup oui)
-        Build(IEnumerable<WiFiNode> nodes, IEnumerable<WLANStation> stations, bool anyEnabled, Dictionary<int, List<WiFiNetwork>>? networkMap = null, bool wizardDismissed = false, IReadOnlyList<string>? localDomainSuffixes = null, string? uiPasswordHash = null)
+        Build(IEnumerable<WiFiNode> nodes, IEnumerable<WLANStation> stations, bool anyEnabled, Dictionary<int, List<WiFiNetwork>>? networkMap = null, bool wizardDismissed = false, IReadOnlyList<string>? localDomainSuffixes = null, string? uiPasswordHash = null, bool historyEnabled = true)
     {
         var ctx = new BunitContext();
         // Phase 8: Dashboard.razor injects PreferencesService for view-state restore + persistence.
@@ -139,7 +165,7 @@ public sealed class DashboardTests
         }
         var sr = new StubStationRepo(stations);
         var oui = new StubOuiLookup();
-        var settings = new StubSettings(wizardDismissed, localDomainSuffixes, uiPasswordHash);
+        var settings = new StubSettings(wizardDismissed, localDomainSuffixes, uiPasswordHash, historyEnabled);
         ctx.Services.AddSingleton<INodeRepo>(nr);
         ctx.Services.AddSingleton<INetworkRepo>(nws);
         ctx.Services.AddSingleton<IStationRepo>(sr);
@@ -147,6 +173,9 @@ public sealed class DashboardTests
         ctx.Services.AddSingleton<IAppSettingsService>(settings);
         ctx.Services.AddSingleton(new ApStatsForOpenWrt.Services.Polling.PollNotifier());
         ctx.Services.AddSingleton(new PreferencesService(ctx.JSInterop.JSRuntime));
+        // Phase 19 stub-churn — register the two history query services Dashboard now injects.
+        ctx.Services.AddSingleton<IKpiHistoryQueryService>(new StubKpiHistory());
+        ctx.Services.AddSingleton<IRssiHistoryQueryService>(new StubRssiHistory());
         return (ctx, nr, nws, sr, oui);
     }
 
@@ -908,6 +937,47 @@ public sealed class DashboardTests
             // accidentally dropped real labels alongside the "—" placeholder).
             Assert.Contains(ssidChips, b => b.TextContent.Trim() == "guest");
             Assert.Contains(apChips,   b => b.TextContent.Trim().StartsWith("ap-A"));
+        }
+    }
+
+    // ── Phase 19 M-HIST-05 / M-HIST-06 (D-03 / D-04) — RSSI (1h) sparkline column gating ──────
+
+    [Fact]
+    public void Dashboard_RssiSparklineColumn_Present_WhenHistoryEnabled()
+    {
+        var (node, net) = MakeApAndNet();
+        var s = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10, Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { s }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } },
+            historyEnabled: true);
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            // The non-sortable "RSSI (1h)" header is present...
+            Assert.Contains("RSSI (1h)", cut.Markup);
+            var rssiOneHourTh = cut.FindAll("th").First(t => t.TextContent.Contains("RSSI (1h)"));
+            // ...and is a plain <th> (NOT a SortHeaderCell — no aria-sort, no sort button, D-04).
+            Assert.False(rssiOneHourTh.HasAttribute("aria-sort"));
+            Assert.Empty(rssiOneHourTh.QuerySelectorAll("button"));
+            // The KPI history chart card mounts beneath the KPI tiles.
+            Assert.Contains("Activity — last 12 h", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public void Dashboard_RssiSparklineColumn_Absent_WhenHistoryDisabled()
+    {
+        // D-03 — history off → no <th>, no chart, no notices.
+        var (node, net) = MakeApAndNet();
+        var s = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10, Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { s }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } },
+            historyEnabled: false);
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            Assert.DoesNotContain("RSSI (1h)", cut.Markup);
+            Assert.DoesNotContain("Activity — last 12 h", cut.Markup);
         }
     }
 
