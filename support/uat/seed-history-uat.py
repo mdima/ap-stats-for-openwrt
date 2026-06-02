@@ -192,9 +192,14 @@ def main():
         sub.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         sub.close()
         run(["docker", "cp", local, f"{CONTAINER}:{DB_PATH_IN_CONTAINER}"])
+        # `docker cp` writes the file root-owned, but the container runs as the non-root `app`
+        # user (Dockerfile USER app, uid 1654). Without this chown the app hits SQLite error 8
+        # "attempt to write a readonly database" while acquiring the EF migration lock on restart,
+        # and crash-loops. Chown back to app before restarting. (Container is up at this point.)
+        run(["docker", "exec", "-u", "0", CONTAINER, "chown", "app:app", DB_PATH_IN_CONTAINER])
         for ext in ("-wal", "-shm"):
             subprocess.run(
-                ["docker", "exec", CONTAINER, "rm", "-f", f"{DB_PATH_IN_CONTAINER}{ext}"], check=False
+                ["docker", "exec", "-u", "0", CONTAINER, "rm", "-f", f"{DB_PATH_IN_CONTAINER}{ext}"], check=False
             )
         print("[4/4] restart container (settings cache + WAL re-open)")
         run(["docker", "restart", CONTAINER])
