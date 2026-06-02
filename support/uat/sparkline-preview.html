@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RSSI sparkline — reference-frame preview (#3 options)</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         margin: 0; padding: 28px 32px 60px; background: #fff; color: #212529; }
+  body.dark { background: #1b1f24; color: #dee2e6; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 20px; color: #6c757d; }
+  body.dark p.sub { color: #adb5bd; }
+  .bar { margin: 0 0 22px; }
+  button { font: inherit; padding: 6px 14px; border: 1px solid currentColor; border-radius: 6px;
+           background: transparent; color: inherit; cursor: pointer; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { padding: 10px 12px; text-align: left; vertical-align: middle; border-bottom: 1px solid rgba(128,128,128,.25); }
+  th { font-size: 12.5px; text-transform: uppercase; letter-spacing: .03em; color: #6c757d; }
+  body.dark th { color: #adb5bd; }
+  th small { display: block; text-transform: none; letter-spacing: 0; font-weight: 400; color: inherit; opacity: .75; margin-top: 3px; }
+  td.name { font-size: 13.5px; white-space: nowrap; }
+  /* The sparkline inherits text color via currentColor — exactly like the real component. */
+  .cell { display: flex; align-items: center; gap: 10px; }
+  svg.spark { width: 124px; height: 26px; display: block; }      /* ~1.4x the real ~90x20 cell */
+  svg.real  { width: 90px;  height: 20px; }                       /* true production size */
+  .legend { margin-top: 30px; font-size: 13.5px; color: #6c757d; }
+  body.dark .legend { color: #adb5bd; }
+  code { background: rgba(128,128,128,.15); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <div class="bar"><button id="toggle">Toggle dark mode</button></div>
+  <h1>RSSI sparkline — reference-frame preview</h1>
+  <p class="sub">Same algorithm as the real component (viewBox 0 0 100 22, non-scaling-stroke, gaps split the line, stroke = <code>currentColor</code>). Hover any sparkline for the <strong>#1 tooltip</strong>. All columns B–F use <strong>#4 auto-scale</strong>. Columns C–F show the <strong>#3</strong> reference options. The rightmost column shows column F at the <em>true</em> ~90×20px size.</p>
+
+  <table id="grid"></table>
+
+  <div class="legend">
+    <p><strong>Pick your #3 reference style</strong> (B is auto-scale alone, for contrast):</p>
+    <ul>
+      <li><strong>C — good-signal band:</strong> shaded green zone (≥ −67 dBm). Anchors "good vs weak"… but watch rows 1 &amp; 2 — under full auto-scale the band <em>fills</em> when every sample is strong and <em>vanishes</em> when every sample is weak.</li>
+      <li><strong>D — threshold line:</strong> dashed red line at −70 dBm ("weak"). Same off-scale caveat as the band.</li>
+      <li><strong>E — min/max dots:</strong> green = best, red = worst point. <em>Always</em> visible regardless of scale — robust under auto-scale.</li>
+      <li><strong>F — band + min/max dots:</strong> most information, most ink.</li>
+    </ul>
+    <p>Tell me which column (C / D / E / F — or a mix, e.g. "E plus the band only when it's in range") and I'll implement #1 + #4 + that #3 + #5 (whole cell becomes a link to the station detail page) in the real component.</p>
+  </div>
+
+<script>
+const W = 100, H = 22, PAD = 2, MIN_SPAN = 8;
+const SERIES = [
+  { name: "Strong steady (~−48)",        data: [-48,-49,-47,-50,-48,-46,-49,-48,-47,-48,-49,-48] },
+  { name: "Weak steady (~−78)",          data: [-78,-79,-77,-80,-78,-76,-79,-81,-78,-77,-79,-78] },
+  { name: "Fluctuating / roam (−55…−70)", data: [-58,-62,-55,-67,-60,-70,-64,-57,-66,-59,-63,-61] },
+  { name: "Climbing (−72 → −46)",        data: [-72,-70,-68,-66,-63,-60,-58,-55,-53,-50,-48,-46] },
+  { name: "Gap (offline mid-window)",    data: [-65,-66,-64,-67,null,null,null,-68,-66,-67,-65,-66] },
+];
+const VARIANTS = [
+  { key: "fixed",     label: "A · current",      sub: "fixed −90…−30 (flat)" },
+  { key: "auto",      label: "B · auto-scale",   sub: "#4 only — no reference" },
+  { key: "band",      label: "C · + band",       sub: "#3 good-signal zone" },
+  { key: "threshold", label: "D · + threshold",  sub: "#3 −70 dBm line" },
+  { key: "dots",      label: "E · + min/max",    sub: "#3 dots" },
+  { key: "combo",     label: "F · band + dots",  sub: "#3 combined" },
+];
+
+const present = v => v.filter(x => x != null);
+function domain(vals, variant) {
+  if (variant === "fixed") return [-90, -30];
+  const p = present(vals);
+  let lo = Math.min(...p) - PAD, hi = Math.max(...p) + PAD;
+  if (hi - lo < MIN_SPAN) { const mid = (hi + lo) / 2; lo = mid - MIN_SPAN / 2; hi = mid + MIN_SPAN / 2; }
+  return [lo, hi];
+}
+const yOf = (v, lo, hi) => H * (1 - Math.max(0, Math.min(1, (v - lo) / (hi - lo))));
+const xOf = (i, n) => n > 1 ? i / (n - 1) * W : 0;
+function runs(vals) { const out = []; let cur = []; vals.forEach((v, i) => { if (v == null) { if (cur.length) { out.push(cur); cur = []; } } else cur.push(i); }); if (cur.length) out.push(cur); return out; }
+
+function svg(series, variant, cls) {
+  const vals = series.data, n = vals.length, [lo, hi] = domain(vals, variant);
+  let inner = "";
+  if (variant === "band" || variant === "combo") {
+    const a = yOf(-30, lo, hi), b = yOf(-67, lo, hi), top = Math.min(a, b), h = Math.abs(a - b);
+    inner += `<rect x="0" y="${top.toFixed(1)}" width="${W}" height="${h.toFixed(1)}" fill="rgba(25,135,84,.15)"/>`;
+  }
+  if (variant === "threshold") {
+    const yt = yOf(-70, lo, hi);
+    inner += `<line x1="0" y1="${yt.toFixed(1)}" x2="${W}" y2="${yt.toFixed(1)}" stroke="rgba(220,53,69,.55)" stroke-width="0.7" stroke-dasharray="3 2" vector-effect="non-scaling-stroke"/>`;
+  }
+  runs(vals).forEach(run => {
+    const pts = run.map(i => `${xOf(i, n).toFixed(1)},${yOf(vals[i], lo, hi).toFixed(1)}`).join(" ");
+    inner += `<polyline fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" points="${pts}"/>`;
+  });
+  if (variant === "dots" || variant === "combo") {
+    const pp = vals.map((v, i) => ({ v, i })).filter(o => o.v != null);
+    const mn = pp.reduce((a, b) => b.v < a.v ? b : a), mx = pp.reduce((a, b) => b.v > a.v ? b : a);
+    inner += `<circle cx="${xOf(mx.i, n).toFixed(1)}" cy="${yOf(mx.v, lo, hi).toFixed(1)}" r="1.7" fill="#198754"/>`;
+    inner += `<circle cx="${xOf(mn.i, n).toFixed(1)}" cy="${yOf(mn.v, lo, hi).toFixed(1)}" r="1.7" fill="#dc3545"/>`;
+  }
+  const p = present(vals);
+  const title = `${series.name}\nlatest ${p[p.length - 1]} dBm · range ${Math.min(...p)}…${Math.max(...p)} dBm`;
+  return `<svg class="spark ${cls || ""}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"><title>${title}</title>${inner}</svg>`;
+}
+
+const grid = document.getElementById("grid");
+let head = "<tr><th>Signal</th>" + VARIANTS.map(v => `<th>${v.label}<small>${v.sub}</small></th>`).join("") + `<th>F · true size<small>~90×20px</small></th></tr>`;
+let rows = SERIES.map(s =>
+  `<tr><td class="name">${s.name}</td>` +
+  VARIANTS.map(v => `<td><div class="cell">${svg(s, v.key)}</div></td>`).join("") +
+  `<td><div class="cell">${svg(s, "combo", "real")}</div></td></tr>`
+).join("");
+grid.innerHTML = head + rows;
+
+document.getElementById("toggle").onclick = () => document.body.classList.toggle("dark");
+</script>
+</body>
+</html>
