@@ -193,4 +193,63 @@ public sealed class SettingsRoundTripTests(SqliteInMemoryFixture fixture) : ICla
         Assert.Equal(DateTimeKind.Utc, svc.LastCheckedAtUtc!.Value.Kind);
         Assert.Equal(when, svc.LastCheckedAtUtc.Value);
     }
+
+    // ── Phase 18 Plan 18-02 M-HIST-04 — HistoryEnabled Path-B slice ─────────────
+
+    /// <summary>
+    /// Path B seed: with no DB row present for <c>HistoryEnabled</c>, a warmed service reads
+    /// <c>HistoryEnabled=true</c> — the in-memory warm-time `?? true` IS the seed (M-HIST-04
+    /// default-on). Also confirms there is genuinely no physical row backing the default.
+    /// </summary>
+    [Fact]
+    public async Task FreshWarm_HistoryEnabled_DefaultsTrue_NoDbRow()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        // Ensure the key is genuinely absent (a sibling test may have written it on the shared fixture).
+        await using (var seed = _fixture.CreateContext())
+        {
+            var row = await seed.AppSettings.FirstOrDefaultAsync(r => r.Key == "HistoryEnabled", ct);
+            if (row is not null) { seed.AppSettings.Remove(row); await seed.SaveChangesAsync(ct); }
+        }
+
+        var svc = CreateService();
+        await svc.WarmAsync(ct);
+
+        Assert.True(svc.HistoryEnabled);
+
+        await using var verify = _fixture.CreateContext();
+        var present = await verify.AppSettings.AsNoTracking()
+            .AnyAsync(r => r.Key == "HistoryEnabled", ct);
+        Assert.False(present);
+    }
+
+    /// <summary>
+    /// M-HIST-04 round-trip: setting false then re-warming reads false back; setting true reads true.
+    /// The setter fires <see cref="IAppSettingsService.Changed"/> exactly once per call (the
+    /// wake-on-toggle decorator in Plan 04 subscribes to this signal).
+    /// </summary>
+    [Fact]
+    public async Task SetHistoryEnabledAsync_RoundTripsFalse_AndFiresChanged()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var svc = CreateService();
+        await svc.WarmAsync(ct);
+
+        var fires = 0;
+        svc.Changed += _ => Interlocked.Increment(ref fires);
+
+        await svc.SetHistoryEnabledAsync(false, ct);
+        Assert.False(svc.HistoryEnabled);
+        Assert.Equal(1, fires);
+
+        // Durable: a fresh service over the same DB reads the persisted false.
+        var svc2 = CreateService();
+        await svc2.WarmAsync(ct);
+        Assert.False(svc2.HistoryEnabled);
+
+        await svc.SetHistoryEnabledAsync(true, ct);
+        Assert.True(svc.HistoryEnabled);
+        Assert.Equal(2, fires);
+    }
 }

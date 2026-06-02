@@ -76,6 +76,15 @@ public interface IAppSettingsService
     /// </summary>
     DateTime? LastCheckedAtUtc { get; }
 
+    /// <summary>
+    /// M-HIST-04 — master switch for the history-capture feature. Default <c>true</c> (default-on,
+    /// mirroring <see cref="UpdateCheckEnabled"/>'s ship-armed posture). Written-by: the Settings card
+    /// (Plan 06) / first-run wizard (Phase 19). Read-by: the orchestrator's history-insert gate (Plan 03)
+    /// and the wake-on-toggle decorator (Plan 04). Path B seed: there is NO physical DB row for this key
+    /// on a fresh DB — the in-memory warm-time default IS the seed (no EF migration, no <c>HasData</c> row).
+    /// </summary>
+    bool HistoryEnabled { get; }
+
     Task SetPollingIntervalSecondsAsync(int seconds, CancellationToken ct = default);
     Task SetUIPasswordHashAsync(string? hash, CancellationToken ct = default);
     Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default);
@@ -123,6 +132,9 @@ public interface IAppSettingsService
     /// <see cref="Changed"/> EXACTLY ONCE (a single badge/toast re-render, not three).
     /// </summary>
     Task SetLatestReleaseAsync(string version, string url, DateTime checkedAtUtc, CancellationToken ct = default);
+
+    /// <summary>M-HIST-04 — operator toggles history capture on/off from the Settings card (Plan 06) / wizard (immediate persist, fires <see cref="Changed"/> for the wake-on-toggle decorator).</summary>
+    Task SetHistoryEnabledAsync(bool enabled, CancellationToken ct = default);
 
     /// <summary>Called once by AppSettingsBootstrapHostedService after migrations complete.</summary>
     Task WarmAsync(CancellationToken ct = default);
