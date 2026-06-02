@@ -1,8 +1,10 @@
 @page "/Stations/{Mac}"
 @implements IDisposable
 @using System.ComponentModel.DataAnnotations
+@using ApStatsForOpenWrt.Components.Shared
 @using ApStatsForOpenWrt.Data.Models
 @using ApStatsForOpenWrt.Data.Repositories
+@using ApStatsForOpenWrt.Data.Repositories.History
 @using ApStatsForOpenWrt.Services.Polling
 @using ApStatsForOpenWrt.Services.Settings
 @using ApStatsForOpenWrt.Services.Vendor
@@ -20,6 +22,9 @@
 @* 260516-dlu — live-update subscription so the page reflects DB-side changes
    (notably post-Disconnect Offline transitions) without manual navigation/F5. *@
 @inject PollNotifier Notifier
+@* Phase 19 19-04 M-HIST-07 — detail multi-series RSSI history chart. Inject the SERVICE,
+   never IDbContextFactory (the ArchitectureTests UI-layer carve-out constraint). *@
+@inject IRssiHistoryQueryService RssiHistory
 
 @* Stations/Detail.razor — Phase 5 D-13 / DASH-15 / DASH-14 / DASH-16. UI-SPEC §Layout
    Contracts §/Stations/{mac} (lines 244-316), §Component Contracts §Detail Page (lines
@@ -212,6 +217,20 @@ else
             </div>
         </div>
     </div>
+
+    @* Phase 19 19-04 M-HIST-07 / L-06 — full-width multi-series RSSI history chart below the
+       two-column layout. Gated on Settings.HistoryEnabled (D-03: history off → card absent, no
+       notices). The chart owns its OWN PollNotifier.Cycled subscription internally (it is an
+       IAsyncDisposable component) — it is NOT wired into this page's OnCycleAsync, so the page
+       keeps exactly ONE Cycled subscription for the header/station fields. *@
+    @if (Settings.HistoryEnabled)
+    {
+        <div class="row g-3 mt-0">
+            <div class="col-12">
+                <RssiHistoryChart Mac="@_mac" />
+            </div>
+        </div>
+    }
 
     @* Delete modal — reuses Phase 3 ConfirmationModal verbatim. CONTEXT D-14 modal copy. *@
     <ConfirmationModal IsOpen="_deleteOpen"
