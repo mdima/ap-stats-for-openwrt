@@ -965,6 +965,23 @@ public sealed class DashboardTests
     }
 
     [Fact]
+    public void Dashboard_SparklineCell_LinksToStationDetail_WhenHistoryEnabled()
+    {
+        // QUAL-02 #5 — the whole sparkline cell is a click-through to /Stations/{mac}.
+        var (node, net) = MakeApAndNet();
+        var s = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10, Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { s }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } },
+            historyEnabled: true);
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            var link = cut.Find("a[data-testid=\"sparkline-link\"]");
+            Assert.Equal($"/Stations/{Uri.EscapeDataString("AA:00:00:00:00:01")}", link.GetAttribute("href"));
+        }
+    }
+
+    [Fact]
     public void Dashboard_RssiSparklineColumn_Absent_WhenHistoryDisabled()
     {
         // D-03 — history off → no <th>, no chart, no notices.

@@ -8,11 +8,19 @@
      - fixed viewBox="0 0 100 22" + preserveAspectRatio="none" so the path scales to the ~90×20 CSS box.
      - one <polyline> per contiguous run of present points; a gap (null Rssi) splits the line into
        separate segments (L-05 — offline/zero-row bucket = a visible break, distinct from a roam).
-     - x = bucketIndex / (count-1) * 100; y inverts RSSI dBm into the viewBox over a fixed −90..−30
-       domain (clamped), matching the detail chart Y range (L-06) so all sparklines share a scale.
+     - x = bucketIndex / (count-1) * 100.
      - stroke="currentColor" (D-02 — inherits --bs-body-color in both themes, no JS), line-only (no fill).
      - vector-effect="non-scaling-stroke" keeps the 1.5px stroke crisp despite the none aspect ratio.
    Zero present points → em-dash span (D-03), no <svg>.
+
+   QUAL-02 sparkline enhancements (operator-requested 2026-06-02):
+     - #4 auto-scale — the Y domain tracks THIS series' own min/max (padded, with a span floor) instead
+       of the old fixed −90..−30 that squashed real variation into ~1–2px. Each row reads on its own scale.
+     - #3 (C) good-signal band — a shaded green zone (≥ −67 dBm) projected through the same auto-scaled
+       domain, anchoring "good vs weak". Operator-chosen trade-off (preview column C): under auto-scale the
+       band fills when every sample is strong and vanishes when every sample is weak.
+     - #1 hover tooltip — native SVG <title> with the latest reading + the window's range.
+     - #5 click-through is the PARENT's job (Dashboard wraps the cell in an /Stations/{mac} link) — not here.
 
    Both the column header and per-row cell are gated on Settings.HistoryEnabled by the PARENT
    (Dashboard.razor) — this component renders only when handed Points (D-04). *@
@@ -28,6 +36,14 @@ else
 {
     <svg viewBox="0 0 100 22" preserveAspectRatio="none" width="90" height="20"
          role="img" aria-label="RSSI trend, last ~1 hour" class="rssi-sparkline">
+        @* #1 — native hover tooltip (latest + range). *@
+        <title>@_title</title>
+        @if (_hasBand)
+        {
+            @* #3 (C) — good-signal band (≥ −67 dBm), behind the line. Bootstrap-success tint @ 15%. *@
+            <rect class="rssi-sparkline-band" x="0" y="@_bandY" width="100" height="@_bandHeight"
+                  fill="rgba(25,135,84,.15)" />
+        }
         @foreach (var seg in _segments)
         {
             <polyline fill="none" stroke="currentColor" stroke-width="1.5"
@@ -40,18 +56,93 @@ else
     /// <summary>The Plan 02 per-MAC sparkline points (ascending; null Rssi == gap/offline bucket, L-05).</summary>
     [Parameter, EditorRequired] public IReadOnlyList<RssiSparklinePoint> Points { get; set; } = [];
 
-    // Fixed viewBox + RSSI domain (RESEARCH §Pattern 3 / L-06).
+    // Fixed viewBox (RESEARCH §Pattern 3).
     private const double VbWidth = 100d;
     private const double VbHeight = 22d;
-    private const double RssiMin = -90d;
-    private const double RssiMax = -30d;
+
+    // #4 auto-scale knobs: pad the series extremes, then floor the span so a near-flat trace isn't
+    // amplified into meaningless noise.
+    private const double Pad = 2d;       // dBm above/below the series min/max
+    private const double MinSpan = 8d;   // dBm — minimum visible domain span
+
+    // #3 (C) good-signal band reference points (dBm), projected through the auto-scaled domain.
+    private const double BandTopDbm = -30d;     // upper anchor (chart-top reference)
+    private const double BandFloorDbm = -67d;   // good-signal threshold — ≥ −67 dBm is "good"
 
     // One "x,y x,y …" string per contiguous run of present points (gaps split the line).
     private List<string> _segments = new();
 
-    protected override void OnParametersSet() => _segments = BuildSegments(Points);
+    // #3 band geometry (only rendered when it has visible height under the current scale).
+    private bool _hasBand;
+    private string _bandY = "0";
+    private string _bandHeight = "0";
 
-    private static List<string> BuildSegments(IReadOnlyList<RssiSparklinePoint> points)
+    // #1 tooltip text.
+    private string? _title;
+
+    protected override void OnParametersSet()
+    {
+        var present = new List<int>();
+        foreach (var p in Points)
+        {
+            if (p.Rssi is int r) present.Add(r);
+        }
+
+        if (present.Count == 0)
+        {
+            // D-03 — no present samples; render the em-dash, no band/title.
+            _segments = new();
+            _hasBand = false;
+            _title = null;
+            return;
+        }
+
+        // #4 — auto-scale the Y domain to THIS series' own range. Pad the extremes, then enforce a
+        // minimum span so a steady trace doesn't get blown up into full-scale jitter.
+        double lo = present.Min() - Pad;
+        double hi = present.Max() + Pad;
+        if (hi - lo < MinSpan)
+        {
+            var mid = (hi + lo) / 2d;
+            lo = mid - MinSpan / 2d;
+            hi = mid + MinSpan / 2d;
+        }
+
+        _segments = BuildSegments(Points, lo, hi);
+
+        // #3 (C) — good-signal band from the good-signal threshold (−67 dBm) up to the top
+        // reference (−30 dBm), through the SAME auto-scaled domain. Fills when every sample is
+        // strong, vanishes when every sample is weak (the operator-chosen column-C trade-off).
+        var a = YOf(BandTopDbm, lo, hi);
+        var b = YOf(BandFloorDbm, lo, hi);
+        var top = Math.Min(a, b);
+        var height = Math.Abs(a - b);
+        _hasBand = height > 0.05d;
+        _bandY = Fmt(top);
+        _bandHeight = Fmt(height);
+
+        // #1 — tooltip: latest reading + the window's range.
+        _title = $"Latest {LatestPresent(Points)} dBm · range {present.Min()}…{present.Max()} dBm";
+    }
+
+    // Chronologically-last present reading (points are ascending; only called with ≥1 present point).
+    private static int LatestPresent(IReadOnlyList<RssiSparklinePoint> points)
+    {
+        for (var i = points.Count - 1; i >= 0; i--)
+        {
+            if (points[i].Rssi is int r) return r;
+        }
+        return 0; // unreachable
+    }
+
+    // dBm → viewBox Y over [lo, hi]: higher RSSI = nearer the top = smaller y, clamped.
+    private static double YOf(double v, double lo, double hi)
+    {
+        var norm = Math.Clamp((v - lo) / (hi - lo), 0d, 1d);
+        return VbHeight * (1d - norm);
+    }
+
+    private static List<string> BuildSegments(IReadOnlyList<RssiSparklinePoint> points, double lo, double hi)
     {
         var segments = new List<string>();
         if (points.Count == 0) return segments;
@@ -83,10 +174,7 @@ else
             }
 
             var x = (double)i / span * VbWidth;
-            // invert dBm into the viewBox (higher RSSI = nearer the top = smaller y), clamped.
-            var norm = ((double)rssi.Value - RssiMin) / (RssiMax - RssiMin);
-            norm = Math.Clamp(norm, 0d, 1d);
-            var y = VbHeight * (1d - norm);
+            var y = YOf(rssi.Value, lo, hi);
 
             current.Append(Fmt(x)).Append(',').Append(Fmt(y)).Append(' ');
             hasCurrent = true;

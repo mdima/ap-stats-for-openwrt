@@ -182,7 +182,13 @@ else
                                         <td><RssiCell Rss="row.Rss" /></td>
                                         @if (Settings.HistoryEnabled)
                                         {
-                                            <td><RssiSparkline Points="@GetSparkline(row.Mac)" /></td>
+                                            @* #5 — whole sparkline cell click-throughs to the station detail page (same target as the name cell). *@
+                                            <td>
+                                                <a href="@($"/Stations/{Uri.EscapeDataString(row.Mac)}")" class="d-inline-block"
+                                                   data-testid="sparkline-link" aria-label="@($"RSSI history for {row.Mac}")">
+                                                    <RssiSparkline Points="@GetSparkline(row.Mac)" />
+                                                </a>
+                                            </td>
                                         }
                                         <td>@RelativeTime(row.LastSeen)</td>
                                         <td><StatusBadge Status="row.StationStatus" IsStale="@IsStale(row)" /></td>
