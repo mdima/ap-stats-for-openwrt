@@ -157,6 +157,7 @@ try
     builder.Services.AddTransient<INodeRepo,        NodeRepo>();
     builder.Services.AddTransient<INetworkRepo,     NetworkRepo>();
     builder.Services.AddTransient<IStationRepo,     StationRepo>();
+    builder.Services.AddTransient<IHistoryRepo,     HistoryRepo>();   // Phase 18 M-HIST-01 — history write seam
     builder.Services.AddTransient<IAppSettingsRepo, AppSettingsRepo>();
     builder.Services.AddSingleton<IAppSettingsService, AppSettingsService>();
 
