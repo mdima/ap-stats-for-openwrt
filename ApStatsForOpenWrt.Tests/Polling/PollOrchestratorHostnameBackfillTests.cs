@@ -156,6 +156,7 @@ public sealed class PollOrchestratorHostnameBackfillTests(SqliteInMemoryFixture 
             new NodeRepo(dpFactory),
             new NetworkRepo(dpFactory),
             stationRepo,
+            new HistoryRepo(dpFactory),
             probe,
             new PollNotifier(),
             NullLogger<PollOrchestrator>.Instance,

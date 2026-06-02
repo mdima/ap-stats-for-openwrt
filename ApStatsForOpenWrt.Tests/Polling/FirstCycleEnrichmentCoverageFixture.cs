@@ -147,6 +147,7 @@ public sealed class FirstCycleEnrichmentCoverageFixture(SqliteInMemoryFixture fi
             new NodeRepo(dpFactory),
             new NetworkRepo(dpFactory),
             new StationRepo(dpFactory),
+            new HistoryRepo(dpFactory),
             Probe,
             new PollNotifier(),
             NullLogger<PollOrchestrator>.Instance,

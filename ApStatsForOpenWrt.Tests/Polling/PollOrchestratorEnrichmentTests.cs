@@ -68,6 +68,7 @@ public sealed class PollOrchestratorEnrichmentTests(SqliteInMemoryFixture fixtur
             new NodeRepo(dpFactory),
             new NetworkRepo(dpFactory),
             new StationRepo(dpFactory),
+            new HistoryRepo(dpFactory),
             probeAsync,
             new PollNotifier(),
             NullLogger<PollOrchestrator>.Instance,

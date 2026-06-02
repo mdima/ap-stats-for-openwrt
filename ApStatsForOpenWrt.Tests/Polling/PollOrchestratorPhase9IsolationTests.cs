@@ -109,6 +109,7 @@ public sealed class PollOrchestratorPhase9IsolationTests(SqliteInMemoryFixture f
             nodeRepo,
             networkRepo,
             stationRepo,
+            new HistoryRepo(dpFactory),
             probeFactory,
             notifier,
             NullLogger<PollOrchestrator>.Instance,
@@ -205,7 +206,7 @@ public sealed class PollOrchestratorPhase9IsolationTests(SqliteInMemoryFixture f
             };
 
         var orchestrator = new PollOrchestrator(
-            dpFactory, nodeRepo, networkRepo, stationRepo, probeFactory, notifier,
+            dpFactory, nodeRepo, networkRepo, stationRepo, new HistoryRepo(dpFactory), probeFactory, notifier,
             NullLogger<PollOrchestrator>.Instance, settings, enrichmentFactory, TimeProvider.System,
             new ForceEnrichmentService());
 
@@ -274,7 +275,7 @@ public sealed class PollOrchestratorPhase9IsolationTests(SqliteInMemoryFixture f
             };
 
         var orchestrator = new PollOrchestrator(
-            dpFactory, nodeRepo, networkRepo, stationRepo, probeFactory, notifier,
+            dpFactory, nodeRepo, networkRepo, stationRepo, new HistoryRepo(dpFactory), probeFactory, notifier,
             NullLogger<PollOrchestrator>.Instance, settings, enrichmentFactory, TimeProvider.System,
             new ForceEnrichmentService());
 

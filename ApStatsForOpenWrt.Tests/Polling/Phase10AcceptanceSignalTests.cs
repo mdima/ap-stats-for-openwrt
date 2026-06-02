@@ -149,7 +149,7 @@ public sealed class Phase10AcceptanceSignalTests(SqliteInMemoryFixture fixture, 
             };
 
         var orchestrator = new PollOrchestrator(
-            dpFactory, nodeRepo, networkRepo, stationRepo, probeFactory, notifier,
+            dpFactory, nodeRepo, networkRepo, stationRepo, new HistoryRepo(dpFactory), probeFactory, notifier,
             NullLogger<PollOrchestrator>.Instance, settings, enrichmentFactory, TimeProvider.System,
             new ForceEnrichmentService());
 

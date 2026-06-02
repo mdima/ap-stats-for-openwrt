@@ -166,6 +166,7 @@ public sealed class PollOrchestratorMergeStepPersistedIpTests(SqliteInMemoryFixt
             new NodeRepo(dpFactory),
             new NetworkRepo(dpFactory),
             stationRepo,
+            new HistoryRepo(dpFactory),
             probe,
             new PollNotifier(),
             NullLogger<PollOrchestrator>.Instance,

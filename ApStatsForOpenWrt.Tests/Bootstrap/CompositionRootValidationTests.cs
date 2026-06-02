@@ -60,6 +60,10 @@ public sealed class CompositionRootValidationTests
         services.AddTransient<INodeRepo, NodeRepo>();
         services.AddTransient<INetworkRepo, NetworkRepo>();
         services.AddTransient<IStationRepo, StationRepo>();
+        // Phase 18 M-HIST-01 — history write seam; PollOrchestrator's primary ctor now takes
+        // IHistoryRepo, so its DI graph requires this registration to pass ValidateOnBuild=true
+        // (mirrors Program.cs:160).
+        services.AddTransient<IHistoryRepo, HistoryRepo>();
         services.AddTransient<IAppSettingsRepo, AppSettingsRepo>();
         services.AddSingleton<IAppSettingsService, AppSettingsService>();
 
