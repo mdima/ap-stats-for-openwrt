@@ -46,6 +46,8 @@ public sealed class UpdateCheckCardTests
         public Task BumpSessionVersionAsync(CancellationToken ct = default) => Task.CompletedTask;
 
         public bool UpdateCheckEnabled { get; set; } = true;
+        public bool HistoryEnabled => true;
+        public Task SetHistoryEnabledAsync(bool enabled, CancellationToken ct = default) => Task.CompletedTask;
         public string? LatestKnownVersion { get; set; }
         public string? LatestReleaseUrl { get; set; }
         public DateTime? LastCheckedAtUtc { get; set; }

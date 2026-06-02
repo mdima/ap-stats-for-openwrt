@@ -97,6 +97,8 @@ public sealed class ForcedOutOfDateTests
         public event Action<IAppSettingsService>? Changed;
 
         public bool UpdateCheckEnabled { get; set; } = true;
+        public bool HistoryEnabled => true;
+        public Task SetHistoryEnabledAsync(bool enabled, CancellationToken ct = default) => Task.CompletedTask;
         public string? LatestKnownVersion { get; set; }
         public string? LatestReleaseUrl { get; set; }
         public DateTime? LastCheckedAtUtc { get; set; }

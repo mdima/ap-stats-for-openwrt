@@ -88,6 +88,8 @@ public sealed class UpdateCheckHostedServiceTests
         public event Action<IAppSettingsService>? Changed;
 
         public bool UpdateCheckEnabled { get; set; } = true;
+        public bool HistoryEnabled => true;
+        public Task SetHistoryEnabledAsync(bool enabled, CancellationToken ct = default) => Task.CompletedTask;
         public string? LatestKnownVersion => null;
         public string? LatestReleaseUrl => null;
         public DateTime? LastCheckedAtUtc => null;
