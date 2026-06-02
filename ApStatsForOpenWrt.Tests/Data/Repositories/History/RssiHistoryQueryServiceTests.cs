@@ -125,6 +125,30 @@ public sealed class RssiHistoryQueryServiceTests : IAsyncLifetime
         Assert.Equal(-65, map[MacB].Points[^1].Rssi);
     }
 
+    [Fact]
+    public async Task GetSparklineSeriesAsync_LatestSampleOlderThanWindow_StillPopulates()
+    {
+        // Regression (QUAL-02 / Bug 2): a UtcNow-based read cutoff blanked the sparkline whenever
+        // the newest sample was older than the wall-clock window (e.g. a visitor-gated polling
+        // pause), even though the KPI/detail charts still rendered. The read must anchor to the
+        // latest sample (the polling clock, D-06), so a 5 h-old series still populates the spark.
+        var ct = TestContext.Current.CancellationToken;
+        var stale = DateTime.UtcNow.AddHours(-5);   // newest sample 5 h old — outside a wall-clock 1 h window
+        int nodeId, netId;
+        await using (var db = _fixture.CreateContext())
+        {
+            (nodeId, netId) = await HistorySeed.SeedNodeAndNetworkAsync(db, "ap1", "wifi", ct);
+            await HistorySeed.SeedRssiAsync(db, stale.AddMinutes(-30), MacA, nodeId, netId, -58, ct);
+            await HistorySeed.SeedRssiAsync(db, stale, MacA, nodeId, netId, -50, ct);
+        }
+
+        var map = await BuildService().GetSparklineSeriesAsync([MacA], ct);
+
+        Assert.True(map.ContainsKey(MacA));
+        // Grid anchored to the latest (5 h-old) sample; its last bucket carries that sample's value.
+        Assert.Equal(-50, map[MacA].Points[^1].Rssi);
+    }
+
     // ---- Detail ------------------------------------------------------------
 
     [Fact]

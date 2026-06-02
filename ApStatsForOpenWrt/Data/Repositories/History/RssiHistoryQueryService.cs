@@ -21,20 +21,31 @@ public sealed class RssiHistoryQueryService(IDbContextFactory<DatabaseContext> f
 
         await using var db = factory.CreateDbContext();
 
-        var cutoff = DateTime.UtcNow - HistoryBuckets.SparklineWindow;
-        // T-19-03: macs.Contains(...) → parameterized IN. The query scopes to the visible MAC set
-        // (D-04) so SQLite returns only the needed rows.
+        // Anchor to the LATEST sample's TimestampUtc (the polling clock, D-06) — NOT wall-clock
+        // UtcNow. Visitor-gated polling can pause writes, so the newest sample may be older than a
+        // wall-clock SparklineWindow; reading [anchor-window, anchor] keeps the sparkline populated
+        // whenever any history exists, consistent with the KPI/detail surfaces (which already anchor
+        // the grid to the latest row). A UtcNow-based read cutoff blanked every sparkline after any
+        // polling gap longer than the window, while the 12 h KPI chart still rendered (QUAL-02 bug).
+        var latest = await db.RssiHistorySamples
+            .Where(s => macSet.Contains(s.StationMac))
+            .MaxAsync(s => (DateTime?)s.TimestampUtc, ct);
+        if (latest is null)
+            return new Dictionary<string, RssiSparklineSeries>();
+
+        var anchor = HistoryBuckets.AsUtc(latest.Value);
+        var readCutoff = anchor - HistoryBuckets.SparklineWindow;
+        // T-19-03: macs.Contains(...) → parameterized IN. Scoped to the visible MAC set (D-04) and
+        // the [anchor-window, anchor] range so SQLite returns only the needed rows.
         var rows = await db.RssiHistorySamples
             .AsNoTracking()
-            .Where(s => s.TimestampUtc >= cutoff && macSet.Contains(s.StationMac))
+            .Where(s => s.TimestampUtc >= readCutoff && macSet.Contains(s.StationMac))
             .OrderBy(s => s.TimestampUtc)
             .ToListAsync(ct);
 
         if (rows.Count == 0)
             return new Dictionary<string, RssiSparklineSeries>();
 
-        // Anchor the sparkline grid to the latest sample's TimestampUtc (polling clock, D-06).
-        var anchor = HistoryBuckets.AsUtc(rows[^1].TimestampUtc);
         var grid = HistoryBuckets.BuildGrid(anchor, HistoryBuckets.SparklineWindow);
 
         var result = new Dictionary<string, RssiSparklineSeries>();
