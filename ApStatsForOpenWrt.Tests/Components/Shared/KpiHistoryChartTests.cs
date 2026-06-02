@@ -108,16 +108,20 @@ public sealed class KpiHistoryChartTests
     }
 
     [Fact]
-    public void EmptyDto_RendersCollectingHistoryPlaceholder_NoCanvas()
+    public void EmptyDto_StillRendersCanvas_ForOnCanvasNoDataOverlay()
     {
-        // D-03: zero-rows → "Collecting history…" placeholder, not an empty axes frame.
+        // M-HIST-05 refinement of D-03 (operator request): the empty state now renders the canvas
+        // so chart-interop.js can draw an on-canvas "history will appear here" overlay, instead of a
+        // Razor placeholder. bUnit (Loose JSInterop) can't see canvas pixels, so assert the canvas is
+        // present even when empty, the old Razor placeholder is gone, and the service was queried.
         var empty = new KpiHistoryDto(Array.Empty<KpiHistoryBucket>(), IsEmpty: true);
-        var (ctx, _, _) = Build(empty);
+        var (ctx, kpi, _) = Build(empty);
         using (ctx)
         {
             var cut = ctx.Render<KpiHistoryChart>();
-            Assert.Contains("Collecting history…", cut.Markup);
-            Assert.Empty(cut.FindAll("canvas"));
+            Assert.NotEmpty(cut.FindAll("canvas"));
+            Assert.DoesNotContain("Collecting history…", cut.Markup);
+            Assert.True(kpi.GetCalled, "Query service must still be called so renderKpiChart runs the no-data overlay.");
         }
     }
 

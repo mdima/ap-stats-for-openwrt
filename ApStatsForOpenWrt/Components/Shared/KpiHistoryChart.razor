@@ -13,7 +13,9 @@
      - Re-query + updateKpiChart on Cycled, wrapped in await InvokeAsync(...) (Pitfall 7); handler returns Task.
      - DisposeAsync sets _disposed = true FIRST (paired-adjacency W4 invariant), unsubscribes, then
        destroyChart + module dispose inside try/catch.
-     - Empty DTO (zero rows) → "Collecting history…" placeholder instead of an empty axes frame (D-03). *@
+     - Empty DTO (zero rows) → the canvas still renders and chart-interop.js draws an on-canvas
+       "history will appear here" overlay (M-HIST-05 refinement of D-03; operator request). The KPI
+       tooltip also shows the per-bucket device total (sum of the stacked segments). *@
 
 @implements IAsyncDisposable
 @inject IKpiHistoryQueryService Kpi
@@ -28,17 +30,12 @@
         <h6 class="card-sub-title mb-0">Activity — last 12 h</h6>
     </div>
     <div class="card-body p-3">
-        @if (_data is null || _data.IsEmpty)
-        {
-            @* D-03 zero-rows placeholder — NOT an empty axes frame. *@
-            <p class="text-body-secondary mb-0">Collecting history…</p>
-        }
-        else
-        {
-            <div style="position: relative; height: 220px;">
-                <canvas id="@_canvasId"></canvas>
-            </div>
-        }
+        @* The canvas ALWAYS renders (even with no history) so chart-interop.js can draw the
+           on-canvas "no data" overlay (M-HIST-05 refinement of the D-03 Razor placeholder —
+           operator request: a no-data message on the chart telling history will appear here). *@
+        <div style="position: relative; height: 220px;">
+            <canvas id="@_canvasId"></canvas>
+        </div>
     </div>
 </div>
 
@@ -78,9 +75,9 @@
         _data = await Kpi.GetLast12hAsync(CancellationToken.None);
         if (_disposed) return;
 
-        // Re-render to swap the placeholder for the <canvas> when data exists, THEN render the chart.
-        StateHasChanged();
-        if (_interop is not null && _data is not null && !_data.IsEmpty)
+        // Render the chart even when empty — chart-interop.js draws the on-canvas no-data overlay
+        // (M-HIST-05 refinement). The canvas is always present, so no placeholder swap is needed.
+        if (_interop is not null && _data is not null)
         {
             try { await _interop.InvokeVoidAsync("renderKpiChart", _canvasId, ToInterop(_data)); }
             catch (JSException) { }
@@ -100,8 +97,9 @@
             await InvokeAsync(async () =>
             {
                 _data = data;
-                StateHasChanged();
-                if (_interop is not null && _data is not null && !_data.IsEmpty)
+                // Update even when empty so the no-data overlay re-evaluates (data may have just
+                // arrived, or drained); chart-interop.js shows/hides the message on each draw.
+                if (_interop is not null && _data is not null)
                 {
                     try { await _interop.InvokeVoidAsync("updateKpiChart", _canvasId, ToInterop(_data)); }
                     catch (JSException) { }

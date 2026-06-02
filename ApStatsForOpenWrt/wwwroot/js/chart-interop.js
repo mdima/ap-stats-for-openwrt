@@ -124,6 +124,36 @@ function reapplySegmentColors(chart, colors) {
     }
 }
 
+/**
+ * Per-chart "no data" overlay (M-HIST-05 refinement): when the chart has nothing to plot,
+ * draw a centered message on the canvas telling the operator history will appear there — instead
+ * of a blank/empty axes frame. Themed via the live --bs-* tokens so it reads in both modes.
+ * "No data" == no labels OR every datapoint across all datasets is null (a gap-only window).
+ * A real zero-device snapshot (counts == 0, not null) is data and is NOT treated as empty.
+ */
+const noDataPlugin = {
+    id: 'noData',
+    afterDraw(chart) {
+        const hasData =
+            (chart.data?.labels?.length ?? 0) > 0 &&
+            chart.data.datasets.some(ds => (ds.data ?? []).some(v => v !== null && v !== undefined));
+        if (hasData) return;
+
+        const area = chart.chartArea;
+        if (!area) return;
+        const text = chart.options?.plugins?.noData?.text ?? 'No data yet';
+        const colors = readThemeColors();
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = colors.secondaryText || colors.body || '#6c757d';
+        ctx.font = '500 14px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+        ctx.fillText(text, (area.left + area.right) / 2, (area.top + area.bottom) / 2);
+        ctx.restore();
+    },
+};
+
 // ---------------------------------------------------------------------------
 // KPI stacked-bar chart (M-HIST-05 / L-07)
 // dto shape: { labels: string[], online: number[], stale: number[], offline: number[] }
@@ -159,6 +189,8 @@ function buildKpiConfig(dto, colors) {
             },
             plugins: {
                 legend: { labels: { color: colors.body } },
+                // M-HIST-05 refinement: centered overlay when the KPI chart has no history yet.
+                noData: { text: 'History will appear here as it is collected' },
                 tooltip: {
                     // L-07: hover-tooltips with exact counts (the reason Chart.js was chosen).
                     enabled: true,
@@ -167,9 +199,19 @@ function buildKpiConfig(dto, colors) {
                     backgroundColor: colors.bodyBg, // contrast with body text in both themes (else black-on-black in light mode)
                     borderColor: colors.border,
                     borderWidth: 1,
+                    callbacks: {
+                        // M-HIST-05 refinement: show the per-bucket device total (sum of the stacked
+                        // Online/Stale/Offline segments) as a footer beneath the per-segment counts.
+                        footer: (items) => {
+                            const total = items.reduce((sum, it) => sum + (it.parsed?.y ?? 0), 0);
+                            return `Total: ${total} device${total === 1 ? '' : 's'}`;
+                        },
+                    },
                 },
             },
         },
+        // Per-chart registration of the no-data overlay (M-HIST-05 refinement).
+        plugins: [noDataPlugin],
     };
 }
 
