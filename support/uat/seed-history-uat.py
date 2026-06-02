@@ -74,21 +74,21 @@ def seed(db: str):
 
     # --- Nodes (2 APs) ---
     cur.executemany(
-        "INSERT INTO WiFiNodes (Id, Hostname, Username, Password, Status, SubnetScanEnabled) "
-        "VALUES (?,?,?,?,?,0)",
+        "INSERT INTO WiFiNodes (Id, Hostname, Username, Password, Status, LastPollDate, SubnetScanEnabled) "
+        "VALUES (?,?,?,?,?,?,0)",
         [
-            (1, "ap-living-room", "root", "seeded", ONLINE),
-            (2, "ap-office", "root", "seeded", ONLINE),
+            (1, "ap-living-room", "root", "seeded", ONLINE, iso(now)),
+            (2, "ap-office", "root", "seeded", ONLINE, iso(now)),
         ],
     )
-    # --- Networks (3 WLANs) ---
+    # --- Networks (3 WLANs) ---  (TxPower is NOT NULL)
     cur.executemany(
-        "INSERT INTO WiFiNetworks (Id, WiFiNodeId, SSID, Channel, Width, MacAddress, Enabled, IfaceName) "
-        "VALUES (?,?,?,?,?,?,1,?)",
+        "INSERT INTO WiFiNetworks (Id, WiFiNodeId, SSID, Channel, Width, MacAddress, TxPower, Enabled, IfaceName) "
+        "VALUES (?,?,?,?,?,?,?,1,?)",
         [
-            (1, 1, "HomeNet", 6, 20, "00:11:22:33:44:01", "phy0-ap0"),
-            (2, 1, "HomeNet-5G", 36, 80, "00:11:22:33:44:02", "phy1-ap0"),
-            (3, 2, "HomeNet", 11, 20, "00:11:22:33:44:03", "phy0-ap0"),
+            (1, 1, "HomeNet", 6, 20, "00:11:22:33:44:01", 20, "phy0-ap0"),
+            (2, 1, "HomeNet-5G", 36, 80, "00:11:22:33:44:02", 23, "phy1-ap0"),
+            (3, 2, "HomeNet", 11, 20, "00:11:22:33:44:03", 20, "phy0-ap0"),
         ],
     )
 
@@ -98,11 +98,13 @@ def seed(db: str):
     s_drop = "AA:BB:CC:00:00:02"   # goes offline mid-window (sparkline GAP)
     s_solid = "AA:BB:CC:00:00:03"  # steady on AP1/5G
     s_fresh = "AA:BB:CC:00:00:04"  # NO history rows -> sparkline shows the muted "—"
+    # WLANStations schema: RSS (nullable), and TxBitrate/RxBitrate/LastPollDate/IsRandomMac/FirstSeen
+    # are all NOT NULL. (Column is RSS, not Rssi; there is no LastSeen column.)
     cur.executemany(
-        "INSERT INTO WLANStations (MacAddress, WiFiNetworkId, Rssi, Status, FirstSeen, LastSeen) "
-        "VALUES (?,?,?,?,?,?)" if _has_col(cur, "WLANStations", "FirstSeen") else
-        "INSERT INTO WLANStations (MacAddress, WiFiNetworkId, Rssi, Status) VALUES (?,?,?,?)",
-        _station_rows(now),
+        "INSERT INTO WLANStations "
+        "(MacAddress, WiFiNetworkId, RSS, Status, TxBitrate, RxBitrate, LastPollDate, IsRandomMac, FirstSeen) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        _station_rows(now, start),
     )
 
     # --- KPI snapshots: one per 5-min bucket, a few early gaps ---
@@ -159,25 +161,23 @@ def _has_col(cur, table, col) -> bool:
     return any(r[1] == col for r in cur.execute(f"PRAGMA table_info({table})").fetchall())
 
 
-def _station_rows(now: dt.datetime):
-    macs = [
-        ("AA:BB:CC:00:00:01", 3, -55, ONLINE),   # roamer (now on AP2/net3)
-        ("AA:BB:CC:00:00:02", 1, 0, OFFLINE),    # dropper (now offline)
-        ("AA:BB:CC:00:00:03", 2, -48, ONLINE),   # solid
-        ("AA:BB:CC:00:00:04", 1, -70, ONLINE),   # fresh (no history yet)
+def _station_rows(now: dt.datetime, start: dt.datetime):
+    fs = iso(start)   # FirstSeen — 12 h ago (NOT NULL)
+    lp = iso(now)     # LastPollDate — this cycle (NOT NULL)
+    # (mac, WiFiNetworkId, RSS, Status, TxBitrate, RxBitrate, LastPollDate, IsRandomMac, FirstSeen)
+    return [
+        ("AA:BB:CC:00:00:01", 3, -55, ONLINE, 144.4, 144.4, lp, 0, fs),  # roamer (now on AP2/net3)
+        ("AA:BB:CC:00:00:02", 1, None, OFFLINE, 6.0, 6.0, lp, 0, fs),    # dropper (now offline; RSS null)
+        ("AA:BB:CC:00:00:03", 2, -48, ONLINE, 433.3, 433.3, lp, 0, fs),  # solid
+        ("AA:BB:CC:00:00:04", 1, -70, ONLINE, 72.2, 72.2, lp, 0, fs),    # fresh (no history yet)
     ]
-    rows = []
-    for mac, net, rssi, status in macs:
-        # column set is resolved by the caller's INSERT; supply the superset and trim if needed
-        rows.append((mac, net, rssi, status, now, now))
-    return rows
 
 
 def main():
     here = os.path.abspath(os.path.dirname(__file__))
     repo = os.path.abspath(os.path.join(here, "..", ".."))
     print(f"QUAL-02 UAT seed — container={CONTAINER}")
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         local = os.path.join(tmp, "uat.db")
         print("[1/4] copy DB out of container")
         run(["docker", "cp", f"{CONTAINER}:{DB_PATH_IN_CONTAINER}", local])
