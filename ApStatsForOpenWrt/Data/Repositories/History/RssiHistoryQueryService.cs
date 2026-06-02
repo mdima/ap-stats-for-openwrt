@@ -1,0 +1,125 @@
+using ApStatsForOpenWrt.Data.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace ApStatsForOpenWrt.Data.Repositories.History;
+
+/// <summary>
+/// Phase 19 M-HIST-06 / M-HIST-07 — windowed-read + in-memory fold implementation of
+/// <see cref="IRssiHistoryQueryService"/> (RESEARCH Pattern 5). Both shapes read via
+/// <c>IDbContextFactory&lt;DatabaseContext&gt;</c> (legal — repo sub-namespace) and fold through the
+/// shared <see cref="HistoryBuckets"/> grid. SQL filters are parameterized (T-19-03: <c>macs.Contains</c>
+/// → parameterized IN; no raw SQL).
+/// </summary>
+public sealed class RssiHistoryQueryService(IDbContextFactory<DatabaseContext> factory) : IRssiHistoryQueryService
+{
+    public async Task<IReadOnlyDictionary<string, RssiSparklineSeries>> GetSparklineSeriesAsync(
+        IEnumerable<string> macs, CancellationToken ct)
+    {
+        var macSet = macs as IReadOnlyCollection<string> ?? macs.ToList();
+        if (macSet.Count == 0)
+            return new Dictionary<string, RssiSparklineSeries>();
+
+        await using var db = factory.CreateDbContext();
+
+        var cutoff = DateTime.UtcNow - HistoryBuckets.SparklineWindow;
+        // T-19-03: macs.Contains(...) → parameterized IN. The query scopes to the visible MAC set
+        // (D-04) so SQLite returns only the needed rows.
+        var rows = await db.RssiHistorySamples
+            .AsNoTracking()
+            .Where(s => s.TimestampUtc >= cutoff && macSet.Contains(s.StationMac))
+            .OrderBy(s => s.TimestampUtc)
+            .ToListAsync(ct);
+
+        if (rows.Count == 0)
+            return new Dictionary<string, RssiSparklineSeries>();
+
+        // Anchor the sparkline grid to the latest sample's TimestampUtc (polling clock, D-06).
+        var anchor = HistoryBuckets.AsUtc(rows[^1].TimestampUtc);
+        var grid = HistoryBuckets.BuildGrid(anchor, HistoryBuckets.SparklineWindow);
+
+        var result = new Dictionary<string, RssiSparklineSeries>();
+        foreach (var macGroup in rows.GroupBy(r => r.StationMac))
+        {
+            // Per bucket: gather all rows, find the latest cycle (max TimestampUtc), then MAX(Rssi)
+            // across that cycle's (AP, WLAN) rows (L-05 — flattens roams to one continuous line).
+            var bucketRows = new List<RssiHistorySample>?[grid.Count];
+            foreach (var row in macGroup)
+            {
+                var idx = HistoryBuckets.BucketIndex(
+                    HistoryBuckets.AsUtc(row.TimestampUtc), anchor, HistoryBuckets.SparklineWindow);
+                if (idx < 0) continue;
+                (bucketRows[idx] ??= []).Add(row);
+            }
+
+            var points = new RssiSparklinePoint[grid.Count];
+            for (var i = 0; i < grid.Count; i++)
+            {
+                var slot = bucketRows[i];
+                if (slot is null || slot.Count == 0)
+                {
+                    points[i] = new RssiSparklinePoint(grid[i], null);   // gap
+                    continue;
+                }
+
+                var latestCycle = slot.Max(r => HistoryBuckets.AsUtc(r.TimestampUtc));
+                var max = slot
+                    .Where(r => HistoryBuckets.AsUtc(r.TimestampUtc) == latestCycle)
+                    .Max(r => r.Rssi);
+                points[i] = new RssiSparklinePoint(grid[i], max);
+            }
+
+            result[macGroup.Key] = new RssiSparklineSeries(points);
+        }
+
+        return result;
+    }
+
+    public async Task<RssiDetailDto> GetDetailSeriesAsync(string mac, CancellationToken ct)
+    {
+        await using var db = factory.CreateDbContext();
+
+        var cutoff = DateTime.UtcNow - HistoryBuckets.FullWindow;
+        var rows = await db.RssiHistorySamples
+            .AsNoTracking()
+            .Where(s => s.TimestampUtc >= cutoff && s.StationMac == mac)
+            .OrderBy(s => s.TimestampUtc)
+            .ToListAsync(ct);
+
+        if (rows.Count == 0)
+            return new RssiDetailDto([], [], IsEmpty: true);
+
+        var anchor = HistoryBuckets.AsUtc(rows[^1].TimestampUtc);
+        var grid = HistoryBuckets.BuildGrid(anchor, HistoryBuckets.FullWindow);
+
+        // Resolve labels: NodeId→Hostname, NetworkId→SSID (mirror Detail.razor:337-338).
+        var nodeIds = rows.Select(r => r.NodeId).Distinct().ToList();
+        var networkIds = rows.Select(r => r.NetworkId).Distinct().ToList();
+        var hostnames = await db.WiFiNodes.AsNoTracking()
+            .Where(n => nodeIds.Contains(n.Id))
+            .ToDictionaryAsync(n => n.Id, n => n.Hostname, ct);
+        var ssids = await db.WiFiNetworks.AsNoTracking()
+            .Where(w => networkIds.Contains(w.Id))
+            .ToDictionaryAsync(w => w.Id, w => w.SSID, ct);
+
+        var series = new List<RssiDetailSeries>();
+        // One series per distinct (NodeId, NetworkId) — NO cross-series aggregation (L-06).
+        foreach (var group in rows.GroupBy(r => (r.NodeId, r.NetworkId)))
+        {
+            var folded = HistoryBuckets.FoldLastValue(
+                group.ToList(),
+                r => r.TimestampUtc,
+                anchor,
+                HistoryBuckets.FullWindow);
+
+            var points = new int?[grid.Count];
+            for (var i = 0; i < grid.Count; i++)
+                points[i] = folded[i]?.Rssi;
+
+            var host = hostnames.GetValueOrDefault(group.Key.NodeId, $"node {group.Key.NodeId}");
+            var ssid = ssids.GetValueOrDefault(group.Key.NetworkId, $"network {group.Key.NetworkId}");
+            series.Add(new RssiDetailSeries($"{host} · {ssid}", group.Key.NodeId, group.Key.NetworkId, points));
+        }
+
+        return new RssiDetailDto(grid, series, IsEmpty: false);
+    }
+}

@@ -53,8 +53,8 @@ internal static class HistoryBuckets
         var lastBucket = FloorToBucket(anchorUtc);
         var step = TimeSpan.FromMinutes(BucketMinutes);
         // Number of buckets spanning [anchor-span .. anchor], inclusive of both ends' slots.
+        // Span is always a positive constant (FullWindow / SparklineWindow), so count >= 1.
         var count = (int)(span.Ticks / step.Ticks) + 1;
-        if (count < 1) count = 1;
 
         var grid = new DateTime[count];
         // Fill ascending: grid[0] is the oldest slot, grid[^1] is the anchor slot.
@@ -74,7 +74,6 @@ internal static class HistoryBuckets
         var floored = FloorToBucket(timestampUtc);
         var lastBucket = FloorToBucket(anchorUtc);
         var count = (int)(span.Ticks / TimeSpan.FromMinutes(BucketMinutes).Ticks) + 1;
-        if (count < 1) count = 1;
         var firstBucket = lastBucket - TimeSpan.FromMinutes((count - 1) * (long)BucketMinutes);
 
         if (floored < firstBucket || floored > lastBucket) return -1;
