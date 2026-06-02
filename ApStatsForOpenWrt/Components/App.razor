@@ -68,6 +68,11 @@
           takes over the circuit. *@
     <script src="/lib/bootstrap/js/bootstrap.bundle.min.js"></script>
     <script src="/lib/adminlte/js/adminlte.min.js"></script>
+    @* Phase 19 (M-HIST-05/07): vendored Chart.js 4.5.1 UMD attaches window.Chart, the
+       global that js/chart-interop.js (an ES module imported in OnAfterRenderAsync)
+       references. MUST load before blazor.web.js so the global is present before the
+       Blazor circuit's first interop import. *@
+    <script src="/lib/chart.js/chart.umd.min.js"></script>
     <script src="/js/sidebar-toggle.js"></script>
     <script type="module" src="/js/sidebar-state.js"></script>
     <script src="/js/local-time.js"></script>
