@@ -196,7 +196,11 @@ public sealed class DetailTests
         sc.AddSingleton<INodeRepo>(nodes);
         sc.AddSingleton<IStationRepo>(stations);
         var sp = sc.BuildServiceProvider();
-        var events = new EventDetectionService(notifier, toasts, gate, sp.GetRequiredService<IServiceScopeFactory>(), NullLogger<EventDetectionService>.Instance);
+        // Phase 18 18-05 — EventDetectionService now takes a concrete CircuitTracker (D-03 visitor
+        // signal). This bUnit harness never raises PollNotifier, so the tracker is idle/Paused;
+        // dispose responsibility stays with the ctx Services container lifetime.
+        var tracker = new ApStatsForOpenWrt.Services.Gating.CircuitTracker();
+        var events = new EventDetectionService(notifier, toasts, gate, tracker, sp.GetRequiredService<IServiceScopeFactory>(), NullLogger<EventDetectionService>.Instance);
         ctx.Services.AddSingleton(notifier);
         ctx.Services.AddSingleton<INotificationsGate>(gate);
         ctx.Services.AddSingleton(toasts);

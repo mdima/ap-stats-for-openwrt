@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
 using ApStatsForOpenWrt.Services;
+using ApStatsForOpenWrt.Services.Gating;
 using ApStatsForOpenWrt.Services.Polling;
 using Xunit;
 
@@ -97,6 +98,13 @@ public sealed class EventDetectionServiceTests
         public List<ToastEntry> Captured { get; } = new();
         public ServiceProvider Sp { get; }
 
+        // Phase 18 D-03 — the strict visitor signal source. Real CircuitTracker with a near-zero
+        // pause-grace (per RESEARCH §Validation: real tracker, NOT a mock). Drive it Live via
+        // MakeVisitorPresent() (synchronous OnOpened) or Paused via MakeNoVisitorAsync() (OnClosed
+        // + await the tiny grace so Current flips back to Paused).
+        private static readonly TimeSpan GraceForTests = TimeSpan.FromMilliseconds(10);
+        public CircuitTracker Tracker { get; } = new(GraceForTests);
+
         public Harness()
         {
             var sc = new ServiceCollection();
@@ -112,14 +120,37 @@ public sealed class EventDetectionServiceTests
             };
         }
 
+        /// <summary>Put the tracker into <see cref="GateState.Live"/> (a visitor connects). Synchronous.</summary>
+        public void MakeVisitorPresent() => Tracker.OnOpened();
+
+        /// <summary>
+        /// Put the tracker back into <see cref="GateState.Paused"/> (the last visitor leaves) and
+        /// await the short pause-grace so <see cref="CircuitTracker.Current"/> has flipped to Paused
+        /// before the next cycle is raised.
+        /// </summary>
+        public async Task MakeNoVisitorAsync()
+        {
+            Tracker.OnClosed();
+            // OnClosed schedules a debounced Paused transition after GraceForTests; poll until it lands.
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+            while (Tracker.Current != GateState.Paused && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(5);
+            }
+        }
+
         public EventDetectionService Build() =>
-            new(Notifier, Toasts, Gate, Sp.GetRequiredService<IServiceScopeFactory>(),
+            new(Notifier, Toasts, Gate, Tracker, Sp.GetRequiredService<IServiceScopeFactory>(),
                 NullLogger<EventDetectionService>.Instance);
 
         public Task RaiseAsync(int total = 1, int online = 1, int failed = 0, int stations = 0) =>
             Notifier.RaiseAsync(new PollSnapshot(total, online, failed, stations, DateTime.UtcNow));
 
-        public void Dispose() => Sp.Dispose();
+        public void Dispose()
+        {
+            Tracker.Dispose();
+            Sp.Dispose();
+        }
     }
 
     private static WiFiNode Node(int id, string hostname, Status status) =>
@@ -158,12 +189,16 @@ public sealed class EventDetectionServiceTests
         Assert.Equal(1, h.StationRepo.GetAllMacsAsyncCallCount);
     }
 
-    // 3. D-10 gate — notifications disabled → NO toasts emitted. -------------------------------
+    // 3. Notifications gate — notifications disabled → NO toasts emitted, even with a visitor
+    //    present. Phase 18 D-03 (OQ7 AMENDED): state tracking (the bootstrap MAC scan) now runs
+    //    UNCONDITIONALLY every cycle; only emission is gated. So GetAllMacsAsyncCallCount is now
+    //    1 (the bootstrap ran) — the pre-D-03 "skip ALL work" assertion is removed. -------------
     [Fact]
-    public async Task GateClosed_EmitsNoToasts_RegardlessOfChanges()
+    public async Task GateClosed_EmitsNoToasts_ButStillTracksState()
     {
         using var h = new Harness();
         h.Gate.IsEnabled = false;
+        h.MakeVisitorPresent();                       // visitor IS present; the gate is the only blocker
         h.NodeRepo.AllNodes = new()
         {
             Node(1, "ap-kitchen", Status.Online),
@@ -178,8 +213,9 @@ public sealed class EventDetectionServiceTests
         await h.RaiseAsync();
 
         Assert.Empty(h.Captured);
-        // Defense-in-depth: bootstrap also did NOT run (early-exit BEFORE the diff per D-10).
-        Assert.Equal(0, h.StationRepo.GetAllMacsAsyncCallCount);
+        // Phase 18 D-03: bootstrap (state tracking) DID run — the _gate.IsEnabled half of canEmit
+        // suppresses ONLY the toast, not the underlying state-keeping work.
+        Assert.Equal(1, h.StationRepo.GetAllMacsAsyncCallCount);
     }
 
     // 4. D-04 — Online → Offline transition fires "Access point offline" warning. --------------
@@ -187,6 +223,7 @@ public sealed class EventDetectionServiceTests
     public async Task NodeTransitionsToOffline_EmitsWarningToast()
     {
         using var h = new Harness();
+        h.MakeVisitorPresent();                       // visitor present so emission is enabled
         // Cycle 1: ap is Online. Cycle 2: same ap flips to Offline.
         h.NodeRepo.AllNodes = new() { Node(7, "ap-kitchen", Status.Online) };
         using var svc = h.Build();
@@ -207,6 +244,7 @@ public sealed class EventDetectionServiceTests
     public async Task NodeTransitionsToOnline_EmitsSuccessToast()
     {
         using var h = new Harness();
+        h.MakeVisitorPresent();                       // visitor present so emission is enabled
         h.NodeRepo.AllNodes = new() { Node(9, "ap-attic", Status.Offline) };
         using var svc = h.Build();
         await h.RaiseAsync();
@@ -227,6 +265,7 @@ public sealed class EventDetectionServiceTests
     public async Task NewMac_EmitsInfoToast_OnlyFirstTime()
     {
         using var h = new Harness();
+        h.MakeVisitorPresent();                                 // visitor present so emission is enabled
         h.StationRepo.SeedMacs = new() { "AA:AA:AA:AA:AA:AA" };  // pre-known
         h.StationRepo.AllStations = new()
         {
@@ -254,6 +293,7 @@ public sealed class EventDetectionServiceTests
     public async Task PersistentFailure_TogglesOnExactlyThirdFailure_ResetsAfterSuccess()
     {
         using var h = new Harness();
+        h.MakeVisitorPresent();                       // visitor present so emission is enabled
         var node = Node(3, "ap-garage", Status.Offline);
         h.NodeRepo.AllNodes = new() { node };
         using var svc = h.Build();
@@ -305,6 +345,7 @@ public sealed class EventDetectionServiceTests
     public async Task DisplayName_AndRelativeTime_BranchesCovered_ViaToastMessages()
     {
         using var h = new Harness();
+        h.MakeVisitorPresent();                       // visitor present so emission is enabled
         // Cover all four DisplayName arms (Name / Hostname / IPAddress / Unknown) by emitting
         // four new MACs in a single cycle, each with exactly one of those fields populated.
         h.StationRepo.AllStations = new()
@@ -395,6 +436,7 @@ public sealed class EventDetectionServiceTests
     public async Task ForgetMac_AllowsSameMacToToastAsNew_OnNextCycle()
     {
         using var h = new Harness();
+        h.MakeVisitorPresent();                       // visitor present so emission is enabled
         // Seed: MAC is already known (bootstrap will load it from SeedMacs on first cycle).
         const string mac = "DE:AD:BE:EF:00:01";
         h.StationRepo.SeedMacs = new() { mac };
@@ -431,5 +473,142 @@ public sealed class EventDetectionServiceTests
         svc.ForgetMac("ZZ:ZZ:ZZ:ZZ:ZZ:ZZ");
         svc.ForgetMac("");
         svc.ForgetMac(null!);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────
+    // Phase 18 Plan 18-05 — D-03 (OQ7 AMENDED): state tracked every cycle, emission gated on
+    // visitor presence (CircuitTracker.Current == Live), even when notifications are enabled.
+    // ─────────────────────────────────────────────────────────────────────────────────────────
+
+    // 18-05 #1 — No-visitor failure counting. With NO visitor present (tracker Paused) and
+    //   notifications ENABLED, drive 3 consecutive Offline cycles: ZERO toasts emit. The D-07
+    //   counter still counts all three (unconditional). When a visitor connects on the 4th cycle
+    //   (node STILL Offline), NO late "Polling failure" toast fires — the threshold crossing
+    //   already happened silently at cycle 3 and is never re-toasted (prevCount is already at the
+    //   threshold). This proves the counter counted no-visitor polls, not just watched ones.
+    [Fact]
+    public async Task NoVisitor_FailureCounterCountsConsecutivePolls_NoLateToastOnReconnect()
+    {
+        using var h = new Harness();                  // tracker starts Paused (no visitor)
+        h.Gate.IsEnabled = true;                       // notifications ON — visitor is the only blocker
+        h.NodeRepo.AllNodes = new() { Node(3, "ap-garage", Status.Offline) };
+        using var svc = h.Build();
+
+        // Cycles 1, 2, 3 — Offline, NO visitor. Counter reaches 3 at cycle 3 — but emits nothing.
+        await h.RaiseAsync();
+        await h.RaiseAsync();
+        await h.RaiseAsync();
+        Assert.Empty(h.Captured);                      // no toast at all while unwatched
+
+        // Cycle 4 — a visitor connects; node is STILL Offline. The AP→Offline transition already
+        // fired (silently) at cycle 1, and the failure threshold already crossed (silently) at
+        // cycle 3, so NO "Polling failure" and NO "Access point offline" toast fires now.
+        h.MakeVisitorPresent();
+        await h.RaiseAsync();
+        Assert.DoesNotContain(h.Captured, t => t.Title == "Polling failure");
+        Assert.DoesNotContain(h.Captured, t => t.Title == "Access point offline");
+    }
+
+    // 18-05 #2 — No reconnect flood. A MAC first seen while NO visitor was present is recorded in
+    //   _knownMacs (unconditional Add) but produces ZERO "New station" toasts. When a visitor then
+    //   connects and the same MAC is still present, it is NOT re-toasted as new (already known).
+    [Fact]
+    public async Task NoVisitor_NewMacRecordedButNotToasted_NotReToastedOnReconnect()
+    {
+        using var h = new Harness();                  // tracker Paused (no visitor)
+        h.Gate.IsEnabled = true;                       // notifications ON
+        h.StationRepo.AllStations = new() { Station("CA:FE:00:00:00:01", name: "Laptop") };
+        using var svc = h.Build();
+
+        // Cycle 1 — new MAC seen while unwatched: recorded, but NOT toasted.
+        await h.RaiseAsync();
+        Assert.DoesNotContain(h.Captured, t => t.Title == "New station");
+
+        // Cycle 2 — visitor connects, same MAC still present: it was recorded while away, so it is
+        // NOT re-toasted as "new" (the reconnect-flood that OQ7-AMENDED prevents).
+        h.MakeVisitorPresent();
+        h.Captured.Clear();
+        await h.RaiseAsync();
+        Assert.DoesNotContain(h.Captured, t => t.Title == "New station");
+    }
+
+    // 18-05 #3 — Emit-when-watched. With a visitor present (tracker Live) and notifications ON, a
+    //   genuinely-new MAC produces exactly one "New station" toast (the preserved behaviour).
+    [Fact]
+    public async Task VisitorPresent_GenuinelyNewMac_EmitsExactlyOneNewStationToast()
+    {
+        using var h = new Harness();
+        h.MakeVisitorPresent();                       // tracker Live
+        h.Gate.IsEnabled = true;
+        h.StationRepo.AllStations = new() { Station("BE:EF:00:00:00:02", name: "Tablet") };
+        using var svc = h.Build();
+
+        await h.RaiseAsync();
+
+        var toast = Assert.Single(h.Captured, t => t.Title == "New station");
+        Assert.Equal("info", toast.Severity);
+        Assert.Contains("BE:EF:00:00:00:02", toast.Message);
+        Assert.Contains("Tablet", toast.Message);
+    }
+
+    // 18-05 #4 — Notifications-off still suppresses, even with a visitor present. The
+    //   _gate.IsEnabled half of canEmit (canEmit = _gate.IsEnabled && hasVisitor) holds
+    //   independently of the visitor signal.
+    [Fact]
+    public async Task VisitorPresent_NotificationsOff_EmitsNoToasts()
+    {
+        using var h = new Harness();
+        h.MakeVisitorPresent();                       // tracker Live
+        h.Gate.IsEnabled = false;                      // but notifications OFF
+        h.NodeRepo.AllNodes = new()
+        {
+            Node(1, "ap-online", Status.Online),
+            Node(2, "ap-offline", Status.Offline),    // would fire AP→Offline if notifications were on
+        };
+        h.StationRepo.AllStations = new() { Station("0B:0B:0B:0B:0B:0B") };  // would fire new-station
+        using var svc = h.Build();
+
+        await h.RaiseAsync();
+
+        Assert.Empty(h.Captured);
+    }
+
+    // 18-05 #5 — Resume-on-visitor. Notifications ON throughout; a node goes Offline while no
+    //   visitor is present (silent), then a SECOND, DISTINCT node goes Offline AFTER a visitor
+    //   connects — proving emission resumes for transitions that occur while watched.
+    [Fact]
+    public async Task EmissionResumes_WhenVisitorConnects()
+    {
+        using var h = new Harness();                  // start Paused
+        h.Gate.IsEnabled = true;
+        h.NodeRepo.AllNodes = new()
+        {
+            Node(10, "ap-silent", Status.Online),
+            Node(11, "ap-watched", Status.Online),
+        };
+        using var svc = h.Build();
+        await h.RaiseAsync();                          // both Online, no visitor
+
+        // ap-silent goes Offline while NO visitor — silent.
+        h.NodeRepo.AllNodes = new()
+        {
+            Node(10, "ap-silent", Status.Offline),
+            Node(11, "ap-watched", Status.Online),
+        };
+        await h.RaiseAsync();
+        Assert.Empty(h.Captured);
+
+        // Visitor connects; now ap-watched goes Offline — this transition IS toasted.
+        h.MakeVisitorPresent();
+        h.Captured.Clear();
+        h.NodeRepo.AllNodes = new()
+        {
+            Node(10, "ap-silent", Status.Offline),
+            Node(11, "ap-watched", Status.Offline),
+        };
+        await h.RaiseAsync();
+
+        var toast = Assert.Single(h.Captured, t => t.Title == "Access point offline");
+        Assert.Contains("ap-watched", toast.Message);
     }
 }
