@@ -565,8 +565,18 @@ try
     }
     else
     {
-        builder.Services.AddSingleton<ApStatsForOpenWrt.Services.Gating.ICircuitGate,
-                                      ApStatsForOpenWrt.Services.Gating.CircuitTrackerGate>();
+        // Phase 18 D-02 (M-HIST-03) — register the production inner gate as its concrete type, then
+        // expose ICircuitGate as the HistoryAwareCircuitGate decorator so the polling gate becomes
+        // historyEnabled || hasVisitor. PollingHostedService resolves ICircuitGate unchanged; the
+        // CircuitTracker + the inner CircuitTrackerGate (the UI badge's tracker source) stay untouched.
+        // The AlwaysLive smoke branch above is deliberately NOT wrapped (it already polls continuously
+        // — wrapping it is redundant; Pitfall 6). AppSettingsService is a singleton, so injecting it
+        // into the singleton decorator is captive-dependency-safe.
+        builder.Services.AddSingleton<ApStatsForOpenWrt.Services.Gating.CircuitTrackerGate>();
+        builder.Services.AddSingleton<ApStatsForOpenWrt.Services.Gating.ICircuitGate>(sp =>
+            new ApStatsForOpenWrt.Services.Gating.HistoryAwareCircuitGate(
+                sp.GetRequiredService<ApStatsForOpenWrt.Services.Gating.CircuitTrackerGate>(),
+                sp.GetRequiredService<ApStatsForOpenWrt.Services.Settings.IAppSettingsService>()));
     }
     builder.Services.AddScoped<Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler,
                                ApStatsForOpenWrt.Services.Gating.CircuitTrackerHandler>();
