@@ -105,6 +105,7 @@ function applyChromeColors(chart, colors) {
         if (opts.plugins.tooltip) {
             opts.plugins.tooltip.titleColor = colors.body;
             opts.plugins.tooltip.bodyColor = colors.body;
+            opts.plugins.tooltip.footerColor = colors.body;
             opts.plugins.tooltip.borderColor = colors.border;
             opts.plugins.tooltip.backgroundColor = colors.bodyBg;
         }
@@ -196,6 +197,7 @@ function buildKpiConfig(dto, colors) {
                     enabled: true,
                     titleColor: colors.body,
                     bodyColor: colors.body,
+                    footerColor: colors.body, // else the "Total: N" footer renders white-on-light (invisible)
                     backgroundColor: colors.bodyBg, // contrast with body text in both themes (else black-on-black in light mode)
                     borderColor: colors.border,
                     borderWidth: 1,
