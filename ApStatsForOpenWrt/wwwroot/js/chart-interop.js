@@ -31,6 +31,9 @@ let _observerInstalled = false;
  * NEVER hardcode hex — these re-resolve per theme (D-02).
  *   - success / warning / secondary : the StatusBadge triad (Online / Stale / Offline)
  *   - body / border / secondaryText : axis ticks, gridlines, legend, tooltip chrome
+ *   - bodyBg                        : tooltip BACKGROUND — must contrast with `body` text in
+ *                                     both themes (Chart.js's default tooltip bg is dark, which
+ *                                     renders body-color text black-on-black in light mode).
  */
 function readThemeColors() {
     const cs = getComputedStyle(document.documentElement);
@@ -42,6 +45,7 @@ function readThemeColors() {
         body: read('--bs-body-color'),
         border: read('--bs-border-color'),
         secondaryText: read('--bs-secondary-color'),
+        bodyBg: read('--bs-body-bg'),
     };
 }
 
@@ -102,6 +106,7 @@ function applyChromeColors(chart, colors) {
             opts.plugins.tooltip.titleColor = colors.body;
             opts.plugins.tooltip.bodyColor = colors.body;
             opts.plugins.tooltip.borderColor = colors.border;
+            opts.plugins.tooltip.backgroundColor = colors.bodyBg;
         }
     }
 }
@@ -159,6 +164,7 @@ function buildKpiConfig(dto, colors) {
                     enabled: true,
                     titleColor: colors.body,
                     bodyColor: colors.body,
+                    backgroundColor: colors.bodyBg, // contrast with body text in both themes (else black-on-black in light mode)
                     borderColor: colors.border,
                     borderWidth: 1,
                 },
@@ -253,6 +259,7 @@ function buildRssiConfig(dto, colors) {
                     enabled: true,
                     titleColor: colors.body,
                     bodyColor: colors.body,
+                    backgroundColor: colors.bodyBg, // contrast with body text in both themes (else black-on-black in light mode)
                     borderColor: colors.border,
                     borderWidth: 1,
                 },
