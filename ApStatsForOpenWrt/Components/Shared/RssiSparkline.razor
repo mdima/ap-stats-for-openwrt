@@ -20,8 +20,11 @@
        through the SAME auto-scaled domain. A band renders wherever the visible window overlaps its dBm
        range, so a steady station shows ONE colour and a station that CROSSES a tier boundary in-window
        shows BOTH adjacent colours, split exactly at the boundary's auto-scaled y.
-     - #1 hover tooltip — native SVG <title> with the latest reading, its tier word (good/fair/weak —
-       so quality survives colour-blindness), and the window's range.
+     - #1 hover tooltip — a BOOTSTRAP tooltip (data-bs-toggle="tooltip" + data-bs-title on the
+       wrapping <span>, initialized by the parent Dashboard's bs-tooltips.js call — NOT a native SVG
+       <title>) with the latest reading, its tier word (good/fair/weak — so quality survives
+       colour-blindness), and the window's range. The component stays ZERO-JS (L-01): it only EMITS
+       the opt-in attribute; the parent owns the initializer.
      - #5 click-through is the PARENT's job (Dashboard wraps the cell in an /Stations/{mac} link) — not here.
 
    Both the column header and per-row cell are gated on Settings.HistoryEnabled by the PARENT
@@ -36,21 +39,26 @@
 }
 else
 {
-    <svg viewBox="0 0 100 22" preserveAspectRatio="none" width="90" height="20"
-         role="img" aria-label="RSSI trend, last ~1 hour" class="rssi-sparkline">
-        @* #1 — native hover tooltip (latest + tier word + range). *@
-        <title>@_title</title>
-        @* #3 quality tiers — green/yellow/red bands behind the line, clamped to the auto-scaled domain. *@
-        @foreach (var band in _bands)
-        {
-            <rect class="rssi-sparkline-tier" x="0" y="@band.Y" width="100" height="@band.H" fill="@band.Fill" />
-        }
-        @foreach (var seg in _segments)
-        {
-            <polyline fill="none" stroke="currentColor" stroke-width="1.5"
-                      vector-effect="non-scaling-stroke" points="@seg" />
-        }
-    </svg>
+    @* #1 — Bootstrap tooltip opt-in on a WRAPPING span (latest + tier word + range). The attributes
+       go on the span, NOT the bare <svg> (Bootstrap tooltips are finicky attached directly to SVG).
+       data-bs-title is Bootstrap's canonical title attribute, so the browser does NOT also show a
+       native title balloon. The parent Dashboard's bs-tooltips.js initializes the instance. *@
+    <span class="rssi-sparkline-wrap" style="display:inline-flex"
+          data-bs-toggle="tooltip" data-bs-title="@_title">
+        <svg viewBox="0 0 100 22" preserveAspectRatio="none" width="90" height="20"
+             role="img" aria-label="RSSI trend, last ~1 hour" class="rssi-sparkline">
+            @* #3 quality tiers — green/yellow/red bands behind the line, clamped to the auto-scaled domain. *@
+            @foreach (var band in _bands)
+            {
+                <rect class="rssi-sparkline-tier" x="0" y="@band.Y" width="100" height="@band.H" fill="@band.Fill" />
+            }
+            @foreach (var seg in _segments)
+            {
+                <polyline fill="none" stroke="currentColor" stroke-width="1.5"
+                          vector-effect="non-scaling-stroke" points="@seg" />
+            }
+        </svg>
+    </span>
 }
 
 @code {
