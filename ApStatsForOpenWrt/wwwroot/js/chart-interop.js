@@ -155,6 +155,52 @@ const noDataPlugin = {
     },
 };
 
+// RSSI quality-tier thresholds + zone colours (M-HIST-07 refinement). Mirrors the inline
+// RssiSparkline tiers: good ≥ −67 dBm, fair −67…−80, weak < −80. Colours are intentionally
+// FIXED (semantic quality, identical in both themes — only chart chrome is theme-driven, D-02).
+const GOOD_FLOOR_DBM = -67;
+const FAIR_FLOOR_DBM = -80;
+const ZONE_GOOD = 'rgba(25,135,84,.07)';
+const ZONE_FAIR = 'rgba(255,193,7,.10)';
+const ZONE_WEAK = 'rgba(220,53,69,.07)';
+
+/**
+ * RSSI quality zones (M-HIST-07 refinement): three horizontal bands painted behind the
+ * line(s) — green (good) at the top, yellow (fair) in the middle, red (weak) at the bottom —
+ * so the detail chart reads the same way as the inline sparkline. dBm thresholds are mapped to
+ * pixels via the LIVE y-scale (so the bands track the actual axis range, fixed −90..−30 by
+ * default) and clamped to the chart area. Enabled per-chart via options.plugins.rssiZones.enabled.
+ */
+const rssiZonesPlugin = {
+    id: 'rssiZones',
+    beforeDatasetsDraw(chart) {
+        if (!chart.options?.plugins?.rssiZones?.enabled) return;
+        const area = chart.chartArea;
+        const yScale = chart.scales?.y;
+        if (!area || !yScale) return;
+
+        const clampY = (py) => Math.max(area.top, Math.min(area.bottom, py));
+        const yGood = clampY(yScale.getPixelForValue(GOOD_FLOOR_DBM)); // good/fair boundary
+        const yFair = clampY(yScale.getPixelForValue(FAIR_FLOOR_DBM)); // fair/weak boundary
+
+        const ctx = chart.ctx;
+        const left = area.left;
+        const width = area.right - area.left;
+        const band = (y0, y1, color) => {
+            const h = y1 - y0;
+            if (h <= 0.5) return; // sub-pixel band not worth painting
+            ctx.fillStyle = color;
+            ctx.fillRect(left, y0, width, h);
+        };
+
+        ctx.save();
+        band(area.top, yGood, ZONE_GOOD);    // ≥ −67 : axis top → −67 line
+        band(yGood, yFair, ZONE_FAIR);       // −80…−67
+        band(yFair, area.bottom, ZONE_WEAK); // < −80 : −80 line → axis bottom
+        ctx.restore();
+    },
+};
+
 // ---------------------------------------------------------------------------
 // KPI stacked-bar chart (M-HIST-05 / L-07)
 // dto shape: { labels: string[], online: number[], stale: number[], offline: number[] }
@@ -299,6 +345,8 @@ function buildRssiConfig(dto, colors) {
             },
             plugins: {
                 legend: { labels: { color: colors.body } },
+                // M-HIST-07 refinement: green/yellow/red signal-quality bands behind the lines.
+                rssiZones: { enabled: true },
                 tooltip: {
                     enabled: true,
                     titleColor: colors.body,
@@ -309,6 +357,8 @@ function buildRssiConfig(dto, colors) {
                 },
             },
         },
+        // Per-chart registration of the RSSI quality zones (M-HIST-07 refinement).
+        plugins: [rssiZonesPlugin],
     };
 }
 

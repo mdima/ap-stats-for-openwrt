@@ -116,58 +116,91 @@ public sealed class RssiSparklineTests
         Assert.Equal(strongPts, weakPts);
     }
 
+    private const string FillGreen = "rgba(25,135,84,.12)";
+    private const string FillYellow = "rgba(255,193,7,.16)";
+    private const string FillRed = "rgba(220,53,69,.12)";
+
+    private static double D(string? s) =>
+        double.Parse(s!, System.Globalization.CultureInfo.InvariantCulture);
+
     [Fact]
-    public void GoodSignalBand_RendersRect_ForMixedSeries()
+    public void Tiers_GreenOnly_WhenEverySampleStrong()
     {
-        // #3 (C) — a mixed series straddling the −67 dBm threshold renders the shaded green band.
-        var points = new List<RssiSparklinePoint> { P(0, -55), P(5, -70), P(10, -60) };
+        // #3 — every sample ≥ −67 → the good band fills the whole auto-scaled cell, no yellow/red.
+        var points = new List<RssiSparklinePoint> { P(0, -48), P(5, -52), P(10, -50) };
         using var ctx = new BunitContext();
         var cut = ctx.Render<RssiSparkline>(p => p.Add(c => c.Points, points));
 
-        var band = cut.Find("rect.rssi-sparkline-band");
-        Assert.Equal("0", band.GetAttribute("x"));
-        Assert.Equal("100", band.GetAttribute("width"));
-        // Bootstrap-success tint @ 15% — fixed color (not currentColor) so the zone reads in both themes.
-        Assert.Contains("rgba(25,135,84,.15)", band.GetAttribute("fill"));
-        var h = double.Parse(band.GetAttribute("height")!, System.Globalization.CultureInfo.InvariantCulture);
-        Assert.InRange(h, 0.1, 21.9); // partial — neither filled nor vanished
+        var tiers = cut.FindAll("rect.rssi-sparkline-tier");
+        Assert.Single(tiers);
+        Assert.Contains(FillGreen, tiers[0].GetAttribute("fill"));
+        Assert.InRange(D(tiers[0].GetAttribute("height")), 21.5, 22.0); // fills the cell
     }
 
     [Fact]
-    public void GoodSignalBand_FillsCell_WhenEverySampleStrong()
+    public void Tiers_RedOnly_WhenEverySampleWeak()
     {
-        // #3 (C) trade-off — all-strong window: the good zone covers the whole auto-scaled domain.
-        var points = new List<RssiSparklinePoint> { P(0, -46), P(5, -48), P(10, -47) };
+        // #3 — every sample < −80 → only the weak band.
+        var points = new List<RssiSparklinePoint> { P(0, -82), P(5, -86), P(10, -84) };
         using var ctx = new BunitContext();
         var cut = ctx.Render<RssiSparkline>(p => p.Add(c => c.Points, points));
 
-        var h = double.Parse(cut.Find("rect.rssi-sparkline-band").GetAttribute("height")!,
-            System.Globalization.CultureInfo.InvariantCulture);
-        Assert.Equal(22d, h, precision: 1); // fills the 22-unit viewBox height
+        var tiers = cut.FindAll("rect.rssi-sparkline-tier");
+        Assert.Single(tiers);
+        Assert.Contains(FillRed, tiers[0].GetAttribute("fill"));
+        Assert.InRange(D(tiers[0].GetAttribute("height")), 21.5, 22.0);
     }
 
     [Fact]
-    public void GoodSignalBand_Vanishes_WhenEverySampleWeak()
+    public void Tiers_GreenAndYellow_BothVisible_WhenSignalCrossesGoodFairBoundary()
     {
-        // #3 (C) trade-off — all-weak window: the good zone clamps off the top of the domain → no rect.
-        var points = new List<RssiSparklinePoint> { P(0, -78), P(5, -80), P(10, -79) };
+        // THE operator's ask — a station crossing −67 in-window shows BOTH green (top) and yellow
+        // (bottom), split at the boundary, with auto-scale still on.
+        var points = new List<RssiSparklinePoint> { P(0, -58), P(5, -74), P(10, -62) };
         using var ctx = new BunitContext();
         var cut = ctx.Render<RssiSparkline>(p => p.Add(c => c.Points, points));
 
-        Assert.Empty(cut.FindAll("rect.rssi-sparkline-band"));
-        Assert.Single(cut.FindAll("polyline")); // the line itself still renders
+        var tiers = cut.FindAll("rect.rssi-sparkline-tier");
+        var fills = tiers.Select(t => t.GetAttribute("fill")!).ToList();
+        Assert.Equal(2, tiers.Count);
+        Assert.Contains(fills, f => f.Contains(FillGreen));
+        Assert.Contains(fills, f => f.Contains(FillYellow));
+        Assert.DoesNotContain(fills, f => f.Contains(FillRed));
+
+        // Green is the top band (y=0); the two bands are vertically adjacent (no gap, no overlap).
+        var green = tiers.First(t => t.GetAttribute("fill")!.Contains(FillGreen));
+        var yellow = tiers.First(t => t.GetAttribute("fill")!.Contains(FillYellow));
+        Assert.Equal("0", green.GetAttribute("y"));
+        Assert.Equal(D(green.GetAttribute("y")) + D(green.GetAttribute("height")),
+                     D(yellow.GetAttribute("y")), precision: 1);
     }
 
     [Fact]
-    public void Title_ShowsLatestReadingAndRange()
+    public void Tiers_YellowAndRed_BothVisible_WhenSignalCrossesFairWeakBoundary()
     {
-        // #1 — native SVG <title> hover tooltip with the latest sample and the window's range.
+        // A station crossing −80 in-window shows BOTH yellow and red, no green.
+        var points = new List<RssiSparklinePoint> { P(0, -76), P(5, -84), P(10, -78) };
+        using var ctx = new BunitContext();
+        var cut = ctx.Render<RssiSparkline>(p => p.Add(c => c.Points, points));
+
+        var fills = cut.FindAll("rect.rssi-sparkline-tier").Select(t => t.GetAttribute("fill")!).ToList();
+        Assert.Equal(2, fills.Count);
+        Assert.Contains(fills, f => f.Contains(FillYellow));
+        Assert.Contains(fills, f => f.Contains(FillRed));
+        Assert.DoesNotContain(fills, f => f.Contains(FillGreen));
+    }
+
+    [Fact]
+    public void Title_ShowsLatestReadingTierAndRange()
+    {
+        // #1 — native SVG <title> hover tooltip with the latest sample, its tier word, and the range.
         var points = new List<RssiSparklinePoint> { P(0, -55), P(5, -70), P(10, -60) };
         using var ctx = new BunitContext();
         var cut = ctx.Render<RssiSparkline>(p => p.Add(c => c.Points, points));
 
         var title = cut.Find("svg title").TextContent;
         Assert.Contains("Latest -60 dBm", title); // chronologically-last present reading
+        Assert.Contains("(good)", title);         // tier word — colour-blind-safe
         Assert.Contains("-70", title);            // range low
         Assert.Contains("-55", title);            // range high
     }

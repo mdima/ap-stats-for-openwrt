@@ -264,7 +264,7 @@ public sealed class DetailTests
             Assert.Contains("Access point", cut.Markup);
             Assert.Contains("Tx bitrate", cut.Markup);
             Assert.Contains("Rx bitrate", cut.Markup);
-            Assert.Contains("Signal", cut.Markup);
+            Assert.Contains("RSSI", cut.Markup);
             Assert.Contains("Last seen", cut.Markup);
             Assert.Contains("Status", cut.Markup);
 

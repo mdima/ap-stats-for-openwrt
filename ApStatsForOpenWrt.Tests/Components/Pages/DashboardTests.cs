@@ -940,10 +940,10 @@ public sealed class DashboardTests
         }
     }
 
-    // ── Phase 19 M-HIST-05 / M-HIST-06 (D-03 / D-04) — RSSI (1h) sparkline column gating ──────
+    // ── Phase 19 M-HIST-05 / M-HIST-06 (D-03 / D-04) — merged "RSSI" column (RSSI + 1 h sparkline) ──
 
     [Fact]
-    public void Dashboard_RssiSparklineColumn_Present_WhenHistoryEnabled()
+    public void Dashboard_RssiColumn_MergesSparkline_WhenHistoryEnabled()
     {
         var (node, net) = MakeApAndNet();
         var s = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10, Status = Status.Online, LastPollDate = DateTime.UtcNow };
@@ -953,13 +953,12 @@ public sealed class DashboardTests
         using (ctx)
         {
             var cut = ctx.Render<Dashboard>();
-            // The non-sortable "RSSI (1h)" header is present...
-            Assert.Contains("RSSI (1h)", cut.Markup);
-            var rssiOneHourTh = cut.FindAll("th").First(t => t.TextContent.Contains("RSSI (1h)"));
-            // ...and is a plain <th> (NOT a SortHeaderCell — no aria-sort, no sort button, D-04).
-            Assert.False(rssiOneHourTh.HasAttribute("aria-sort"));
-            Assert.Empty(rssiOneHourTh.QuerySelectorAll("button"));
-            // The KPI history chart card mounts beneath the KPI tiles.
+            // RSSI + RSSI(1h) are merged into ONE sortable "RSSI" column — no separate sparkline header.
+            Assert.DoesNotContain("RSSI (1h)", cut.Markup);
+            Assert.Contains(cut.FindAll("th").Select(t => t.TextContent), h => h.Contains("RSSI"));
+            // The sparkline lives inside the merged Signal cell (link target covered by the click-through test).
+            Assert.NotEmpty(cut.FindAll("a[data-testid=\"sparkline-link\"]"));
+            // The KPI history chart card still mounts beneath the KPI tiles.
             Assert.Contains("Activity — last 12 h", cut.Markup);
         }
     }
@@ -982,9 +981,9 @@ public sealed class DashboardTests
     }
 
     [Fact]
-    public void Dashboard_RssiSparklineColumn_Absent_WhenHistoryDisabled()
+    public void Dashboard_RssiColumn_OmitsSparkline_WhenHistoryDisabled()
     {
-        // D-03 — history off → no <th>, no chart, no notices.
+        // D-03 — history off → the RSSI column shows ONLY the RSSI cell (no sparkline, no link), no chart.
         var (node, net) = MakeApAndNet();
         var s = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10, Status = Status.Online, LastPollDate = DateTime.UtcNow };
         var (ctx, _, _, _, _) = Build(new[] { node }, new[] { s }, anyEnabled: true,
@@ -993,7 +992,11 @@ public sealed class DashboardTests
         using (ctx)
         {
             var cut = ctx.Render<Dashboard>();
-            Assert.DoesNotContain("RSSI (1h)", cut.Markup);
+            // The RSSI column header is still present (sortable by current RSSI)...
+            Assert.Contains(cut.FindAll("th").Select(t => t.TextContent), h => h.Contains("RSSI"));
+            // ...but with history off there is no sparkline (no link, no tier band) and no KPI chart.
+            Assert.Empty(cut.FindAll("a[data-testid=\"sparkline-link\"]"));
+            Assert.Empty(cut.FindAll("rect.rssi-sparkline-tier"));
             Assert.DoesNotContain("Activity — last 12 h", cut.Markup);
         }
     }

@@ -130,15 +130,19 @@ def seed(db: str):
     t = start
     while t <= now:
         age_h = (now - t).total_seconds() / 3600.0
-        # roamer: AP1(net1) for first half, AP2(net3) for second half — continuous line, AP attribution flips
+        # roamer: AP1(net1) older half, AP2(net3) recent half (AP attribution flips, line stays continuous).
+        # Recent half swings −56..−72 so the LAST-HOUR sparkline CROSSES the −67 good/fair boundary →
+        # green (top) + yellow (bottom) bands both visible (the tier-crossing demo).
         if age_h > 6:
-            rssi_rows.append((iso(t), s_roam, 1, 1, -55 - int(5 * _wobble(t))))
+            rssi_rows.append((iso(t), s_roam, 1, 1, -56 - int(8 * _wobble(t))))
         else:
-            rssi_rows.append((iso(t), s_roam, 2, 3, -60 - int(5 * _wobble(t))))
-        # dropper: present only in first 8 h, then a GAP (offline) for the last 4 h
-        if age_h > 4:
-            rssi_rows.append((iso(t), s_drop, 1, 1, -67 - int(6 * _wobble(t))))
-        # solid: steady on AP1 / 5 GHz
+            rssi_rows.append((iso(t), s_roam, 2, 3, -64 - int(8 * _wobble(t))))
+        # dropper: swings −76..−84 so it CROSSES the −80 fair/weak boundary → yellow + red bands both
+        # visible. A short offline GAP 5–7 h ago (L-05) still shows on the 12 h detail chart, but the
+        # last hour has samples so the sparkline tier-crossing is visible.
+        if not (5.0 <= age_h <= 7.0):
+            rssi_rows.append((iso(t), s_drop, 1, 1, -80 - int(4 * _wobble(t))))
+        # solid: steady ~−48 on AP1 / 5 GHz — the all-green reference row.
         rssi_rows.append((iso(t), s_solid, 1, 2, -48 - int(4 * _wobble(t))))
         # s_fresh: intentionally NO rows
         t += dt.timedelta(minutes=BUCKET_MIN)

@@ -137,14 +137,9 @@ else
                                 <SortHeaderCell Column="ip"       CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">IP</SortHeaderCell>
                                 <SortHeaderCell Column="ssid"     CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">SSID</SortHeaderCell>
                                 <SortHeaderCell Column="ap"       CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">AP</SortHeaderCell>
+                                @* Phase 19 — merged "RSSI" column: sortable by current RSSI; when history is on the
+                                   cell ALSO carries the inline 1 h sparkline (no separate column — keeps the table narrow). *@
                                 <SortHeaderCell Column="rssi"     CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">RSSI</SortHeaderCell>
-                                @* Phase 19 M-HIST-06 / D-04 — non-sortable "RSSI (1h)" sparkline column, AFTER RSSI.
-                                   Plain <th> (NOT a SortHeaderCell — no meaningful single-key sort for a series).
-                                   Gated on HistoryEnabled (D-03 — column entirely absent when history is off). *@
-                                @if (Settings.HistoryEnabled)
-                                {
-                                    <th scope="col">RSSI (1h)</th>
-                                }
                                 <SortHeaderCell Column="lastSeen" CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">Last seen</SortHeaderCell>
                                 <SortHeaderCell Column="status"   CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">Status</SortHeaderCell>
                             </tr>
@@ -179,17 +174,24 @@ else
                                         <td><code class="font-monospace">@(string.IsNullOrEmpty(row.Ip) ? "—" : row.Ip)</code></td>
                                         <td>@row.Ssid</td>
                                         <td class="text-nowrap">@row.ApHostname</td>
-                                        <td><RssiCell Rss="row.Rss" /></td>
-                                        @if (Settings.HistoryEnabled)
-                                        {
-                                            @* #5 — whole sparkline cell click-throughs to the station detail page (same target as the name cell). *@
-                                            <td>
-                                                <a href="@($"/Stations/{Uri.EscapeDataString(row.Mac)}")" class="d-inline-block"
-                                                   data-testid="sparkline-link" aria-label="@($"RSSI history for {row.Mac}")">
-                                                    <RssiSparkline Points="@GetSparkline(row.Mac)" />
-                                                </a>
-                                            </td>
-                                        }
+                                        @* Merged "RSSI" cell: current RSSI (bars + dBm) and, when history is on, the
+                                           inline 1 h sparkline beside it (still a click-through to the detail page, #5). *@
+                                        <td>
+                                            @if (Settings.HistoryEnabled)
+                                            {
+                                                <span class="d-inline-flex align-items-center gap-2">
+                                                    <RssiCell Rss="row.Rss" />
+                                                    <a href="@($"/Stations/{Uri.EscapeDataString(row.Mac)}")" class="d-inline-flex"
+                                                       data-testid="sparkline-link" aria-label="@($"RSSI history for {row.Mac}")">
+                                                        <RssiSparkline Points="@GetSparkline(row.Mac)" />
+                                                    </a>
+                                                </span>
+                                            }
+                                            else
+                                            {
+                                                <RssiCell Rss="row.Rss" />
+                                            }
+                                        </td>
                                         <td>@RelativeTime(row.LastSeen)</td>
                                         <td><StatusBadge Status="row.StationStatus" IsStale="@IsStale(row)" /></td>
                                     </tr>
