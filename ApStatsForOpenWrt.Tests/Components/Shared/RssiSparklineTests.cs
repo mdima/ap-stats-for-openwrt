@@ -193,12 +193,16 @@ public sealed class RssiSparklineTests
     [Fact]
     public void Title_ShowsLatestReadingTierAndRange()
     {
-        // #1 — native SVG <title> hover tooltip with the latest sample, its tier word, and the range.
+        // #1 — the hover tooltip is now a BOOTSTRAP tooltip: data-bs-toggle="tooltip" + the text on
+        // a data-bs-title attribute (no native SVG <title> child). Same latest + tier word + range.
         var points = new List<RssiSparklinePoint> { P(0, -55), P(5, -70), P(10, -60) };
         using var ctx = new BunitContext();
         var cut = ctx.Render<RssiSparkline>(p => p.Add(c => c.Points, points));
 
-        var title = cut.Find("svg title").TextContent;
+        // Native SVG <title> is gone; the opt-in attribute is present.
+        Assert.Empty(cut.FindAll("svg title"));
+        var tip = cut.Find("[data-bs-toggle=\"tooltip\"]");
+        var title = tip.GetAttribute("data-bs-title")!;
         Assert.Contains("Latest -60 dBm", title); // chronologically-last present reading
         Assert.Contains("(good)", title);         // tier word — colour-blind-safe
         Assert.Contains("-70", title);            // range low
@@ -208,11 +212,13 @@ public sealed class RssiSparklineTests
     [Fact]
     public void Title_IgnoresTrailingGap_ForLatestReading()
     {
-        // Latest = last PRESENT sample, even when the window ends on an offline (gap) bucket.
+        // Latest = last PRESENT sample, even when the window ends on an offline (gap) bucket. Read off
+        // the Bootstrap-tooltip data-bs-title attribute (the native SVG <title> child is gone).
         var points = new List<RssiSparklinePoint> { P(0, -55), P(5, -62), P(10, null) };
         using var ctx = new BunitContext();
         var cut = ctx.Render<RssiSparkline>(p => p.Add(c => c.Points, points));
 
-        Assert.Contains("Latest -62 dBm", cut.Find("svg title").TextContent);
+        var title = cut.Find("[data-bs-toggle=\"tooltip\"]").GetAttribute("data-bs-title")!;
+        Assert.Contains("Latest -62 dBm", title);
     }
 }

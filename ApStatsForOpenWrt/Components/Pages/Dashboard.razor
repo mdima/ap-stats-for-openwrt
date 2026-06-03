@@ -6,7 +6,9 @@
 @using ApStatsForOpenWrt.Services.Settings
 @using ApStatsForOpenWrt.Services.Vendor
 @using ApStatsForOpenWrt.Web.Helpers
+@using Microsoft.JSInterop
 @implements IDisposable
+@implements IAsyncDisposable
 
 @inject INodeRepo Nodes
 @inject INetworkRepo Networks
@@ -17,6 +19,7 @@
 @inject PreferencesService Prefs
 @inject IKpiHistoryQueryService KpiHistory
 @inject IRssiHistoryQueryService RssiHistory
+@inject IJSRuntime JS
 
 @* Dashboard.razor — Phase 5 live-push view (REORGANIZED Phase 8 — REQ-UI-10..13, REQ-UI-22, REQ-UI-23, REQ-UI-53).
    Phase 5 mechanics (Virtualize table, sort, search predicate, ComputeFilteredRows, IsStale, OnCycledAsync) preserved verbatim.
@@ -261,6 +264,11 @@ else
 
     // --- Phase 8 NEW state (REQ-UI-22, REQ-UI-53, KpiTileBar wiring) ---
     private bool _restored;                                                                  // PITFALLS.md Pitfall 7 prerender guard
+
+    // --- Quick task 260603-968 (QUAL-02) — bs-tooltips.js module ref, imported once on firstRender;
+    // initTooltips() is called after EVERY render (rows re-render per Cycle, so a firstRender-only
+    // init would go stale). The module's dispose-then-recreate keeps re-init leak-free.
+    private IJSObjectReference? _tooltipInterop;
     private StatusFilter? _statusFilter;                                                     // KPI tile selection (bidirectionally synced with _selectedStatuses)
     private List<DashboardKpiRow> _lastFilteredKpiRows = new();                              // projection passed to <KpiTileBar Rows="..."/>
     private readonly HashSet<string> _changedRowMacs = new();                                // REQ-UI-53 row-status-changed hook (one render frame)
@@ -293,6 +301,30 @@ else
     /// </summary>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        // Quick task 260603-968 (QUAL-02) — (re)initialize the Bootstrap tooltips on EVERY render.
+        // Import the bs-tooltips.js module once (firstRender), then call initTooltips() after every
+        // render: the Virtualized rows re-render on each Cycle (OnCycledAsync → StateHasChanged), so
+        // the per-row sparkline DOM is replaced and tooltips must be re-bound. The initializer's
+        // dispose-then-recreate keeps this leak-free. Runs BEFORE the prefs-restore early-return below
+        // so it is never short-circuited. Interop is forbidden during prerender — swallow JS errors.
+        if (firstRender)
+        {
+            try
+            {
+                _tooltipInterop = await JS.InvokeAsync<IJSObjectReference>("import", "./js/bs-tooltips.js");
+            }
+            catch (JSException) { }                 // prerender / interop unavailable
+            catch (InvalidOperationException) { }   // prerender (no JS runtime yet)
+            catch (TaskCanceledException) { }
+        }
+
+        if (_tooltipInterop is not null)
+        {
+            try { await _tooltipInterop.InvokeVoidAsync("initTooltips"); }
+            catch (JSException) { }
+            catch (ObjectDisposedException) { }
+        }
+
         if (!firstRender || _restored) return;
 
         try
@@ -394,6 +426,16 @@ else
     {
         // Pattern 2: unsubscribe to release captured `this`. Singleton Notifier outlives circuit.
         Notifier.Cycled -= OnCycledAsync;
+    }
+
+    // Quick task 260603-968 — async teardown for the bs-tooltips.js module ref. Blazor invokes BOTH
+    // Dispose() (Notifier unsubscribe, above) and DisposeAsync() when a component implements both.
+    public async ValueTask DisposeAsync()
+    {
+        if (_tooltipInterop is not null)
+        {
+            try { await _tooltipInterop.DisposeAsync(); } catch { }
+        }
     }
 
     private async Task<List<DashboardRow>> BuildRowsAsync(IReadOnlyList<WiFiNode> allNodes)
