@@ -89,18 +89,42 @@ public sealed class RssiHistoryQueryService(IDbContextFactory<DatabaseContext> f
     {
         await using var db = factory.CreateDbContext();
 
-        var cutoff = DateTime.UtcNow - HistoryBuckets.FullWindow;
+        // Anchor the 12 h grid to the POLLING CLOCK = MAX(KpiHistorySnapshots.TimestampUtc) (D-06).
+        // One KPI snapshot is written per cycle in the same transaction (same `now`) as the RSSI
+        // samples, so the latest snapshot is always >= any station sample — it is the authoritative
+        // "current poll time". Anchoring here (instead of the station's OWN latest sample) fixes two
+        // QUAL-02 bugs: (1) a station with no samples in the window but an active poll clock showed
+        // "Collecting history…" forever; (2) a disconnected station's chart froze at its last sample
+        // instead of sliding forward with trailing null gaps. Fallback: when NO KPI snapshot exists
+        // yet (fresh DB / pre-history), anchor to the station's latest row so the existing RSSI-only
+        // tests stay green. IsEmpty is true ONLY when NEITHER a KPI snapshot NOR any station row
+        // exists — i.e. there is genuinely no history at all (the placeholder is then truthful).
+        var kpiClock = await db.KpiHistorySnapshots
+            .MaxAsync(s => (DateTime?)s.TimestampUtc, ct);
+        var stationLatest = await db.RssiHistorySamples
+            .Where(s => s.StationMac == mac)
+            .MaxAsync(s => (DateTime?)s.TimestampUtc, ct);
+
+        var anchorRaw = kpiClock ?? stationLatest;
+        if (anchorRaw is null)
+            return new RssiDetailDto([], [], IsEmpty: true);   // no poll clock AND no station rows
+
+        var anchor = HistoryBuckets.AsUtc(anchorRaw.Value);   // Pitfall 3 round-trip kind fix
+        var grid = HistoryBuckets.BuildGrid(anchor, HistoryBuckets.FullWindow);
+
+        // Read the station's rows over the SAME window the grid spans (derive the cutoff from the
+        // anchor, not DateTime.UtcNow, so the windowed read is consistent with the displayed grid).
+        var cutoff = anchor - HistoryBuckets.FullWindow;
         var rows = await db.RssiHistorySamples
             .AsNoTracking()
             .Where(s => s.TimestampUtc >= cutoff && s.StationMac == mac)
             .OrderBy(s => s.TimestampUtc)
             .ToListAsync(ct);
 
+        // A poll clock exists but this station has no samples in the window: render empty axes up to
+        // the current poll time (no series) — NOT the permanent placeholder.
         if (rows.Count == 0)
-            return new RssiDetailDto([], [], IsEmpty: true);
-
-        var anchor = HistoryBuckets.AsUtc(rows[^1].TimestampUtc);
-        var grid = HistoryBuckets.BuildGrid(anchor, HistoryBuckets.FullWindow);
+            return new RssiDetailDto(grid, [], IsEmpty: false);
 
         // Resolve labels: NodeId→Hostname, NetworkId→SSID (mirror Detail.razor:337-338).
         var nodeIds = rows.Select(r => r.NodeId).Distinct().ToList();

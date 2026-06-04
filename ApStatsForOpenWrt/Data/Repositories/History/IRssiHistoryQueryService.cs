@@ -28,7 +28,11 @@ public interface IRssiHistoryQueryService
     /// M-HIST-07 / L-06. Return one series per distinct (NodeId, NetworkId) the MAC was seen on in the
     /// full 12 h window; each series is last-value-per-bucket over the full grid (NO cross-series
     /// aggregation — preserves per-AP detail). Series label resolves NodeId→Hostname + NetworkId→SSID.
-    /// Zero rows → empty-state flag set.
+    /// The grid is anchored to the POLLING CLOCK (MAX(KpiHistorySnapshots.TimestampUtc), with a
+    /// station-latest-row fallback when no snapshot exists), so a station with no samples in the
+    /// window still shows empty axes up to the current poll time and a disconnected station's line
+    /// slides forward with trailing null gaps. <see cref="RssiDetailDto.IsEmpty"/> is set ONLY when
+    /// NEITHER a KPI snapshot NOR any station row exists (genuinely no history at all).
     /// </summary>
     Task<RssiDetailDto> GetDetailSeriesAsync(string mac, CancellationToken ct);
 }
@@ -47,8 +51,8 @@ public sealed record RssiSparklinePoint(DateTime BucketUtc, int? Rssi);
 /// (NodeId, NetworkId), and a zero-rows flag (D-03 placeholder).
 /// </summary>
 /// <param name="BucketsUtc">The shared full-axis bucket timestamps (oldest first).</param>
-/// <param name="Series">One series per distinct (NodeId, NetworkId); empty when no rows.</param>
-/// <param name="IsEmpty">True when the MAC had zero samples in the 12 h window.</param>
+/// <param name="Series">One series per distinct (NodeId, NetworkId); empty when this MAC has no rows in the window.</param>
+/// <param name="IsEmpty">True ONLY when there is no history at all (no KPI poll clock AND no station rows). A station with no samples but an active poll clock returns IsEmpty=false with empty Series + a populated axis.</param>
 public sealed record RssiDetailDto(
     IReadOnlyList<DateTime> BucketsUtc, IReadOnlyList<RssiDetailSeries> Series, bool IsEmpty);
 
