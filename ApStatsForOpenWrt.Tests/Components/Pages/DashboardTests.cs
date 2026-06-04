@@ -278,6 +278,34 @@ public sealed class DashboardTests
         }
     }
 
+    [Fact]
+    public void TableRow_VendorColumn_ClampedWithTwoLineEllipsis_FullNameInTitleTooltip()
+    {
+        // 260604-vel — vendor cell markup contract: the vendor name renders inside a span
+        // carrying .two-line-ellipsis (site.css clamps to 2 lines, ellipsis only on overflow)
+        // with the FULL vendor name on the native title tooltip. bUnit has no layout engine,
+        // so the clamp itself is CSS-only; this pins the class + title wiring.
+        var nodes = new[] { new WiFiNode { Id = 1, Hostname = "ap-1", Username = "root" } };
+        var networks = new Dictionary<int, List<WiFiNetwork>>
+        {
+            [1] = new() { new WiFiNetwork { Id = 100, WiFiNodeId = 1, MacAddress = "AA:BB:CC:00:00:00", SSID = "main", Enabled = true } }
+        };
+        var stations = new[]
+        {
+            new WLANStation { Id = 1, MacAddress = "00:00:0C:DE:AD:BE", WiFiNetworkId = 100, Status = Status.Online, LastPollDate = DateTime.UtcNow }
+        };
+
+        var (ctx, _, _, _, oui) = Build(nodes, stations, anyEnabled: true, networks);
+        oui.Vendors["00:00:0C:DE:AD:BE"] = "Telefonaktiebolaget LM Ericsson";
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            var vendorSpan = cut.Find("span.two-line-ellipsis");
+            Assert.Equal("Telefonaktiebolaget LM Ericsson", vendorSpan.GetAttribute("title"));
+            Assert.Contains("Telefonaktiebolaget LM Ericsson", vendorSpan.TextContent);
+        }
+    }
+
     // ── DASH-11 Phase 5 empty state (replaces the Phase 3 placeholder row) ─
     // Note: the dedicated phase-5 test `Dashboard_Dash11_EmptyState_RendersWhenNodesAndWlansButNoStations`
     // (below) covers the new EmptyState rendering; the Phase 3 placeholder-row test was retired with

@@ -166,7 +166,9 @@ else
                                         <td>
                                             @if (!string.IsNullOrEmpty(row.Vendor))
                                             {
-                                                @row.Vendor
+                                                <span class="two-line-ellipsis" title="@row.Vendor">
+                                                    @row.Vendor
+                                                </span>                                                
                                             }
                                             else
                                             {

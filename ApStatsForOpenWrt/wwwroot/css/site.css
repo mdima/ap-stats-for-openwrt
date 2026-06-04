@@ -175,3 +175,18 @@
   --bs-tooltip-color: var(--bs-gray-100);
   --bs-tooltip-opacity: 1;
 }
+
+/* === Quick task 260604-vel — Dashboard Vendor column 2-line clamp (operator request). =====
+   Long OUI vendor names wrap to at most two lines; -webkit-line-clamp draws the ellipsis on
+   the SECOND line, and only when the text actually overflows — short names render untouched.
+   The full vendor rides the native title tooltip on the same span (Dashboard.razor vendor
+   cell), so the clamped tail stays reachable on hover. The -webkit- prefixed trio is the
+   form every engine actually implements (Blink/WebKit/Gecko); the unprefixed line-clamp is
+   the standards-track alias where supported. */
+.two-line-ellipsis {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
