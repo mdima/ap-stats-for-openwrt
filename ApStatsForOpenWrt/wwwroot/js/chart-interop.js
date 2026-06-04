@@ -23,6 +23,20 @@
 // canvasId -> Chart instance
 const charts = new Map();
 
+/**
+ * 260604-rq7: Convert an ISO-8601 UTC label (the Razor ToInterop now emits `.ToString("o")`,
+ * trailing `Z`) to a browser-LOCAL `HH:mm` string. `new Date(iso)` parses the UTC instant; the
+ * locale-formatter renders it in the browser's timezone, so x-axis ticks AND tooltip titles read
+ * in the operator's local time instead of UTC. Defensive: any non-string / unparseable value
+ * passes through unchanged (so a pre-existing local label or a numeric index is never corrupted).
+ */
+function localHm(iso) {
+    if (typeof iso !== 'string') return iso;
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
 // D-02: guard so the MutationObserver is installed exactly once per module instance.
 let _observerInstalled = false;
 
@@ -210,7 +224,7 @@ function buildKpiConfig(dto, colors) {
     return {
         type: 'bar',
         data: {
-            labels: dto?.labels ?? [],
+            labels: (dto?.labels ?? []).map(localHm), // 260604-rq7: UTC ISO -> browser-local HH:mm
             datasets: [
                 { _segment: 'online', label: 'Online', data: dto?.online ?? [], backgroundColor: colors.success },
                 { _segment: 'stale', label: 'Stale', data: dto?.stale ?? [], backgroundColor: colors.warning },
@@ -282,8 +296,10 @@ export function renderKpiChart(canvasId, dto) {
 export function updateKpiChart(canvasId, dto) {
     try {
         const chart = charts.get(canvasId);
-        if (!chart) return false;
-        chart.data.labels = dto?.labels ?? [];
+        // 260604-rq7: self-heal — no live instance (e.g. a prior render failed) -> render fresh
+        // instead of a permanent silent no-op on every subsequent update.
+        if (!chart) return renderKpiChart(canvasId, dto);
+        chart.data.labels = (dto?.labels ?? []).map(localHm); // 260604-rq7: UTC ISO -> local HH:mm
         const map = { online: dto?.online ?? [], stale: dto?.stale ?? [], offline: dto?.offline ?? [] };
         for (const ds of chart.data.datasets) {
             if (ds._segment && map[ds._segment]) ds.data = map[ds._segment];
@@ -325,7 +341,7 @@ function buildRssiConfig(dto, colors) {
     }));
     return {
         type: 'line',
-        data: { labels: dto?.labels ?? [], datasets },
+        data: { labels: (dto?.labels ?? []).map(localHm), datasets }, // 260604-rq7: UTC ISO -> local HH:mm
         options: {
             responsive: true,
             maintainAspectRatio: false,
@@ -347,6 +363,9 @@ function buildRssiConfig(dto, colors) {
                 legend: { labels: { color: colors.body } },
                 // M-HIST-07 refinement: green/yellow/red signal-quality bands behind the lines.
                 rssiZones: { enabled: true },
+                // 260604-rq7: centered overlay when the RSSI window has nothing to plot
+                // (zero series or every datapoint null/gap) instead of bare axes.
+                noData: { text: 'No samples in the last 12 h' },
                 tooltip: {
                     enabled: true,
                     titleColor: colors.body,
@@ -357,8 +376,8 @@ function buildRssiConfig(dto, colors) {
                 },
             },
         },
-        // Per-chart registration of the RSSI quality zones (M-HIST-07 refinement).
-        plugins: [rssiZonesPlugin],
+        // Per-chart registration of the RSSI quality zones + the no-data overlay (260604-rq7).
+        plugins: [rssiZonesPlugin, noDataPlugin],
     };
 }
 
@@ -381,8 +400,10 @@ export function renderRssiChart(canvasId, dto) {
 export function updateRssiChart(canvasId, dto) {
     try {
         const chart = charts.get(canvasId);
-        if (!chart) return false;
-        chart.data.labels = dto?.labels ?? [];
+        // 260604-rq7: self-heal — no live instance (e.g. a prior render failed) -> render fresh
+        // instead of a permanent silent no-op on every subsequent update.
+        if (!chart) return renderRssiChart(canvasId, dto);
+        chart.data.labels = (dto?.labels ?? []).map(localHm); // 260604-rq7: UTC ISO -> local HH:mm
         const series = dto?.series ?? [];
         // Rebuild datasets so series add/remove across roams is reflected.
         chart.data.datasets = series.map((s, i) => ({
