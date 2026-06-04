@@ -15,7 +15,7 @@ namespace ApStatsForOpenWrt.Data.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.7");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
 
             modelBuilder.Entity("ApStatsForOpenWrt.Data.Models.AppSetting", b =>
                 {
@@ -52,6 +52,70 @@ namespace ApStatsForOpenWrt.Data.Migrations
                             Key = "LocalDomainSuffixes",
                             StringValue = "[]"
                         });
+                });
+
+            modelBuilder.Entity("ApStatsForOpenWrt.Data.Models.KpiHistorySnapshot", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("OfflineCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("OnlineCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("StaleCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("TimestampUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TimestampUtc")
+                        .IsDescending();
+
+                    b.ToTable("KpiHistorySnapshots");
+                });
+
+            modelBuilder.Entity("ApStatsForOpenWrt.Data.Models.RssiHistorySample", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("NetworkId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("NodeId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Rssi")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StationMac")
+                        .IsRequired()
+                        .HasMaxLength(17)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("TimestampUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NetworkId");
+
+                    b.HasIndex("NodeId");
+
+                    b.HasIndex("TimestampUtc")
+                        .IsDescending();
+
+                    b.HasIndex("StationMac", "TimestampUtc")
+                        .IsDescending();
+
+                    b.ToTable("RssiHistorySamples");
                 });
 
             modelBuilder.Entity("ApStatsForOpenWrt.Data.Models.WLANStation", b =>
@@ -199,6 +263,25 @@ namespace ApStatsForOpenWrt.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("WiFiNodes");
+                });
+
+            modelBuilder.Entity("ApStatsForOpenWrt.Data.Models.RssiHistorySample", b =>
+                {
+                    b.HasOne("ApStatsForOpenWrt.Data.Models.WiFiNetwork", "Network")
+                        .WithMany()
+                        .HasForeignKey("NetworkId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ApStatsForOpenWrt.Data.Models.WiFiNode", "Node")
+                        .WithMany()
+                        .HasForeignKey("NodeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Network");
+
+                    b.Navigation("Node");
                 });
 
             modelBuilder.Entity("ApStatsForOpenWrt.Data.Models.WLANStation", b =>

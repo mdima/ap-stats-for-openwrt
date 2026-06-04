@@ -16,6 +16,10 @@ public sealed class DatabaseContext(DbContextOptions<DatabaseContext> options) :
     public DbSet<WLANStation> WLANStations => Set<WLANStation>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
 
+    // Phase 18 M-HIST-01 — history persistence (orchestrator-only writes, 12 h prune).
+    public DbSet<KpiHistorySnapshot> KpiHistorySnapshots => Set<KpiHistorySnapshot>();
+    public DbSet<RssiHistorySample> RssiHistorySamples => Set<RssiHistorySample>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // D-09 / D-10: seed exactly one row, captured in __EFMigrationsHistory.
@@ -52,5 +56,21 @@ public sealed class DatabaseContext(DbContextOptions<DatabaseContext> options) :
             .WithMany()
             .HasForeignKey(s => s.WiFiNetworkId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        // Phase 18 M-HIST-01 / L-03 — RssiHistorySample FKs are CASCADE (NOT SetNull like
+        // WLANStation above): deleting a WiFiNode or WiFiNetwork cascade-deletes its history
+        // samples. StationMac has NO FK by design (MAC is identity; history survives station
+        // churn). Mirrors the WiFiNetwork → WiFiNode cascade template above.
+        modelBuilder.Entity<RssiHistorySample>()
+            .HasOne(r => r.Node)
+            .WithMany()
+            .HasForeignKey(r => r.NodeId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<RssiHistorySample>()
+            .HasOne(r => r.Network)
+            .WithMany()
+            .HasForeignKey(r => r.NetworkId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

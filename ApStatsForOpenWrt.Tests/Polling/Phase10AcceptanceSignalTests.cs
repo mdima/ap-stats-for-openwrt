@@ -149,7 +149,7 @@ public sealed class Phase10AcceptanceSignalTests(SqliteInMemoryFixture fixture, 
             };
 
         var orchestrator = new PollOrchestrator(
-            dpFactory, nodeRepo, networkRepo, stationRepo, probeFactory, notifier,
+            dpFactory, nodeRepo, networkRepo, stationRepo, new HistoryRepo(dpFactory), probeFactory, notifier,
             NullLogger<PollOrchestrator>.Instance, settings, enrichmentFactory, TimeProvider.System,
             new ForceEnrichmentService());
 
@@ -305,6 +305,8 @@ public sealed class Phase10AcceptanceSignalTests(SqliteInMemoryFixture fixture, 
         public Task BumpSessionVersionAsync(CancellationToken ct = default) => Task.CompletedTask;
         // Phase 17 Plan 17-01 M-UPD-02 — minimal mutable update-check stub members.
         public bool UpdateCheckEnabled { get; private set; } = true;
+        public bool HistoryEnabled => true;
+        public Task SetHistoryEnabledAsync(bool enabled, CancellationToken ct = default) => Task.CompletedTask;
         public string? LatestKnownVersion { get; private set; }
         public string? LatestReleaseUrl { get; private set; }
         public DateTime? LastCheckedAtUtc { get; private set; }

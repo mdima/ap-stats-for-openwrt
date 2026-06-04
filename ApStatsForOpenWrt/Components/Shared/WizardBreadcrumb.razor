@@ -1,6 +1,9 @@
-@* WizardBreadcrumb.razor — D-07 wizard chrome. Three-step breadcrumb with completed /
+@* WizardBreadcrumb.razor — D-07 wizard chrome. Four-step breadcrumb with completed /
    current / future visual states. Bespoke Razor markup — AdminLTE 4 wizard-bs (RC7)
-   is too unstable to use per STACK.md. *@
+   is too unstable to use per STACK.md.
+   19-05 (D-01): extended 3→4 steps (1 Password › 2 Nodes › 3 WLANs › 4 History).
+   The WR-03 "always-last" invariant shifts from WLANs to History; WLANs now gains a
+   completed/clickable-link state when CurrentStep > 3. *@
 
 <div class="d-flex align-items-center justify-content-center gap-2 mb-4">
 
@@ -36,14 +39,30 @@
 
     <span class="text-body-secondary mx-2">&rsaquo;</span>
 
-    @* Step 3: WLANs — no "completed" state; it is always the last step (WR-03) *@
-    @if (CurrentStep == 3)
+    @* Step 3: WLANs — gains a completed/clickable state when CurrentStep > 3 (D-01) *@
+    @if (CurrentStep > 3)
+    {
+        <a href="/setup/wlans" class="text-primary">3 WLANs</a>
+    }
+    else if (CurrentStep == 3)
     {
         <span class="fw-semibold text-body">3 WLANs</span>
     }
     else
     {
         <span class="text-body-secondary">3 WLANs</span>
+    }
+
+    <span class="text-body-secondary mx-2">&rsaquo;</span>
+
+    @* Step 4: History — no "completed" state; it is always the last step (WR-03, D-01) *@
+    @if (CurrentStep == 4)
+    {
+        <span class="fw-semibold text-body">4 History</span>
+    }
+    else
+    {
+        <span class="text-body-secondary">4 History</span>
     }
 
 </div>

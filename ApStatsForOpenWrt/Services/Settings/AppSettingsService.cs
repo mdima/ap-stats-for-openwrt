@@ -27,6 +27,9 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
     private const string KeyLatestKnownVersion     = "LatestKnownVersion";
     private const string KeyLatestReleaseUrl       = "LatestReleaseUrl";
     private const string KeyLastCheckedAtUtc       = "LastCheckedAtUtc";
+    // M-HIST-04 — Path B (mirrors KeyUpdateCheckEnabled): NO HasData row, NO EF migration; the
+    // warm-time `?? true` default below IS the seed (HistoryEnabled defaults on).
+    private const string KeyHistoryEnabled         = "HistoryEnabled";
 
     private static readonly IReadOnlyList<string> EmptySuffixList = Array.Empty<string>();
 
@@ -41,10 +44,11 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
         bool UpdateCheckEnabled,
         string? LatestKnownVersion,
         string? LatestReleaseUrl,
-        DateTime? LastCheckedAtUtc);
+        DateTime? LastCheckedAtUtc,
+        bool HistoryEnabled);
     // safe defaults until WarmAsync runs (3600 matches Phase 9 SCHEMA-06 seed; SessionVersion default 0 per M-SEC-04;
     // M-UPD-02 Path B seed — UpdateCheckEnabled=true (D-07 ship-armed) + three nulls, NO DB row required).
-    private Snapshot _current = new(30, null, false, 3600, EmptySuffixList, 0, true, null, null, null);
+    private Snapshot _current = new(30, null, false, 3600, EmptySuffixList, 0, true, null, null, null, true);
 
     public int     PollingIntervalSeconds => Volatile.Read(ref _current).PollingIntervalSeconds;
     public string? UIPasswordHash         => Volatile.Read(ref _current).UIPasswordHash;
@@ -56,6 +60,7 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
     public string? LatestKnownVersion     => Volatile.Read(ref _current).LatestKnownVersion;
     public string? LatestReleaseUrl       => Volatile.Read(ref _current).LatestReleaseUrl;
     public DateTime? LastCheckedAtUtc      => Volatile.Read(ref _current).LastCheckedAtUtc;
+    public bool    HistoryEnabled         => Volatile.Read(ref _current).HistoryEnabled;
 
     public event Action<IAppSettingsService>? Changed;
 
@@ -105,7 +110,9 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
             UpdateCheckEnabled:        rows.TryGetValue(KeyUpdateCheckEnabled,     out var uc) ? uc.BoolValue ?? true : true,
             LatestKnownVersion:        rows.TryGetValue(KeyLatestKnownVersion,     out var lv) ? lv.StringValue       : null,
             LatestReleaseUrl:          rows.TryGetValue(KeyLatestReleaseUrl,       out var lu) ? lu.StringValue       : null,
-            LastCheckedAtUtc:          lastCheckedAtUtc);
+            LastCheckedAtUtc:          lastCheckedAtUtc,
+            // M-HIST-04 Path B seed: defaults TRUE (default-on) whether the key is absent OR present-without-a-bool.
+            HistoryEnabled:            rows.TryGetValue(KeyHistoryEnabled,         out var he) ? he.BoolValue ?? true : true);
         Interlocked.Exchange(ref _current, snap);
     }
 
@@ -156,6 +163,10 @@ public sealed class AppSettingsService(IAppSettingsRepo repo) : IAppSettingsServ
 
     public Task SetUpdateCheckEnabledAsync(bool enabled, CancellationToken ct = default)
         => UpsertAndRefreshAsync(KeyUpdateCheckEnabled, boolValue: enabled, ct: ct);
+
+    // ── Phase 18 Plan 18-02 M-HIST-04 — the history on/off setter (Path B, mirrors UpdateCheckEnabled) ──
+    public Task SetHistoryEnabledAsync(bool enabled, CancellationToken ct = default)
+        => UpsertAndRefreshAsync(KeyHistoryEnabled, boolValue: enabled, ct: ct);
 
     public Task SetLatestKnownVersionAsync(string? version, CancellationToken ct = default)
         => UpsertAndRefreshAsync(KeyLatestKnownVersion, stringValue: version, ct: ct);

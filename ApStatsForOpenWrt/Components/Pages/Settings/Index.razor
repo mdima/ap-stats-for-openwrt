@@ -278,6 +278,30 @@
     </div>
 </div>
 
+@* ==== Card 7: Live history (Phase 18 M-HIST-04) ====
+   DB-setting toggle (immediate persist via IAppSettingsService.SetHistoryEnabledAsync — NOT
+   PreferencesService, NOT EditForm/Save) — verbatim structural mirror of the Update-check card.
+   The switch re-renders to the persisted value via the existing Settings.Changed → StateHasChanged
+   subscription wired in OnInitializedAsync. The next-cycle wake (false→true) is the Plan-04
+   HistoryAwareCircuitGate decorator's job; this card's only responsibility is to call the setter. *@
+<div class="card mb-4">
+    <div class="card-header"><h5 class="card-title mb-0">Live history</h5></div>
+    <div class="card-body">
+        <small class="text-body-secondary d-block mb-3">Track online/offline counts and per-station RSSI for the last 12 hours. When on, polling runs continuously even with no one viewing the dashboard.</small>
+
+        <div class="form-check form-switch mb-3">
+            <input class="form-check-input" type="checkbox" role="switch"
+                   id="history-enabled-toggle"
+                   checked="@Settings.HistoryEnabled"
+                   @onchange="OnHistoryEnabledToggleChangedAsync" />
+            <label class="form-check-label" for="history-enabled-toggle">
+                <i class="bi @(Settings.HistoryEnabled ? "bi-clock-history" : "bi-slash-circle") me-2" aria-hidden="true"></i>
+                @(Settings.HistoryEnabled ? "History enabled" : "History disabled")
+            </label>
+        </div>
+    </div>
+</div>
+
 @* ==== Modals ==== *@
 <ConfirmationModal IsOpen="_clearPwdModal"
                    IsOpenChanged="@((bool v) => { _clearPwdModal = v; })"
@@ -424,6 +448,17 @@
     }
 
     private Task OnUpdateAvailableAsync(UpdateInfo _) => InvokeAsync(StateHasChanged);
+
+    // ── Card 7 (Phase 18 M-HIST-04) — Live history toggle handler ───────────
+    private async Task OnHistoryEnabledToggleChangedAsync(ChangeEventArgs e)
+    {
+        var newValue = e.Value is bool b && b;
+        // Immediate DB persist (NOT PreferencesService, NOT EditForm/Save). SetHistoryEnabledAsync
+        // fires Settings.Changed → OnSettingsChanged → InvokeAsync(StateHasChanged), re-rendering the
+        // switch to the persisted value with no page reload. The false→true wake of a paused polling
+        // loop is the Plan-04 HistoryAwareCircuitGate decorator's job, not this card's.
+        await Settings.SetHistoryEnabledAsync(newValue);
+    }
 
     private void OnSettingsChanged(IAppSettingsService settings) => _ = InvokeAsync(StateHasChanged);
 

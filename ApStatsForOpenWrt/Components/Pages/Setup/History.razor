@@ -1,0 +1,73 @@
+@page "/setup/history"
+@layout SetupLayout
+@using ApStatsForOpenWrt.Services.Settings
+
+@inject IAppSettingsService Settings
+@inject NavigationManager Nav
+
+@* /setup/history — Step 4 of the onboarding wizard and the new terminus (D-01, M-HIST-08).
+   A deliberate history opt-in: two Bootstrap form-check radios (default-selected Enable,
+   charter-locked copy L-10). The "Finish" handler persists the choice via the SAME
+   IAppSettingsService.SetHistoryEnabledAsync the Settings card uses (L-08), then sets
+   WizardDismissed = true, then navigates to the dashboard.
+
+   Bypass-safe (D-01): only an explicit "Skip history" + Finish writes false. Skipping the
+   wizard entirely (navigating directly to /) writes nothing, and the warm-time `?? true`
+   default keeps history ON.
+
+   Middleware: NO change needed — WizardSetupGateMiddleware keys off
+   path.StartsWithSegments("/setup") and WizardRedirectMiddleware acts on "/" only, so
+   /setup/history is auto-gated (RESEARCH §Pattern 7, verified). *@
+
+<WizardBreadcrumb CurrentStep="4" />
+
+<h3 class="card-title mb-1">Live history</h3>
+<small class="text-body-secondary">
+    Choose whether to record activity history. This is the last step.
+</small>
+
+<div class="mt-4">
+    <div class="form-check mb-3">
+        <input class="form-check-input" type="radio" name="history-choice" id="history-enable"
+               checked="@_enable"
+               @onchange="() => _enable = true" />
+        <label class="form-check-label" for="history-enable">
+            <span class="fw-semibold">Enable history</span> <span class="text-body-secondary">(recommended)</span><br />
+            <span>Track online/offline counts and per-station RSSI for the last 12 h. Polling runs continuously.</span>
+        </label>
+    </div>
+
+    <div class="form-check mb-3">
+        <input class="form-check-input" type="radio" name="history-choice" id="history-skip"
+               checked="@(!_enable)"
+               @onchange="() => _enable = false" />
+        <label class="form-check-label" for="history-skip">
+            <span class="fw-semibold">Skip history</span><br />
+            <span>No data recorded. Polling only runs while someone is viewing the dashboard, and pauses otherwise.</span>
+        </label>
+    </div>
+
+    <small class="text-body-secondary d-block">You can change this later in Settings.</small>
+</div>
+
+<hr class="my-4" />
+<div class="d-flex justify-content-end">
+    <button type="button" class="btn btn-primary" @onclick="HandleFinishAsync">
+        <i class="bi bi-check-lg me-2"></i>Finish
+    </button>
+</div>
+
+@code {
+    // Default-selected = Enable (L-10). Bypass-safe: this in-memory default is only
+    // persisted when the operator clicks Finish; skipping the wizard writes nothing.
+    private bool _enable = true;
+
+    // D-01: the real Finish — (a) persist the opt-in via the shared setter (L-08),
+    // (b) dismiss the wizard, (c) navigate home.
+    private async Task HandleFinishAsync()
+    {
+        await Settings.SetHistoryEnabledAsync(_enable);
+        await Settings.SetWizardDismissedAsync(true);
+        Nav.NavigateTo("/", forceLoad: false);
+    }
+}

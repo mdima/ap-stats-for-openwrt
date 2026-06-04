@@ -105,6 +105,24 @@ public sealed class DashboardPhase8Tests
         public string? GetVendor(string macAddress) => null;
     }
 
+    // Phase 19 stub-churn (Pitfall 5): Dashboard now injects both history query services.
+    private sealed class StubKpiHistory : ApStatsForOpenWrt.Data.Repositories.History.IKpiHistoryQueryService
+    {
+        public Task<ApStatsForOpenWrt.Data.Repositories.History.KpiHistoryDto> GetLast12hAsync(CancellationToken ct) =>
+            Task.FromResult(new ApStatsForOpenWrt.Data.Repositories.History.KpiHistoryDto(
+                Array.Empty<ApStatsForOpenWrt.Data.Repositories.History.KpiHistoryBucket>(), IsEmpty: true));
+    }
+
+    private sealed class StubRssiHistory : ApStatsForOpenWrt.Data.Repositories.History.IRssiHistoryQueryService
+    {
+        public Task<IReadOnlyDictionary<string, ApStatsForOpenWrt.Data.Repositories.History.RssiSparklineSeries>> GetSparklineSeriesAsync(IEnumerable<string> macs, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyDictionary<string, ApStatsForOpenWrt.Data.Repositories.History.RssiSparklineSeries>>(
+                new Dictionary<string, ApStatsForOpenWrt.Data.Repositories.History.RssiSparklineSeries>());
+        public Task<ApStatsForOpenWrt.Data.Repositories.History.RssiDetailDto> GetDetailSeriesAsync(string mac, CancellationToken ct) =>
+            Task.FromResult(new ApStatsForOpenWrt.Data.Repositories.History.RssiDetailDto(
+                Array.Empty<DateTime>(), Array.Empty<ApStatsForOpenWrt.Data.Repositories.History.RssiDetailSeries>(), IsEmpty: true));
+    }
+
     private sealed class StubSettings : IAppSettingsService
     {
         public int     PollingIntervalSeconds { get; } = 30;
@@ -122,6 +140,8 @@ public sealed class DashboardPhase8Tests
         public Task BumpSessionVersionAsync(CancellationToken ct = default) => Task.CompletedTask;
         // Phase 17 Plan 17-01 M-UPD-02 — minimal mutable update-check stub members.
         public bool UpdateCheckEnabled { get; private set; } = true;
+        public bool HistoryEnabled => true;
+        public Task SetHistoryEnabledAsync(bool enabled, CancellationToken ct = default) => Task.CompletedTask;
         public string? LatestKnownVersion { get; private set; }
         public string? LatestReleaseUrl { get; private set; }
         public DateTime? LastCheckedAtUtc { get; private set; }
@@ -173,6 +193,8 @@ public sealed class DashboardPhase8Tests
         ctx.Services.AddSingleton<IAppSettingsService>(new StubSettings());
         ctx.Services.AddSingleton(notifier);
         ctx.Services.AddSingleton(prefs);
+        ctx.Services.AddSingleton<ApStatsForOpenWrt.Data.Repositories.History.IKpiHistoryQueryService>(new StubKpiHistory());
+        ctx.Services.AddSingleton<ApStatsForOpenWrt.Data.Repositories.History.IRssiHistoryQueryService>(new StubRssiHistory());
         return new Harness(ctx, module, nr, nws, sr, notifier, prefs);
     }
 
@@ -426,6 +448,8 @@ public sealed class DashboardPhase8Tests
         ctx.Services.AddSingleton<IAppSettingsService>(new StubSettings());
         ctx.Services.AddSingleton(new PollNotifier());
         ctx.Services.AddSingleton(new PreferencesService(ctx.JSInterop.JSRuntime));
+        ctx.Services.AddSingleton<ApStatsForOpenWrt.Data.Repositories.History.IKpiHistoryQueryService>(new StubKpiHistory());
+        ctx.Services.AddSingleton<ApStatsForOpenWrt.Data.Repositories.History.IRssiHistoryQueryService>(new StubRssiHistory());
 
         using (ctx)
         {

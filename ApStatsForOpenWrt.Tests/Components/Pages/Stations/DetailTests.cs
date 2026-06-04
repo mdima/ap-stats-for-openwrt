@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Data.Repositories.History;
 using ApStatsForOpenWrt.Services;
 using ApStatsForOpenWrt.Services.Admin;
 using ApStatsForOpenWrt.Services.Polling;
@@ -132,6 +133,9 @@ public sealed class DetailTests
         public Task BumpSessionVersionAsync(CancellationToken ct = default) => Task.CompletedTask;
         // Phase 17 Plan 17-01 M-UPD-02 — minimal mutable update-check stub members.
         public bool UpdateCheckEnabled { get; private set; } = true;
+        // Phase 19 19-04 D-03 — configurable so the Detail suite can pin "history off → RSSI card absent".
+        public bool HistoryEnabled { get; set; } = true;
+        public Task SetHistoryEnabledAsync(bool enabled, CancellationToken ct = default) { HistoryEnabled = enabled; return Task.CompletedTask; }
         public string? LatestKnownVersion { get; private set; }
         public string? LatestReleaseUrl { get; private set; }
         public DateTime? LastCheckedAtUtc { get; private set; }
@@ -168,9 +172,28 @@ public sealed class DetailTests
         }
     }
 
-    private static (BunitContext ctx, StubStationRepo stations, StubNetworkRepo nets, StubNodeRepo nodes, StubOuiLookup oui, EventDetectionService events, StubNodeAdminService nodeAdmin) Build()
+    // Phase 19 19-04 Pitfall 5 stub-churn — Detail.razor now @injects IRssiHistoryQueryService AND
+    // mounts <RssiHistoryChart> (which also @injects it), so every Detail render needs this service in
+    // the test DI container. Empty detail DTO is enough — these tests assert card presence/absence,
+    // not chart payload (the chart's own wiring test owns that, L-03).
+    private sealed class StubRssiHistory : IRssiHistoryQueryService
+    {
+        public Task<IReadOnlyDictionary<string, RssiSparklineSeries>> GetSparklineSeriesAsync(
+            IEnumerable<string> macs, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyDictionary<string, RssiSparklineSeries>>(
+                new Dictionary<string, RssiSparklineSeries>());
+
+        public Task<RssiDetailDto> GetDetailSeriesAsync(string mac, CancellationToken ct) =>
+            Task.FromResult(new RssiDetailDto(
+                Array.Empty<DateTime>(), Array.Empty<RssiDetailSeries>(), IsEmpty: true));
+    }
+
+    private static (BunitContext ctx, StubStationRepo stations, StubNetworkRepo nets, StubNodeRepo nodes, StubOuiLookup oui, EventDetectionService events, StubNodeAdminService nodeAdmin) Build(bool historyEnabled = true)
     {
         var ctx = new BunitContext();
+        // The nested <RssiHistoryChart> imports chart-interop.js + calls InvokeVoidAsync; Loose mode
+        // no-op-records those so the Detail page renders without a real Chart.js (Phase 19 19-04).
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         var stations = new StubStationRepo();
         var nets = new StubNetworkRepo();
         var nodes = new StubNodeRepo();
@@ -180,7 +203,9 @@ public sealed class DetailTests
         ctx.Services.AddSingleton<INetworkRepo>(nets);
         ctx.Services.AddSingleton<INodeRepo>(nodes);
         ctx.Services.AddSingleton<IOuiLookup>(oui);
-        ctx.Services.AddSingleton<IAppSettingsService>(new StubSettings());
+        ctx.Services.AddSingleton<IAppSettingsService>(new StubSettings { HistoryEnabled = historyEnabled });
+        // Phase 19 19-04 — Detail.razor + the mounted RssiHistoryChart both need the detail query service.
+        ctx.Services.AddSingleton<IRssiHistoryQueryService>(new StubRssiHistory());
         // v0.11 Plan 14-04 DISC-01..07 -- Detail.razor now injects INodeAdminService.
         ctx.Services.AddSingleton<INodeAdminService>(nodeAdmin);
 
@@ -194,7 +219,11 @@ public sealed class DetailTests
         sc.AddSingleton<INodeRepo>(nodes);
         sc.AddSingleton<IStationRepo>(stations);
         var sp = sc.BuildServiceProvider();
-        var events = new EventDetectionService(notifier, toasts, gate, sp.GetRequiredService<IServiceScopeFactory>(), NullLogger<EventDetectionService>.Instance);
+        // Phase 18 18-05 — EventDetectionService now takes a concrete CircuitTracker (D-03 visitor
+        // signal). This bUnit harness never raises PollNotifier, so the tracker is idle/Paused;
+        // dispose responsibility stays with the ctx Services container lifetime.
+        var tracker = new ApStatsForOpenWrt.Services.Gating.CircuitTracker();
+        var events = new EventDetectionService(notifier, toasts, gate, tracker, sp.GetRequiredService<IServiceScopeFactory>(), NullLogger<EventDetectionService>.Instance);
         ctx.Services.AddSingleton(notifier);
         ctx.Services.AddSingleton<INotificationsGate>(gate);
         ctx.Services.AddSingleton(toasts);
@@ -235,7 +264,7 @@ public sealed class DetailTests
             Assert.Contains("Access point", cut.Markup);
             Assert.Contains("Tx bitrate", cut.Markup);
             Assert.Contains("Rx bitrate", cut.Markup);
-            Assert.Contains("Signal", cut.Markup);
+            Assert.Contains("RSSI", cut.Markup);
             Assert.Contains("Last seen", cut.Markup);
             Assert.Contains("Status", cut.Markup);
 
@@ -910,6 +939,41 @@ public sealed class DetailTests
             // StatusBadge unchanged (NoSuchStation may render an informational banner but
             // MUST NOT flip the status -- the station could legitimately still be there).
             Assert.Contains(">Online</span>", cut.Markup);
+        }
+    }
+
+    // ── Phase 19 19-04 M-HIST-07 / D-03 — gated RSSI history chart card ──
+
+    [Fact]
+    public void RssiHistoryCard_Present_WhenHistoryEnabled()
+    {
+        // History on → the full-width <RssiHistoryChart> card renders (its card title is the marker;
+        // the empty stub DTO drives the "Collecting history…" placeholder inside the card).
+        var (ctx, stations, nets, nodes, _, _, _) = Build(historyEnabled: true);
+        stations.Existing = MakeStation();
+        nets.Existing = new WiFiNetwork { Id = 10, WiFiNodeId = 1, MacAddress = "00:11:22:33:44:55", SSID = "guest", Enabled = true };
+        nodes.Nodes.Add(new WiFiNode { Id = 1, Hostname = "ap-A", Username = "root", Password = "x", Status = Status.Online, LastPollDate = DateTime.UtcNow });
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            Assert.Contains("RSSI history — last 12 h", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public void RssiHistoryCard_Absent_WhenHistoryDisabled()
+    {
+        // D-03: history off → the RSSI history card is NOT rendered, with no notice.
+        var (ctx, stations, nets, nodes, _, _, _) = Build(historyEnabled: false);
+        stations.Existing = MakeStation();
+        nets.Existing = new WiFiNetwork { Id = 10, WiFiNodeId = 1, MacAddress = "00:11:22:33:44:55", SSID = "guest", Enabled = true };
+        nodes.Nodes.Add(new WiFiNode { Id = 1, Hostname = "ap-A", Username = "root", Password = "x", Status = Status.Online, LastPollDate = DateTime.UtcNow });
+
+        using (ctx)
+        {
+            var cut = ctx.Render<Detail>(p => p.Add(c => c.Mac, "AA:BB:CC:00:00:01"));
+            Assert.DoesNotContain("RSSI history — last 12 h", cut.Markup);
         }
     }
 }

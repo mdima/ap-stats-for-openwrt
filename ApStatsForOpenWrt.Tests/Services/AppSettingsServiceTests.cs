@@ -295,4 +295,27 @@ public sealed class AppSettingsServiceTests(SqliteInMemoryFixture fixture) : ICl
 
         Assert.Equal(1, fires);
     }
+
+    // ── Phase 18 Plan 18-02 M-HIST-04 — warm-time `?? true` default ─────────────
+
+    /// <summary>
+    /// M-HIST-04 Path B — when the backing repo returns no <c>HistoryEnabled</c> row, the warm-time
+    /// `?? true` default applies (HistoryEnabled defaults on with no physical DB row).
+    /// </summary>
+    [Fact]
+    public async Task WarmAsync_HistoryEnabled_DefaultsTrue_WhenNoRow()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        await using (var seed = _fixture.CreateContext())
+        {
+            var row = await seed.AppSettings.FirstOrDefaultAsync(r => r.Key == "HistoryEnabled", ct);
+            if (row is not null) { seed.AppSettings.Remove(row); await seed.SaveChangesAsync(ct); }
+        }
+
+        var svc = CreateService();
+        await svc.WarmAsync(ct);
+
+        Assert.True(svc.HistoryEnabled);
+    }
 }

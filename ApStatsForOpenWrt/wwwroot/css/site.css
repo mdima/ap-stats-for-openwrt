@@ -161,3 +161,39 @@
 .kpi-tile-active {
     box-shadow: inset 3px 0 0 0 var(--bs-primary), 0 0 1px rgba(var(--bs-body-color-rgb), .125), 0 1px 3px rgba(var(--bs-body-color-rgb), .2) !important;
 }
+
+/* === Quick task 260603-968 — shared opaque dark-gray tooltip skin (operator request). =====
+   Match the always-dark left sidebar (.app-sidebar.bg-body-secondary @ data-bs-theme="dark",
+   MainLayout.razor:62), which resolves to #343a40 = the theme-invariant --bs-gray-800.
+   Using --bs-gray-800 (NOT --bs-secondary-bg, which is #e9ecef in light mode) keeps the tooltip
+   the SAME dark gray in both page themes, exactly like the sidebar. Setting --bs-tooltip-bg also
+   recolors the arrow (Bootstrap 5.3 .tooltip-arrow::before borders read var(--bs-tooltip-bg)),
+   and opacity:1 matches the fully-opaque sidebar. Applied via data-bs-custom-class="app-tooltip".
+   260604-a5u — generalized from the former sparkline-only rule to this shared .app-tooltip
+   skin, now worn by BOTH the RSSI sparkline trigger (RssiSparkline.razor) AND the Dashboard
+   vendor cell's overflow tooltip (Dashboard.razor). */
+.app-tooltip {
+  --bs-tooltip-bg: var(--bs-gray-800);
+  --bs-tooltip-color: var(--bs-gray-100);
+  --bs-tooltip-opacity: 1;
+}
+
+/* === Quick task 260604-vel — Dashboard Vendor column 2-line clamp (operator request). =====
+   Long OUI vendor names wrap to at most two lines; -webkit-line-clamp draws the ellipsis on
+   the SECOND line, and only when the text actually overflows — short names render untouched.
+   The full vendor rides the native title tooltip on the same span (Dashboard.razor vendor
+   cell), so the clamped tail stays reachable on hover. The -webkit- prefixed trio is the
+   form every engine actually implements (Blink/WebKit/Gecko); the unprefixed line-clamp is
+   the standards-track alias where supported. Consolidated here from the operator's app.css
+   draft (app.css loads AFTER site.css, so a duplicate there would silently win — one home
+   only): line-height 1.2 tightens the two lines; max-height caps the box at exactly two
+   lines as a belt-and-braces fallback for any engine without -webkit-box clamping. */
+.two-line-ellipsis {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  line-height: 1.2;
+  max-height: calc(1.2em * 2);
+}

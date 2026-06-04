@@ -33,6 +33,7 @@ public sealed class PollOrchestrator(
     INodeRepo nodeRepo,
     INetworkRepo networkRepo,
     IStationRepo stationRepo,
+    IHistoryRepo historyRepo,
     Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync,
     PollNotifier notifier,
     ILogger<PollOrchestrator> log,
@@ -429,6 +430,27 @@ public sealed class PollOrchestrator(
             // Drop stations whose WiFiNetworkId could not be resolved (orphaned).
             allStations = allStations.Where(s => s.WiFiNetworkId is not null and not 0).ToList();
 
+            // ─── Phase 18 D-04 — RSSI history sample capture (PRE-dedup) ──────────────────────────
+            // Source = the pre-dedup `allStations` set, taken AFTER WiFiNetworkId resolution (:430)
+            // but BEFORE the group-by-MAC dedup below. This yields one RssiHistorySample per
+            // (StationMac, AP, WLAN) — preserving roams / dual-band as distinct series for the
+            // Phase-19 multi-series chart (M-HIST-07). Sourcing from the post-dedup `deduped` list
+            // would collapse them to one series (D-04 anti-pattern). Filter: Status==Online AND
+            // RSS not null (WLANStation.RSS is int?; RssiHistorySample.Rssi is non-null int). NodeId
+            // is resolved from the existing reference-keyed stationToNodeId map (:402). TimestampUtc
+            // uses the single cycle clock `now` (:125) — never a fresh DateTime.UtcNow (D-06).
+            var historySamples = allStations
+                .Where(s => s.Status == Status.Online && s.RSS is not null)
+                .Select(s => new RssiHistorySample
+                {
+                    TimestampUtc = now,
+                    StationMac   = s.MacAddress,
+                    NodeId       = stationToNodeId[s],
+                    NetworkId    = s.WiFiNetworkId!.Value,
+                    Rssi         = s.RSS!.Value,
+                })
+                .ToList();
+
             // 6. Orchestrator-side dedup (D-08 / CR-03 closure). StringComparer.Ordinal: parser uppercased.
             var deduped = allStations
                 .GroupBy(s => s.MacAddress, StringComparer.Ordinal)
@@ -465,6 +487,48 @@ public sealed class PollOrchestrator(
                     .SetProperty(s => s.RSS, (int?)null)
                     .SetProperty(s => s.TxBitrate, 0.0)
                     .SetProperty(s => s.RxBitrate, 0.0), ct);
+
+            // ─── Phase 18 M-HIST-01 / M-HIST-02 — history write + 12 h prune ──────────────────────
+            // Slotted AFTER step 7.5 telemetry-blank and BEFORE tx.CommitAsync so the inserts +
+            // prune participate in the coordinator transaction and roll back atomically with the
+            // cycle (D-05). All writes route through IHistoryRepo on the orchestrator's own `db`
+            // (caller-owned-db idiom — keeps ArchitectureTests.DbContext_IsOnlyUsedByRepositories
+            // green; never a second DbContext → single-writer invariant, no `database is locked`).
+            //
+            // D-01 KPI triad — computed over the FINAL post-upsert station set, reusing the SAME
+            // `staleCutoff` (:461 above) the telemetry-blank used. ⚠ StaleCount uses `>= staleCutoff`
+            // (recently offline = Stale) — the INVERSE of the telemetry-blank `< staleCutoff` filter
+            // above (RESEARCH §Critical Correctness Note). Status.Polling is excluded from all three;
+            // the three counts therefore sum to the count of (Online ∪ Offline) stations and match
+            // the live DashboardKpiRow / StatusBadge IsStale buckets byte-for-byte.
+            if (settings.HistoryEnabled)
+            {
+                var onlineCount = await db.WLANStations
+                    .CountAsync(s => s.Status == Status.Online, ct);
+                var staleCount = await db.WLANStations
+                    .CountAsync(s => s.Status == Status.Offline && s.LastPollDate >= staleCutoff, ct);
+                var offlineCount = await db.WLANStations
+                    .CountAsync(s => s.Status == Status.Offline && s.LastPollDate < staleCutoff, ct);
+
+                var kpiSnapshot = new KpiHistorySnapshot
+                {
+                    TimestampUtc = now,            // single clock (:125)
+                    OnlineCount  = onlineCount,
+                    StaleCount   = staleCount,
+                    OfflineCount = offlineCount,
+                };
+
+                // D-05 — inserts gated on HistoryEnabled (this whole block). The RSSI sample set was
+                // captured pre-dedup above (D-04). KpiHistorySnapshot = exactly one row per cycle.
+                await historyRepo.WriteCycleAsync(db, kpiSnapshot, historySamples, ct);
+            }
+
+            // D-06 — 12 h prune runs UNCONDITIONALLY (NOT gated on HistoryEnabled) so disabling
+            // history is non-destructive: inserts stop, but existing rows continue to age out.
+            // Single clock: the prune cutoff derives from the SAME cycle `now` (:125) used for the
+            // row timestamps and staleCutoff — anchored to the polling clock, not wall-clock-now.
+            var pruneCutoff = now - TimeSpan.FromHours(12);
+            await historyRepo.PruneAsync(db, pruneCutoff, ct);
 
             await tx.CommitAsync(ct);
 

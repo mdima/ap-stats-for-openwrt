@@ -1,0 +1,193 @@
+@* RssiHistoryChart.razor — Phase 19 M-HIST-07 (L-03 / L-06 / D-02 / D-03).
+
+   The station-detail multi-series RSSI line chart, mounted as a full-width card on
+   Detail.razor (gated by the parent on Settings.HistoryEnabled — D-03 "feature off →
+   surface absent"; this component owns only the empty-DATA placeholder). ONE Chart.js
+   line series per distinct (NodeId, NetworkId) the station was seen on in the 12 h
+   window (legend label = AP hostname + SSID, L-06), last-value-per-bucket per series
+   over the full 12 h grid with NO cross-series aggregation, Y = RSSI dBm (suggested
+   −90..−30). The series/bucketing logic is owned + tested by IRssiHistoryQueryService
+   (Plan 02); this is a THIN Chart.js wrapper that mirrors KpiHistoryChart.razor.
+
+   Lifecycle discipline (RESEARCH §Pattern 1 + Detail.razor W4 double-guard; CLAUDE.md / Pitfall 1 + 7):
+     - Subscribe Notifier.Cycled in OnInitialized — NO interop here (interop is FORBIDDEN during prerender).
+     - Import chart-interop.js + first render ONLY in OnAfterRenderAsync(firstRender).
+     - Re-query + updateRssiChart on Cycled, wrapped in await InvokeAsync(...) (Pitfall 7); handler returns Task.
+     - Re-query + updateRssiChart on Mac change (OnParametersSetAsync) once the chart already exists.
+     - DisposeAsync sets _disposed = true FIRST (paired-adjacency W4 invariant), unsubscribes, then
+       destroyChart + module dispose inside try/catch.
+     - Empty detail DTO (station with no samples) → "Collecting history…" placeholder, not an empty axes frame (D-03). *@
+
+@implements IAsyncDisposable
+@inject IRssiHistoryQueryService Rssi
+@inject IJSRuntime JS
+@inject PollNotifier Notifier
+@using ApStatsForOpenWrt.Data.Repositories.History
+@using ApStatsForOpenWrt.Services.Polling
+@using Microsoft.JSInterop
+
+<div class="card mb-3">
+    <div class="card-header py-2 px-3">
+        <h6 class="card-sub-title mb-0">RSSI history — last 12 h</h6>
+    </div>
+    <div class="card-body p-3">
+        @if (_data is null || _data.IsEmpty)
+        {
+            @* D-03 zero-rows placeholder — NOT an empty axes frame. *@
+            <p class="text-body-secondary mb-0">Collecting history…</p>
+        }
+        else
+        {
+            <div style="position: relative; height: 260px;">
+                <canvas id="@_canvasId"></canvas>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    // The station MAC whose detail series this chart renders. EditorRequired — the parent
+    // (Detail.razor) always supplies the canonicalized _mac.
+    [Parameter, EditorRequired] public string Mac { get; set; } = string.Empty;
+
+    // Per-instance canvas id so multiple charts on a page never collide (RESEARCH §Pattern 1).
+    private readonly string _canvasId = $"rssi-history-{Guid.NewGuid():N}";
+    private IJSObjectReference? _interop;
+
+    // W4 race-with-dispose guard (Detail.razor:270). Set true FIRST in DisposeAsync, BEFORE
+    // detaching the subscription, so a concurrent Cycled handler short-circuits before touching
+    // the torn-down renderer (paired-adjacency invariant).
+    private volatile bool _disposed;
+
+    private RssiDetailDto? _data;
+
+    // Track the MAC the chart was last rendered for so OnParametersSetAsync only re-fetches
+    // when the route param actually changed (roam between station detail pages).
+    private string? _renderedMac;
+
+    // True once OnAfterRenderAsync(firstRender) imported the seam — used to decide between
+    // first-render (render) and subsequent (update) interop paths on a Mac change.
+    private bool _firstRenderDone;
+
+    // Subscribe in OnInitialized (L-09) — NO interop (Pitfall 1: forbidden during prerender).
+    protected override void OnInitialized()
+    {
+        Notifier.Cycled += OnCycledAsync;
+    }
+
+    // Interop ONLY here (RESEARCH §Pattern 1 / Pitfall 1). Import the seam + first render on the
+    // first render only. The import mirrors the PreferencesService lazy-import idiom; the cache
+    // field is enough (single component lifetime; OnAfterRenderAsync(firstRender) runs once).
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_disposed || !firstRender) return;
+
+        try
+        {
+            _interop = await JS.InvokeAsync<IJSObjectReference>("import", "./js/chart-interop.js");
+        }
+        catch (JSException) { return; }                 // prerender / interop unavailable
+        catch (InvalidOperationException) { return; }   // prerender (no JS runtime yet)
+        catch (TaskCanceledException) { return; }
+
+        _firstRenderDone = true;
+
+        _data = await Rssi.GetDetailSeriesAsync(Mac, CancellationToken.None);
+        _renderedMac = Mac;
+        if (_disposed) return;
+
+        // Re-render to swap the placeholder for the <canvas> when data exists, THEN render the chart.
+        StateHasChanged();
+        if (_interop is not null && _data is not null && !_data.IsEmpty)
+        {
+            try { await _interop.InvokeVoidAsync("renderRssiChart", _canvasId, ToInterop(_data)); }
+            catch (JSException) { }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
+    // Mac-change refresh (roam to another /Stations/{mac}). Only acts AFTER the first render has
+    // imported the seam; before that, OnAfterRenderAsync owns the initial fetch+render. Re-query
+    // and updateRssiChart (or render, if data appears where there was none) for the new MAC.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_disposed || !_firstRenderDone) return;
+        if (string.Equals(Mac, _renderedMac, StringComparison.Ordinal)) return;
+
+        var data = await Rssi.GetDetailSeriesAsync(Mac, CancellationToken.None);
+        if (_disposed) return;
+
+        var hadCanvas = _data is not null && !_data.IsEmpty;
+        _data = data;
+        _renderedMac = Mac;
+        StateHasChanged();
+
+        if (_interop is null || _data is null || _data.IsEmpty) return;
+        try
+        {
+            // If the previous MAC had no canvas, the <canvas> only just appeared — render fresh;
+            // otherwise mutate the live chart in place.
+            var fn = hadCanvas ? "updateRssiChart" : "renderRssiChart";
+            await _interop.InvokeVoidAsync(fn, _canvasId, ToInterop(_data));
+        }
+        catch (JSException) { }
+        catch (ObjectDisposedException) { }
+    }
+
+    // Cycled handler — returns Task (NOT async void, Pitfall 7). Re-query then mutate inside
+    // InvokeAsync (the handler arrives off the circuit's sync-context). W4: short-circuit on dispose.
+    private async Task OnCycledAsync(PollSnapshot _)
+    {
+        if (_disposed) return;
+        var data = await Rssi.GetDetailSeriesAsync(Mac, CancellationToken.None);
+        if (_disposed) return;
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                var hadCanvas = _data is not null && !_data.IsEmpty;
+                _data = data;
+                StateHasChanged();
+                if (_interop is not null && _data is not null && !_data.IsEmpty)
+                {
+                    try
+                    {
+                        // First non-empty payload after an empty cycle needs a render, not an update.
+                        var fn = hadCanvas ? "updateRssiChart" : "renderRssiChart";
+                        await _interop.InvokeVoidAsync(fn, _canvasId, ToInterop(_data));
+                    }
+                    catch (JSException) { }
+                }
+            });
+        }
+        catch (ObjectDisposedException)
+        {
+            // W4 race between Cycled raise and DisposeAsync — renderer gone, swallow.
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;                       // W4: set FIRST (paired adjacency)
+        Notifier.Cycled -= OnCycledAsync;
+        if (_interop is not null)
+        {
+            try { await _interop.InvokeVoidAsync("destroyChart", _canvasId); } catch { }
+            try { await _interop.DisposeAsync(); } catch { }
+        }
+    }
+
+    // Project the typed multi-series DTO into the flat shape chart-interop.js consumes
+    // ({ labels, series: [{ label, data[] }] }). Bucket timestamps → HH:mm labels; each
+    // RssiDetailSeries → one dataset preserving per-AP detail (NO cross-series aggregation,
+    // L-06). Null points pass through as gaps (offline bucket) so the line breaks visibly.
+    private static object ToInterop(RssiDetailDto dto) => new
+    {
+        labels = dto.BucketsUtc.Select(b => b.ToString("HH:mm")).ToArray(),
+        series = dto.Series.Select(s => new
+        {
+            label = s.Label,
+            data  = s.Points,   // IReadOnlyList<int?> — null = gap
+        }).ToArray(),
+    };
+}

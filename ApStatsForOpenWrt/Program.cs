@@ -157,8 +157,17 @@ try
     builder.Services.AddTransient<INodeRepo,        NodeRepo>();
     builder.Services.AddTransient<INetworkRepo,     NetworkRepo>();
     builder.Services.AddTransient<IStationRepo,     StationRepo>();
+    builder.Services.AddTransient<IHistoryRepo,     HistoryRepo>();   // Phase 18 M-HIST-01 — history write seam
     builder.Services.AddTransient<IAppSettingsRepo, AppSettingsRepo>();
     builder.Services.AddSingleton<IAppSettingsService, AppSettingsService>();
+
+    // Phase 19 M-HIST-05/06/07 — read-side history query services (L-03). Transient to match the
+    // repo-layer parity (RESEARCH OQ1); they hold only IDbContextFactory (no captive-dependency
+    // concern) and live under Data.Repositories.History so the factory injection is ArchitectureTests-legal.
+    builder.Services.AddTransient<ApStatsForOpenWrt.Data.Repositories.History.IKpiHistoryQueryService,
+                                  ApStatsForOpenWrt.Data.Repositories.History.KpiHistoryQueryService>();
+    builder.Services.AddTransient<ApStatsForOpenWrt.Data.Repositories.History.IRssiHistoryQueryService,
+                                  ApStatsForOpenWrt.Data.Repositories.History.RssiHistoryQueryService>();
 
     // v0.11 ENRICH-01 / CONTEXT 14 §D-05 — one-shot force-enrichment flag for the
     // "Run now" button on Settings/Index.razor. Singleton-lifetime; backed by a single
@@ -564,8 +573,18 @@ try
     }
     else
     {
-        builder.Services.AddSingleton<ApStatsForOpenWrt.Services.Gating.ICircuitGate,
-                                      ApStatsForOpenWrt.Services.Gating.CircuitTrackerGate>();
+        // Phase 18 D-02 (M-HIST-03) — register the production inner gate as its concrete type, then
+        // expose ICircuitGate as the HistoryAwareCircuitGate decorator so the polling gate becomes
+        // historyEnabled || hasVisitor. PollingHostedService resolves ICircuitGate unchanged; the
+        // CircuitTracker + the inner CircuitTrackerGate (the UI badge's tracker source) stay untouched.
+        // The AlwaysLive smoke branch above is deliberately NOT wrapped (it already polls continuously
+        // — wrapping it is redundant; Pitfall 6). AppSettingsService is a singleton, so injecting it
+        // into the singleton decorator is captive-dependency-safe.
+        builder.Services.AddSingleton<ApStatsForOpenWrt.Services.Gating.CircuitTrackerGate>();
+        builder.Services.AddSingleton<ApStatsForOpenWrt.Services.Gating.ICircuitGate>(sp =>
+            new ApStatsForOpenWrt.Services.Gating.HistoryAwareCircuitGate(
+                sp.GetRequiredService<ApStatsForOpenWrt.Services.Gating.CircuitTrackerGate>(),
+                sp.GetRequiredService<ApStatsForOpenWrt.Services.Settings.IAppSettingsService>()));
     }
     builder.Services.AddScoped<Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler,
                                ApStatsForOpenWrt.Services.Gating.CircuitTrackerHandler>();

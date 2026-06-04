@@ -2,6 +2,7 @@ using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Data.Repositories.History;
 using ApStatsForOpenWrt.Services;
 using ApStatsForOpenWrt.Services.Settings;
 using ApStatsForOpenWrt.Services.Vendor;
@@ -87,11 +88,12 @@ public sealed class DashboardTests
 
     private sealed class StubSettings : IAppSettingsService
     {
-        public StubSettings(bool wizardDismissed = false, IReadOnlyList<string>? localDomainSuffixes = null, string? uiPasswordHash = null)
+        public StubSettings(bool wizardDismissed = false, IReadOnlyList<string>? localDomainSuffixes = null, string? uiPasswordHash = null, bool historyEnabled = true)
         {
             WizardDismissed = wizardDismissed;
             LocalDomainSuffixes = localDomainSuffixes ?? Array.Empty<string>();
             UIPasswordHash = uiPasswordHash;
+            HistoryEnabled = historyEnabled;
         }
         public int     PollingIntervalSeconds { get; } = 30;
         public string? UIPasswordHash         { get; }
@@ -108,6 +110,8 @@ public sealed class DashboardTests
         public Task BumpSessionVersionAsync(CancellationToken ct = default) => Task.CompletedTask;
         // Phase 17 Plan 17-01 M-UPD-02 — minimal mutable update-check stub members.
         public bool UpdateCheckEnabled { get; private set; } = true;
+        public bool HistoryEnabled { get; }
+        public Task SetHistoryEnabledAsync(bool enabled, CancellationToken ct = default) => Task.CompletedTask;
         public string? LatestKnownVersion { get; private set; }
         public string? LatestReleaseUrl { get; private set; }
         public DateTime? LastCheckedAtUtc { get; private set; }
@@ -120,8 +124,32 @@ public sealed class DashboardTests
         public event Action<IAppSettingsService>? Changed { add { } remove { } }
     }
 
+    // Phase 19 stub-churn (RESEARCH §Pitfall 5): Dashboard.razor now injects both history query
+    // services. Hand-rolled stubs (TESTING.md — no mocking framework) returning empty results so
+    // the existing render branches are unaffected and the sparkline column renders the em-dash.
+    private sealed class StubKpiHistory : IKpiHistoryQueryService
+    {
+        public Task<KpiHistoryDto> GetLast12hAsync(CancellationToken ct) =>
+            Task.FromResult(new KpiHistoryDto(Array.Empty<KpiHistoryBucket>(), IsEmpty: true));
+    }
+
+    private sealed class StubRssiHistory : IRssiHistoryQueryService
+    {
+        public Dictionary<string, RssiSparklineSeries> Map { get; } = new();
+        public int SparklineCallCount { get; private set; }
+
+        public Task<IReadOnlyDictionary<string, RssiSparklineSeries>> GetSparklineSeriesAsync(IEnumerable<string> macs, CancellationToken ct)
+        {
+            SparklineCallCount++;
+            return Task.FromResult<IReadOnlyDictionary<string, RssiSparklineSeries>>(Map);
+        }
+
+        public Task<RssiDetailDto> GetDetailSeriesAsync(string mac, CancellationToken ct) =>
+            Task.FromResult(new RssiDetailDto(Array.Empty<DateTime>(), Array.Empty<RssiDetailSeries>(), IsEmpty: true));
+    }
+
     private static (BunitContext ctx, StubNodeRepo nodes, StubNetworkRepo nets, StubStationRepo stations, StubOuiLookup oui)
-        Build(IEnumerable<WiFiNode> nodes, IEnumerable<WLANStation> stations, bool anyEnabled, Dictionary<int, List<WiFiNetwork>>? networkMap = null, bool wizardDismissed = false, IReadOnlyList<string>? localDomainSuffixes = null, string? uiPasswordHash = null)
+        Build(IEnumerable<WiFiNode> nodes, IEnumerable<WLANStation> stations, bool anyEnabled, Dictionary<int, List<WiFiNetwork>>? networkMap = null, bool wizardDismissed = false, IReadOnlyList<string>? localDomainSuffixes = null, string? uiPasswordHash = null, bool historyEnabled = true)
     {
         var ctx = new BunitContext();
         // Phase 8: Dashboard.razor injects PreferencesService for view-state restore + persistence.
@@ -137,7 +165,7 @@ public sealed class DashboardTests
         }
         var sr = new StubStationRepo(stations);
         var oui = new StubOuiLookup();
-        var settings = new StubSettings(wizardDismissed, localDomainSuffixes, uiPasswordHash);
+        var settings = new StubSettings(wizardDismissed, localDomainSuffixes, uiPasswordHash, historyEnabled);
         ctx.Services.AddSingleton<INodeRepo>(nr);
         ctx.Services.AddSingleton<INetworkRepo>(nws);
         ctx.Services.AddSingleton<IStationRepo>(sr);
@@ -145,6 +173,9 @@ public sealed class DashboardTests
         ctx.Services.AddSingleton<IAppSettingsService>(settings);
         ctx.Services.AddSingleton(new ApStatsForOpenWrt.Services.Polling.PollNotifier());
         ctx.Services.AddSingleton(new PreferencesService(ctx.JSInterop.JSRuntime));
+        // Phase 19 stub-churn — register the two history query services Dashboard now injects.
+        ctx.Services.AddSingleton<IKpiHistoryQueryService>(new StubKpiHistory());
+        ctx.Services.AddSingleton<IRssiHistoryQueryService>(new StubRssiHistory());
         return (ctx, nr, nws, sr, oui);
     }
 
@@ -244,6 +275,41 @@ public sealed class DashboardTests
             var cut = ctx.Render<Dashboard>();
             Assert.Contains("Unknown vendor", cut.Markup);
             Assert.Contains("text-body-secondary", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public void TableRow_VendorColumn_ClampedWithTwoLineEllipsis_FullNameInOverflowTooltip()
+    {
+        // 260604-a5u — vendor cell markup contract: the vendor name renders inside a span
+        // carrying .two-line-ellipsis (site.css clamps to 2 lines, ellipsis only on overflow)
+        // that opts in to the overflow-gated Bootstrap tooltip instead of a native title.
+        // bUnit has no layout engine and JSInterop is stubbed here, so the scrollHeight >
+        // clientHeight gating is JS-only and is live-verified; this test pins only the markup
+        // OPT-IN CONTRACT (the attributes initOverflowTooltips reads), not the gating itself:
+        // data-bs-toggle="tooltip-overflow", full vendor name on data-bs-title, the shared
+        // .app-tooltip skin via data-bs-custom-class, and NO native title attribute.
+        var nodes = new[] { new WiFiNode { Id = 1, Hostname = "ap-1", Username = "root" } };
+        var networks = new Dictionary<int, List<WiFiNetwork>>
+        {
+            [1] = new() { new WiFiNetwork { Id = 100, WiFiNodeId = 1, MacAddress = "AA:BB:CC:00:00:00", SSID = "main", Enabled = true } }
+        };
+        var stations = new[]
+        {
+            new WLANStation { Id = 1, MacAddress = "00:00:0C:DE:AD:BE", WiFiNetworkId = 100, Status = Status.Online, LastPollDate = DateTime.UtcNow }
+        };
+
+        var (ctx, _, _, _, oui) = Build(nodes, stations, anyEnabled: true, networks);
+        oui.Vendors["00:00:0C:DE:AD:BE"] = "Telefonaktiebolaget LM Ericsson";
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            var vendorSpan = cut.Find("span.two-line-ellipsis");
+            Assert.Equal("tooltip-overflow", vendorSpan.GetAttribute("data-bs-toggle"));
+            Assert.Equal("Telefonaktiebolaget LM Ericsson", vendorSpan.GetAttribute("data-bs-title"));
+            Assert.Equal("app-tooltip", vendorSpan.GetAttribute("data-bs-custom-class"));
+            Assert.Null(vendorSpan.GetAttribute("title"));  // no native title — AngleSharp returns null for an absent attribute
+            Assert.Contains("Telefonaktiebolaget LM Ericsson", vendorSpan.TextContent);
         }
     }
 
@@ -724,9 +790,11 @@ public sealed class DashboardTests
     }
 
     [Fact]
-    public void Dashboard_RowTooltip_ExposesFullIdentifierSet()
+    public void Dashboard_BodyRows_CarryNoTitleTooltip()
     {
-        // DASH-20 — row title attribute contains Name | Hostname (short) | FQDN | MAC | Random MAC.
+        // DASH-20 retired (260604 cosmetic tune) — the row-level title tooltip was removed; body
+        // rows must carry NO title attribute even when every identifier (Name, Hostname, FQDN,
+        // MAC, Random MAC) is populated. Identifiers live in the visible columns instead.
         var (node, net) = MakeApAndNet();
         var s = new WLANStation { Id = 100, MacAddress = "AA:BB:CC:DD:EE:FF", WiFiNetworkId = 10, Name = "Pi", Hostname = "dev.michelecasa", IsRandomMac = true, Status = Status.Online, LastPollDate = DateTime.UtcNow };
         var (ctx, _, _, _, _) = Build(new[] { node }, new[] { s }, anyEnabled: true,
@@ -736,12 +804,8 @@ public sealed class DashboardTests
         {
             var cut = ctx.Render<Dashboard>();
             var bodyRow = cut.FindAll("tbody tr").First();
-            var title = bodyRow.GetAttribute("title") ?? string.Empty;
-            Assert.Contains("Name: Pi", title);
-            Assert.Contains("Hostname: dev", title);
-            Assert.Contains("FQDN: dev.michelecasa", title);
-            Assert.Contains("MAC: AA:BB:CC:DD:EE:FF", title);
-            Assert.Contains("Random MAC: Yes", title);
+            Assert.False(bodyRow.HasAttribute("title"),
+                "Body rows must not carry a title tooltip (DASH-20 tooltip removed in the pre-v0.14-close cosmetic tune).");
         }
     }
 
@@ -906,6 +970,67 @@ public sealed class DashboardTests
             // accidentally dropped real labels alongside the "—" placeholder).
             Assert.Contains(ssidChips, b => b.TextContent.Trim() == "guest");
             Assert.Contains(apChips,   b => b.TextContent.Trim().StartsWith("ap-A"));
+        }
+    }
+
+    // ── Phase 19 M-HIST-05 / M-HIST-06 (D-03 / D-04) — merged "RSSI" column (RSSI + 1 h sparkline) ──
+
+    [Fact]
+    public void Dashboard_RssiColumn_MergesSparkline_WhenHistoryEnabled()
+    {
+        var (node, net) = MakeApAndNet();
+        var s = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10, Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { s }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } },
+            historyEnabled: true);
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            // RSSI + RSSI(1h) are merged into ONE sortable "RSSI" column — no separate sparkline header.
+            Assert.DoesNotContain("RSSI (1h)", cut.Markup);
+            Assert.Contains(cut.FindAll("th").Select(t => t.TextContent), h => h.Contains("RSSI"));
+            // The sparkline lives inside the merged Signal cell (link target covered by the click-through test).
+            Assert.NotEmpty(cut.FindAll("a[data-testid=\"sparkline-link\"]"));
+            // The KPI history chart card still mounts beneath the KPI tiles.
+            Assert.Contains("Activity — last 12 h", cut.Markup);
+        }
+    }
+
+    [Fact]
+    public void Dashboard_SparklineCell_LinksToStationDetail_WhenHistoryEnabled()
+    {
+        // QUAL-02 #5 — the whole sparkline cell is a click-through to /Stations/{mac}.
+        var (node, net) = MakeApAndNet();
+        var s = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10, Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { s }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } },
+            historyEnabled: true);
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            var link = cut.Find("a[data-testid=\"sparkline-link\"]");
+            Assert.Equal($"/Stations/{Uri.EscapeDataString("AA:00:00:00:00:01")}", link.GetAttribute("href"));
+        }
+    }
+
+    [Fact]
+    public void Dashboard_RssiColumn_OmitsSparkline_WhenHistoryDisabled()
+    {
+        // D-03 — history off → the RSSI column shows ONLY the RSSI cell (no sparkline, no link), no chart.
+        var (node, net) = MakeApAndNet();
+        var s = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10, Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var (ctx, _, _, _, _) = Build(new[] { node }, new[] { s }, anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>> { [1] = new List<WiFiNetwork> { net } },
+            historyEnabled: false);
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+            // The RSSI column header is still present (sortable by current RSSI)...
+            Assert.Contains(cut.FindAll("th").Select(t => t.TextContent), h => h.Contains("RSSI"));
+            // ...but with history off there is no sparkline (no link, no tier band) and no KPI chart.
+            Assert.Empty(cut.FindAll("a[data-testid=\"sparkline-link\"]"));
+            Assert.Empty(cut.FindAll("rect.rssi-sparkline-tier"));
+            Assert.DoesNotContain("Activity — last 12 h", cut.Markup);
         }
     }
 

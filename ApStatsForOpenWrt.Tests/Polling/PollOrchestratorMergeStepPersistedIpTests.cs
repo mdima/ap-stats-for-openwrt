@@ -166,6 +166,7 @@ public sealed class PollOrchestratorMergeStepPersistedIpTests(SqliteInMemoryFixt
             new NodeRepo(dpFactory),
             new NetworkRepo(dpFactory),
             stationRepo,
+            new HistoryRepo(dpFactory),
             probe,
             new PollNotifier(),
             NullLogger<PollOrchestrator>.Instance,
@@ -229,6 +230,8 @@ public sealed class PollOrchestratorMergeStepPersistedIpTests(SqliteInMemoryFixt
         public Task BumpSessionVersionAsync(CancellationToken ct = default) => Task.CompletedTask;
         // Phase 17 Plan 17-01 M-UPD-02 — minimal mutable update-check stub members.
         public bool UpdateCheckEnabled { get; private set; } = true;
+        public bool HistoryEnabled => true;
+        public Task SetHistoryEnabledAsync(bool enabled, CancellationToken ct = default) => Task.CompletedTask;
         public string? LatestKnownVersion { get; private set; }
         public string? LatestReleaseUrl { get; private set; }
         public DateTime? LastCheckedAtUtc { get; private set; }

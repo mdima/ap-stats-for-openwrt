@@ -33,19 +33,21 @@ public class MigrationsFolderShapeTests
         // conditional yield adds a SECOND migration AddWiFiNetworkIfaceName (single-column
         // add for the DISC-01 disconnect path).
         //
-        // Expected shape from v0.11 onwards:
+        // Expected shape from v0.14 onwards:
         //   {ts1}_InitialCreate.cs                            (Phase 1)
         //   {ts1}_InitialCreate.Designer.cs                   (Phase 1)
         //   {ts2}_AddWiFiNetworkIfaceName.cs                  (Plan 14-04 D-10)
         //   {ts2}_AddWiFiNetworkIfaceName.Designer.cs         (Plan 14-04 D-10)
+        //   {ts3}_AddHistoryTables_v0_14.cs                   (Plan 18-01 M-HIST-01)
+        //   {ts3}_AddHistoryTables_v0_14.Designer.cs          (Plan 18-01 M-HIST-01)
         //   DatabaseContextModelSnapshot.cs
-        // = 5 .cs files. The InitialCreate uniqueness assertion is preserved.
+        // = 7 .cs files. The InitialCreate uniqueness assertion is preserved.
 
         var dir = ResolveMigrationsDir();
         Assert.True(Directory.Exists(dir), $"Migrations folder not found at {dir}");
 
         var allCs = Directory.EnumerateFiles(dir, "*.cs", SearchOption.TopDirectoryOnly).ToList();
-        Assert.Equal(5, allCs.Count);
+        Assert.Equal(7, allCs.Count);
 
         var initialCreate = allCs
             .Where(p => Path.GetFileName(p).EndsWith("_InitialCreate.cs", StringComparison.Ordinal))
@@ -69,6 +71,18 @@ public class MigrationsFolderShapeTests
             .Where(p => Path.GetFileName(p).EndsWith("_AddWiFiNetworkIfaceName.Designer.cs", StringComparison.Ordinal))
             .ToList();
         Assert.Single(addIfaceDesigner);
+
+        // v0.14 Plan 18-01 M-HIST-01 — the AddHistoryTables_v0_14 migration sister pair (.cs + .Designer.cs).
+        var addHistory = allCs
+            .Where(p => Path.GetFileName(p).EndsWith("_AddHistoryTables_v0_14.cs", StringComparison.Ordinal))
+            .Where(p => !Path.GetFileName(p).EndsWith(".Designer.cs", StringComparison.Ordinal))
+            .ToList();
+        Assert.Single(addHistory);
+
+        var addHistoryDesigner = allCs
+            .Where(p => Path.GetFileName(p).EndsWith("_AddHistoryTables_v0_14.Designer.cs", StringComparison.Ordinal))
+            .ToList();
+        Assert.Single(addHistoryDesigner);
 
         var snapshot = allCs
             .Where(p => Path.GetFileName(p).Equals("DatabaseContextModelSnapshot.cs", StringComparison.Ordinal))

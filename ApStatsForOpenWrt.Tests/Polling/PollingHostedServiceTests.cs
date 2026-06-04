@@ -72,6 +72,8 @@ public sealed class PollingHostedServiceTests
         public Task BumpSessionVersionAsync(CancellationToken ct = default) => Task.CompletedTask;
         // Phase 17 Plan 17-01 M-UPD-02 — minimal mutable update-check stub members.
         public bool UpdateCheckEnabled { get; private set; } = true;
+        public bool HistoryEnabled => true;
+        public Task SetHistoryEnabledAsync(bool enabled, CancellationToken ct = default) => Task.CompletedTask;
         public string? LatestKnownVersion { get; private set; }
         public string? LatestReleaseUrl { get; private set; }
         public DateTime? LastCheckedAtUtc { get; private set; }
@@ -96,7 +98,27 @@ public sealed class PollingHostedServiceTests
         // type argument to Volatile.Read<T>). 0 == Paused, 1 == Live (matches GateState).
         private int _currentInt = (int)GateState.Paused;
         public GateState Current => (GateState)Volatile.Read(ref _currentInt);
-        public event Func<GateState, Task>? Changed;
+
+        // Explicit accessors make the SUT's subscription OBSERVABLE (260604 flake fix):
+        // BackgroundService.StartAsync returns before ExecuteAsync reaches
+        // `gate.Changed += OnGateChanged`, so a test that fires Open()/Close() on a fixed
+        // delay races the subscription and can invoke an EMPTY subscriber list — the
+        // cold-start test flaked 1-in-N under host load this way. SubscribedAsync completes
+        // on the FIRST add; await it (bounded) instead of guessing with Task.Delay. Sibling
+        // tests keep small fixed delays for SECONDARY settling only (post-subscription cycle
+        // timing — same pattern, but those waits have never raced the subscription itself).
+        private Func<GateState, Task>? _changed;
+        private readonly TaskCompletionSource<bool> _subscribed =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>Completes when the SUT first attaches a Changed handler.</summary>
+        public Task SubscribedAsync => _subscribed.Task;
+
+        public event Func<GateState, Task>? Changed
+        {
+            add { _changed += value; _subscribed.TrySetResult(true); }
+            remove { _changed -= value; }
+        }
 
         private TaskCompletionSource<bool> _tcs =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -115,7 +137,7 @@ public sealed class PollingHostedServiceTests
         {
             Volatile.Write(ref _currentInt, (int)GateState.Live);
             Volatile.Read(ref _tcs).TrySetResult(true);
-            _ = (Changed?.Invoke(GateState.Live) ?? Task.CompletedTask);
+            _ = (_changed?.Invoke(GateState.Live) ?? Task.CompletedTask);
         }
 
         /// <summary>Test API — flips Paused, re-arms a fresh TCS, fires Changed(Paused).</summary>
@@ -125,7 +147,7 @@ public sealed class PollingHostedServiceTests
             // Re-arm so the next WaitForVisitorAsync caller awaits a fresh, non-pre-completed TCS.
             Interlocked.Exchange(ref _tcs,
                 new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously));
-            _ = (Changed?.Invoke(GateState.Paused) ?? Task.CompletedTask);
+            _ = (_changed?.Invoke(GateState.Paused) ?? Task.CompletedTask);
         }
     }
 
@@ -359,11 +381,12 @@ public sealed class PollingHostedServiceTests
         try
         {
             // BackgroundService.StartAsync returns as soon as ExecuteAsync is kicked off as a Task
-            // — it does NOT wait for the first await inside ExecuteAsync. Without this brief delay
-            // we race the SUT's `gate.Changed += OnGateChanged` subscription, and Open()'s
-            // Changed.Invoke fires against a still-empty subscriber list (mirrors the 200ms wait
-            // in ExecuteAsync_WithPausedGate_DoesNotRunFirstCycle_UntilOpen above).
-            await Task.Delay(100, ct);
+            // — it does NOT wait for the first await inside ExecuteAsync, so a fixed 100 ms delay
+            // here RACED the SUT's `gate.Changed += OnGateChanged` subscription: under host load
+            // Open()'s Changed.Invoke fired against a still-empty subscriber list and the
+            // cold-start log never appeared (1-in-N flake, 260604). Deterministic now:
+            // StubGate.SubscribedAsync completes on the first +=; wait for it, bounded.
+            await gate.SubscribedAsync.WaitAsync(TimeSpan.FromSeconds(2), ct);
             gate.Open();   // Paused -> Live with _coldStart=true at construction -> "cold-start kick" rendered
 
             // Bounded poll — wait up to 2s for the Live log entry to appear.

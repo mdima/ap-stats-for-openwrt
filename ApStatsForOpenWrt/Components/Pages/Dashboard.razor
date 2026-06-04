@@ -1,11 +1,14 @@
 @page "/"
 @using ApStatsForOpenWrt.Components.Shared
+@using ApStatsForOpenWrt.Data.Repositories.History
 @using ApStatsForOpenWrt.Services
 @using ApStatsForOpenWrt.Services.Polling
 @using ApStatsForOpenWrt.Services.Settings
 @using ApStatsForOpenWrt.Services.Vendor
 @using ApStatsForOpenWrt.Web.Helpers
+@using Microsoft.JSInterop
 @implements IDisposable
+@implements IAsyncDisposable
 
 @inject INodeRepo Nodes
 @inject INetworkRepo Networks
@@ -14,6 +17,9 @@
 @inject IAppSettingsService Settings
 @inject PollNotifier Notifier
 @inject PreferencesService Prefs
+@inject IKpiHistoryQueryService KpiHistory
+@inject IRssiHistoryQueryService RssiHistory
+@inject IJSRuntime JS
 
 @* Dashboard.razor — Phase 5 live-push view (REORGANIZED Phase 8 — REQ-UI-10..13, REQ-UI-22, REQ-UI-23, REQ-UI-53).
    Phase 5 mechanics (Virtualize table, sort, search predicate, ComputeFilteredRows, IsStale, OnCycledAsync) preserved verbatim.
@@ -74,6 +80,13 @@ else
        synced with the Status FilterChipGroup via _statusFilter. *@
     <KpiTileBar Rows="_lastFilteredKpiRows" Active="_statusFilter" OnActiveChanged="OnKpiSelectedAsync" />
 
+    @* 2b. KPI history chart — Phase 19 M-HIST-05 (L-07). Sibling DIRECTLY beneath the KPI tiles
+       (L-04 — NOT nested). Gated on HistoryEnabled (D-03 — feature off → surface absent, no notices). *@
+    @if (Settings.HistoryEnabled)
+    {
+        <KpiHistoryChart />
+    }
+
     @* 3. Filter card — Phase 8 (REQ-UI-12). AdminLTE card with header "Filters",
        search + 3 chip groups in a 5/7 grid. Reset filters lives in PageHeader actions. *@
     <div class="card mb-3">
@@ -127,6 +140,8 @@ else
                                 <SortHeaderCell Column="ip"       CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">IP</SortHeaderCell>
                                 <SortHeaderCell Column="ssid"     CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">SSID</SortHeaderCell>
                                 <SortHeaderCell Column="ap"       CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">AP</SortHeaderCell>
+                                @* Phase 19 — merged "RSSI" column: sortable by current RSSI; when history is on the
+                                   cell ALSO carries the inline 1 h sparkline (no separate column — keeps the table narrow). *@
                                 <SortHeaderCell Column="rssi"     CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">RSSI</SortHeaderCell>
                                 <SortHeaderCell Column="lastSeen" CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">Last seen</SortHeaderCell>
                                 <SortHeaderCell Column="status"   CurrentSort="@_sortColumn" Descending="_sortDescending" OnSort="ApplySort">Status</SortHeaderCell>
@@ -135,11 +150,10 @@ else
                         <tbody>
                             <Virtualize Items="ComputeFilteredRows()" ItemSize="40" Context="row">
                                 <ItemContent>
-                                    <tr class="@(_changedRowMacs.Contains(row.Mac) ? "row-status-changed" : null)"
-                                        title="@BuildRowTooltip(row)">
+                                    <tr class="@(_changedRowMacs.Contains(row.Mac) ? "row-status-changed" : null)">
                                         <td><a href="@($"/Stations/{Uri.EscapeDataString(row.Mac)}")">@(string.IsNullOrEmpty(row.Name) ? (string.IsNullOrEmpty(row.Hostname) ? row.Mac : HostnameDisplay.StripLocalSuffix(row.Hostname, Settings.LocalDomainSuffixes)) : row.Name)</a></td>
                                         <td>
-                                            <code class="font-monospace">@row.Mac</code>
+                                            <code class="font-monospace"><small>@row.Mac</small></code>
                                             @if (row.IsRandomMac)
                                             {
                                                 <span class="badge text-bg-warning ms-2"
@@ -152,17 +166,39 @@ else
                                         <td>
                                             @if (!string.IsNullOrEmpty(row.Vendor))
                                             {
-                                                @row.Vendor
+                                                <span class="two-line-ellipsis" data-bs-toggle="tooltip-overflow" data-bs-title="@row.Vendor" data-bs-custom-class="app-tooltip">
+                                                    @row.Vendor
+                                                </span>
                                             }
                                             else
                                             {
                                                 <span class="text-body-secondary">Unknown vendor</span>
                                             }
                                         </td>
-                                        <td><code class="font-monospace">@(string.IsNullOrEmpty(row.Ip) ? "—" : row.Ip)</code></td>
+                                        <td><code class="font-monospace"><small>@(string.IsNullOrEmpty(row.Ip) ? "—" : row.Ip)</small></code></td>
                                         <td>@row.Ssid</td>
                                         <td class="text-nowrap">@row.ApHostname</td>
-                                        <td><RssiCell Rss="row.Rss" /></td>
+                                        @* Merged "RSSI" cell: current RSSI (bars + dBm) and, when history is on, the
+                                           inline 1 h sparkline beside it (still a click-through to the detail page, #5). *@
+                                        <td>
+                                            @if (Settings.HistoryEnabled)
+                                            {
+                                                @* d-flex (not inline) fills the td and ms-auto pins the sparkline to the
+                                                   column's right edge — charts align across rows even when the left side
+                                                   is just the offline em-dash (260604 operator finding, option A). *@
+                                                <span class="d-flex align-items-center gap-2">
+                                                    <RssiCell Rss="row.Rss" />
+                                                    <a href="@($"/Stations/{Uri.EscapeDataString(row.Mac)}")" class="d-inline-flex ms-auto"
+                                                       data-testid="sparkline-link" aria-label="@($"RSSI history for {row.Mac}")">
+                                                        <RssiSparkline Points="@GetSparkline(row.Mac)" />
+                                                    </a>
+                                                </span>
+                                            }
+                                            else
+                                            {
+                                                <RssiCell Rss="row.Rss" />
+                                            }
+                                        </td>
                                         <td>@RelativeTime(row.LastSeen)</td>
                                         <td><StatusBadge Status="row.StationStatus" IsStale="@IsStale(row)" /></td>
                                     </tr>
@@ -232,10 +268,20 @@ else
 
     // --- Phase 8 NEW state (REQ-UI-22, REQ-UI-53, KpiTileBar wiring) ---
     private bool _restored;                                                                  // PITFALLS.md Pitfall 7 prerender guard
+
+    // --- Quick task 260603-968 (QUAL-02) — bs-tooltips.js module ref, imported once on firstRender;
+    // initTooltips() is called after EVERY render (rows re-render per Cycle, so a firstRender-only
+    // init would go stale). The module's dispose-then-recreate keeps re-init leak-free.
+    private IJSObjectReference? _tooltipInterop;
     private StatusFilter? _statusFilter;                                                     // KPI tile selection (bidirectionally synced with _selectedStatuses)
     private List<DashboardKpiRow> _lastFilteredKpiRows = new();                              // projection passed to <KpiTileBar Rows="..."/>
     private readonly HashSet<string> _changedRowMacs = new();                                // REQ-UI-53 row-status-changed hook (one render frame)
     private Dictionary<string, ApStatsForOpenWrt.Data.Models.Status> _prevRowStatus = new();    // diff source for DetectRowStatusChanges
+
+    // --- Phase 19 M-HIST-06 / D-04 — per-MAC sparkline series, fetched ONCE per Cycled (NOT per row).
+    // Keyed by MAC; a MAC with no samples in the ~1 h window is ABSENT (drives the RssiSparkline em-dash, D-03).
+    private IReadOnlyDictionary<string, RssiSparklineSeries> _sparklines =
+        new Dictionary<string, RssiSparklineSeries>();
 
     private string DashTenBody =>
         $"You have {_nodeCount} access point{(_nodeCount == 1 ? "" : "s")} configured, but every WLAN is disabled. Enable at least one WLAN to start seeing connected stations.";
@@ -259,6 +305,39 @@ else
     /// </summary>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        // Quick task 260603-968 (QUAL-02) — (re)initialize the Bootstrap tooltips on EVERY render.
+        // Import the bs-tooltips.js module once (firstRender), then call initTooltips() after every
+        // render: the Virtualized rows re-render on each Cycle (OnCycledAsync → StateHasChanged), so
+        // the per-row sparkline DOM is replaced and tooltips must be re-bound. The initializer's
+        // dispose-then-recreate keeps this leak-free. Runs BEFORE the prefs-restore early-return below
+        // so it is never short-circuited. Interop is forbidden during prerender — swallow JS errors.
+        if (firstRender)
+        {
+            try
+            {
+                _tooltipInterop = await JS.InvokeAsync<IJSObjectReference>("import", "./js/bs-tooltips.js");
+            }
+            catch (JSException) { }                 // prerender / interop unavailable
+            catch (InvalidOperationException) { }   // prerender (no JS runtime yet)
+            catch (TaskCanceledException) { }
+        }
+
+        if (_tooltipInterop is not null)
+        {
+            try { await _tooltipInterop.InvokeVoidAsync("initTooltips"); }
+            catch (JSException) { }
+            catch (ObjectDisposedException) { }
+
+            // 260604-a5u (QUAL-02) — re-evaluate the vendor column's overflow tooltips after the
+            // sparkline tooltips. Same module ref, same guard + catch shape. The overflow gate
+            // (scrollHeight > clientHeight) is re-checked every render: rows replace on each poll
+            // Cycle, so truncation self-heals on resize at the NEXT cycle (known limitation — a
+            // bare window resize between cycles does not re-evaluate until the next re-render).
+            try { await _tooltipInterop.InvokeVoidAsync("initOverflowTooltips"); }
+            catch (JSException) { }
+            catch (ObjectDisposedException) { }
+        }
+
         if (!firstRender || _restored) return;
 
         try
@@ -315,8 +394,31 @@ else
             _rows = await BuildRowsAsync(allNodes);
             _allSsids    = _rows.Select(r => r.Ssid).Where(s => s != "—").Distinct().OrderBy(s => s).ToList();
             _allApLabels = _rows.Select(r => r.ApHostname).Where(a => a != "—").Distinct().OrderBy(a => a).ToList();
+
+            // Phase 19 M-HIST-06 / D-04 — fetch the per-MAC sparkline map ONCE per ReloadAsync
+            // (initial load + each Cycled), scoped to the currently-listed MAC set. NOT a per-row
+            // query (T-19-08 N+1 mitigation). Only when history is enabled (D-03).
+            if (Settings.HistoryEnabled)
+            {
+                var macs = _rows.Select(r => r.Mac).Distinct().ToList();
+                _sparklines = macs.Count > 0
+                    ? await RssiHistory.GetSparklineSeriesAsync(macs, CancellationToken.None)
+                    : new Dictionary<string, RssiSparklineSeries>();
+            }
+            else
+            {
+                _sparklines = new Dictionary<string, RssiSparklineSeries>();
+            }
         }
     }
+
+    /// <summary>
+    /// Phase 19 D-04 — dispatch a station's sparkline series by MAC from the once-per-Cycled map.
+    /// A MAC absent from the map (no samples in the ~1 h window) returns an empty list, which the
+    /// RssiSparkline renders as the em-dash (D-03).
+    /// </summary>
+    private IReadOnlyList<RssiSparklinePoint> GetSparkline(string mac) =>
+        _sparklines.TryGetValue(mac, out var series) ? series.Points : Array.Empty<RssiSparklinePoint>();
 
     private async Task OnCycledAsync(PollSnapshot snapshot)
     {
@@ -337,6 +439,16 @@ else
     {
         // Pattern 2: unsubscribe to release captured `this`. Singleton Notifier outlives circuit.
         Notifier.Cycled -= OnCycledAsync;
+    }
+
+    // Quick task 260603-968 — async teardown for the bs-tooltips.js module ref. Blazor invokes BOTH
+    // Dispose() (Notifier unsubscribe, above) and DisposeAsync() when a component implements both.
+    public async ValueTask DisposeAsync()
+    {
+        if (_tooltipInterop is not null)
+        {
+            try { await _tooltipInterop.DisposeAsync(); } catch { }
+        }
     }
 
     private async Task<List<DashboardRow>> BuildRowsAsync(IReadOnlyList<WiFiNode> allNodes)
@@ -665,22 +777,6 @@ else
             .ToList();
     }
 
-    /// <summary>
-    /// Phase 10 DASH-20 — row hover tooltip exposing the full identifier set per
-    /// CONTEXT D-07. Bar-separated single-line format (newline behavior in HTML title
-    /// attributes is browser-inconsistent; the bar is the safest cross-browser shape).
-    /// HostnameDisplay.StripLocalSuffix produces the short form; the persisted FQDN is
-    /// also surfaced verbatim. Random-MAC indicator mirrors DASH-21.
-    /// </summary>
-    private string BuildRowTooltip(DashboardRow row)
-    {
-        var shortHostname = HostnameDisplay.StripLocalSuffix(row.Hostname, Settings.LocalDomainSuffixes) ?? string.Empty;
-        var name = string.IsNullOrEmpty(row.Name) ? string.Empty : row.Name;
-        var fqdn = row.Hostname ?? string.Empty;
-        var random = row.IsRandomMac ? "Yes" : "No";
-        return $"Name: {name} | Hostname: {shortHostname} | FQDN: {fqdn} | MAC: {row.Mac} | Random MAC: {random}";
-    }
-
     private static string RelativeTime(DateTime t)
     {
         if (t == default) return "Never";
@@ -689,10 +785,10 @@ else
         // an Unspecified value as UTC; ToUniversalTime() would otherwise interpret it
         // as local and subtract the local offset (off-by-N hours bug).
         var d = DateTime.UtcNow - DateTime.SpecifyKind(t, DateTimeKind.Utc);
-        if (d.TotalSeconds < 60) return "just now";
-        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes}m ago";
-        if (d.TotalHours < 24)   return $"{(int)d.TotalHours}h ago";
-        return $"{(int)d.TotalDays}d ago";
+        if (d.TotalSeconds < 60) return "now";
+        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes}m";
+        if (d.TotalHours < 24)   return $"{(int)d.TotalHours}h";
+        return $"{(int)d.TotalDays}d";
     }
 
     private sealed record DashboardRow(

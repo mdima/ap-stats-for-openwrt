@@ -16,7 +16,10 @@
 @* /setup/wlans — Step 3 of the onboarding wizard. Parallel WLAN discovery across all
    added nodes. Per-node spinner while in flight; inline table of discovered WLANs with
    per-row instant-write toggle (D-13). Zero-WLAN advisory when all nodes return empty (D-16).
-   Finish button sets WizardDismissed and navigates to dashboard (D-08 / ONB-05).
+   19-05 (D-01): the button changed "Finish"→"Next" — it navigates to /setup/history (the
+   new wizard terminus) and NO LONGER sets WizardDismissed. The dismiss moved to the History
+   step so that skipping the new terminal step cannot leave the wizard dismissed before the
+   opt-in write (RESEARCH §Anti-Patterns).
    Re-entry guard: only discovers nodes not already in _alreadyDiscovered (D-15). *@
 
 <h3 class="card-title mb-1">Select WLANs to monitor</h3>
@@ -105,8 +108,8 @@
 
 <hr class="my-4" />
 <div class="d-flex justify-content-end">
-    <button type="button" class="btn btn-primary" @onclick="HandleFinishAsync">
-        <i class="bi bi-check-lg me-2"></i>Finish
+    <button type="button" class="btn btn-primary" @onclick="HandleNextAsync">
+        <i class="bi bi-arrow-right me-2"></i>Next
     </button>
 </div>
 
@@ -200,10 +203,13 @@
         });
     }
 
-    // D-08: Finish sets WizardDismissed = true and navigates to dashboard (ONB-05)
-    private async Task HandleFinishAsync()
+    // 19-05 (D-01): "Next" advances to the History step (the new wizard terminus).
+    // It NO LONGER sets WizardDismissed — that write moved to History.razor's Finish so
+    // skipping the terminal opt-in step cannot dismiss the wizard before the choice is
+    // persisted (RESEARCH §Anti-Patterns).
+    private Task HandleNextAsync()
     {
-        await Settings.SetWizardDismissedAsync(true);
-        Nav.NavigateTo("/", forceLoad: false);
+        Nav.NavigateTo("/setup/history", forceLoad: false);
+        return Task.CompletedTask;
     }
 }

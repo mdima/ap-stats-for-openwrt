@@ -60,6 +60,10 @@ public sealed class CompositionRootValidationTests
         services.AddTransient<INodeRepo, NodeRepo>();
         services.AddTransient<INetworkRepo, NetworkRepo>();
         services.AddTransient<IStationRepo, StationRepo>();
+        // Phase 18 M-HIST-01 — history write seam; PollOrchestrator's primary ctor now takes
+        // IHistoryRepo, so its DI graph requires this registration to pass ValidateOnBuild=true
+        // (mirrors Program.cs:160).
+        services.AddTransient<IHistoryRepo, HistoryRepo>();
         services.AddTransient<IAppSettingsRepo, AppSettingsRepo>();
         services.AddSingleton<IAppSettingsService, AppSettingsService>();
 
@@ -92,11 +96,19 @@ public sealed class CompositionRootValidationTests
         services.AddSingleton<Func<CancellationToken, Task>>(sp => ct =>
             sp.GetRequiredService<PollOrchestrator>().RunCycleAsync(ct));
 
-        // Phase 6 D-01 — PollingHostedService now takes ICircuitGate for the cold-start kick.
-        // Use AlwaysLiveGate as the validation-only stub (this test asserts registration shape,
-        // not gating semantics). Production registers CircuitTrackerGate (see Program.cs §6).
-        services.AddSingleton<ApStatsForOpenWrt.Services.Gating.ICircuitGate,
-                              ApStatsForOpenWrt.Services.Gating.AlwaysLiveGate>();
+        // Phase 6 D-01 — PollingHostedService takes ICircuitGate for the cold-start kick.
+        // Phase 18 D-02 — mirror the production gate registration shape: the inner CircuitTrackerGate
+        // is registered as its concrete type, and ICircuitGate resolves to the HistoryAwareCircuitGate
+        // decorator factory (CircuitTrackerGate + IAppSettingsService). CircuitTracker is the inner
+        // gate's ctor dep. This asserts the decorator's DI graph builds cleanly under ValidateOnBuild;
+        // gating semantics are exercised by HistoryAwareCircuitGateTests, not here. (Drift discipline:
+        // keep this in lock-step with Program.cs §6 — the production else-branch.)
+        services.AddSingleton<ApStatsForOpenWrt.Services.Gating.CircuitTracker>();
+        services.AddSingleton<ApStatsForOpenWrt.Services.Gating.CircuitTrackerGate>();
+        services.AddSingleton<ApStatsForOpenWrt.Services.Gating.ICircuitGate>(sp =>
+            new ApStatsForOpenWrt.Services.Gating.HistoryAwareCircuitGate(
+                sp.GetRequiredService<ApStatsForOpenWrt.Services.Gating.CircuitTrackerGate>(),
+                sp.GetRequiredService<ApStatsForOpenWrt.Services.Settings.IAppSettingsService>()));
 
         services.AddHostedService<PollingHostedService>();
 

@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Gating;
 using ApStatsForOpenWrt.Services.Polling;
 
 namespace ApStatsForOpenWrt.Services;
@@ -18,10 +19,17 @@ namespace ApStatsForOpenWrt.Services;
 /// </list>
 ///
 /// <para>
-/// <b>D-10 defense-in-depth gate.</b> This service early-exits BEFORE the snapshot diff
-/// when <see cref="INotificationsGate.IsEnabled"/> is <c>false</c> ("if nobody watches,
-/// do no work"). Both this service AND <see cref="ToastService"/> gate, so any caller
-/// path is covered.
+/// <b>D-10 / Phase 18 D-03 (OQ7 AMENDED) emission gate.</b> Snapshot-diff state tracking
+/// (<see cref="_lastNodeStatus"/>, <see cref="_failureCounters"/>, <see cref="_knownMacs"/>)
+/// now runs on EVERY <c>Cycled</c> event so the D-07 consecutive-failure counter counts
+/// ACTUAL consecutive polls and no station seen while no one was watching is re-toasted as
+/// "new" on reconnect. Only the four <see cref="ToastService.Show"/> emission sites are gated,
+/// on <c>(_gate.IsEnabled &amp;&amp; hasVisitor)</c>: a toast fires only when notifications are
+/// on (<see cref="INotificationsGate.IsEnabled"/>) AND an operator is connected
+/// (<see cref="CircuitTracker.Current"/> == <see cref="GateState.Live"/>, respecting the
+/// 260518-gpd 30 s pause-grace). This SUPERSEDES the charter's stale OQ7 "skip all work" gate.
+/// Both this service AND <see cref="ToastService"/> gate on <see cref="INotificationsGate"/>,
+/// so any caller path is covered.
 /// </para>
 ///
 /// <para>
@@ -54,6 +62,7 @@ public sealed class EventDetectionService : IDisposable
     private readonly PollNotifier _notifier;
     private readonly ToastService _toasts;
     private readonly INotificationsGate _gate;
+    private readonly CircuitTracker _tracker;
     private readonly IServiceScopeFactory _scopes;
     private readonly ILogger<EventDetectionService> _log;
 
@@ -77,12 +86,18 @@ public sealed class EventDetectionService : IDisposable
         PollNotifier notifier,
         ToastService toasts,
         INotificationsGate gate,
+        CircuitTracker tracker,
         IServiceScopeFactory scopes,
         ILogger<EventDetectionService> log)
     {
         _notifier = notifier;
         _toasts = toasts;
         _gate = gate;
+        // Phase 18 D-03 — concrete CircuitTracker singleton (Program.cs:548) for the strict
+        // visitor signal. NOT the ICircuitGate / HistoryAwareCircuitGate decorator (it reports
+        // Live under continuous history-on polling, which would defeat this toast gate — D-03
+        // forbidden). Singleton→singleton injection is captive-dependency-safe.
+        _tracker = tracker;
         _scopes = scopes;
         _log = log;
 
@@ -93,18 +108,18 @@ public sealed class EventDetectionService : IDisposable
 
     /// <summary>
     /// PollNotifier.Cycled handler. Wrapped in try/catch so a single bad cycle does not
-    /// detach the subscription. D-11 work order:
-    ///   1) D-10 gate check (defense-in-depth — skips ALL work, not just emission).
-    ///   2) D-06 lazy bootstrap on first cycle.
-    ///   3) Read current nodes + stations via a service scope (READ-ONLY).
-    ///   4) Diff and emit toasts.
+    /// detach the subscription. Phase 18 D-03 (OQ7 AMENDED) work order:
+    ///   1) D-06 lazy bootstrap on first cycle (UNCONDITIONAL — runs even with no visitor /
+    ///      notifications off so the known-MAC set stays honest from process start).
+    ///   2) Read current nodes + stations via a service scope (READ-ONLY).
+    ///   3) Compute <c>hasVisitor</c> from <see cref="CircuitTracker.Current"/>.
+    ///   4) Diff (state mutation UNCONDITIONAL) and emit toasts (gated on
+    ///      <c>_gate.IsEnabled &amp;&amp; hasVisitor</c>).
+    /// There is intentionally NO early-return on the notifications/visitor gate: the charter's
+    /// OQ7 "skip all work" behaviour is SUPERSEDED (D-03). State tracking must run every cycle.
     /// </summary>
     private async Task OnCycledAsync(PollSnapshot snapshot)
     {
-        // D-10 — early-exit BEFORE acquiring the lock or doing any work. This is the
-        // BRIEF's "if nobody watches, do no work" optimization (per 08-CONTEXT.md §specifics).
-        if (!_gate.IsEnabled) return;
-
         await _lock.WaitAsync();
         try
         {
@@ -113,8 +128,10 @@ public sealed class EventDetectionService : IDisposable
             var nodeRepo    = scope.ServiceProvider.GetRequiredService<INodeRepo>();
 
             // D-06 — bootstrap MAC set on the FIRST Cycled, not in the constructor.
-            // Run inside the gate so a session that starts with notifications OFF doesn't
-            // pre-fetch the MACs uselessly (D-10 holds for the bootstrap too).
+            // Phase 18 D-03: this runs UNCONDITIONALLY on the first cycle (no longer behind a
+            // notifications/visitor gate) so the known-MAC set is seeded from process start —
+            // a station first seen while no one was watching is therefore NOT re-toasted as
+            // "new" when an operator later connects.
             if (!_bootstrapped)
             {
                 await BootstrapKnownMacsAsync(stationRepo);
@@ -127,7 +144,12 @@ public sealed class EventDetectionService : IDisposable
             var nodes    = await nodeRepo.GetAllAsync(CancellationToken.None);
             var stations = await stationRepo.GetAllAsync(CancellationToken.None);
 
-            await DiffAndEmitAsync(nodes, stations);
+            // Phase 18 D-03 — strict visitor signal from the concrete tracker (30 s pause-grace
+            // respected transparently). Computed once per cycle and passed into the diff; only
+            // the toast emission depends on it, never the state mutation.
+            bool hasVisitor = _tracker.Current == GateState.Live;
+
+            await DiffAndEmitAsync(nodes, stations, hasVisitor);
         }
         catch (Exception ex)
         {
@@ -156,8 +178,13 @@ public sealed class EventDetectionService : IDisposable
         }
     }
 
-    private async Task DiffAndEmitAsync(IReadOnlyList<WiFiNode> nodes, IReadOnlyList<WLANStation> stations)
+    private async Task DiffAndEmitAsync(IReadOnlyList<WiFiNode> nodes, IReadOnlyList<WLANStation> stations, bool hasVisitor)
     {
+        // Phase 18 D-03 (OQ7 AMENDED) — the emission gate. A toast fires ONLY when notifications
+        // are enabled AND an operator is connected. All state mutations below stay UNCONDITIONAL
+        // so the D-07 counter counts actual consecutive polls and the known-MAC set stays honest.
+        bool canEmit = _gate.IsEnabled && hasVisitor;
+
         // D-04 / D-05 — per-node status transitions + D-07 consecutive-failure counter.
         foreach (var node in nodes)
         {
@@ -167,24 +194,32 @@ public sealed class EventDetectionService : IDisposable
             // D-04 — first cycle Offline (Online/Polling/missing → Offline).
             if (node.Status == Status.Offline && (!hadPrev || prev != Status.Offline))
             {
-                await _toasts.Show(
-                    "Access point offline",
-                    $"`{node.Hostname}` is no longer reachable. Last seen {RelativeTime(node.LastPollDate)}.",
-                    "warning");
+                if (canEmit)
+                {
+                    await _toasts.Show(
+                        "Access point offline",
+                        $"`{node.Hostname}` is no longer reachable. Last seen {RelativeTime(node.LastPollDate)}.",
+                        "warning");
+                }
             }
             // D-05 — every Offline → Online transition. Symmetric — paired semantics REJECTED.
             else if (hadPrev && prev == Status.Offline && node.Status == Status.Online)
             {
-                await _toasts.Show(
-                    "Access point online",
-                    $"`{node.Hostname}` is reachable again. Polling resumed.",
-                    "success");
+                if (canEmit)
+                {
+                    await _toasts.Show(
+                        "Access point online",
+                        $"`{node.Hostname}` is reachable again. Polling resumed.",
+                        "success");
+                }
             }
 
             _lastNodeStatus[node.Id] = node.Status;
 
             // D-07 — persistent-failure counter. Status==Offline = the orchestrator's
             // encoding of "poll failed" (no separate PollSucceeded boolean exists).
+            // The counter increment/reset is UNCONDITIONAL (Phase 18 D-03): it counts actual
+            // consecutive polls regardless of visitor presence. Only the toast is gated.
             var pollFailed = node.Status == Status.Offline;
             if (!pollFailed)
             {
@@ -196,12 +231,18 @@ public sealed class EventDetectionService : IDisposable
                 var newCount = prevCount + 1;
                 _failureCounters[node.Id] = newCount;
                 // EXACTLY 3 — first crossing only; no re-toast on 4, 5, ...
+                // The threshold crossing is computed unconditionally; a crossing that happens
+                // while no visitor is present is simply NOT toasted (and never re-toasted later,
+                // since prevCount is already >= threshold by the time a visitor connects).
                 if (prevCount < FailureToastThreshold && newCount == FailureToastThreshold)
                 {
-                    await _toasts.Show(
-                        "Polling failure",
-                        $"`{node.Hostname}` has failed {newCount} consecutive polls. Check connectivity or credentials.",
-                        "danger");
+                    if (canEmit)
+                    {
+                        await _toasts.Show(
+                            "Polling failure",
+                            $"`{node.Hostname}` has failed {newCount} consecutive polls. Check connectivity or credentials.",
+                            "danger");
+                    }
                 }
             }
         }
@@ -214,12 +255,19 @@ public sealed class EventDetectionService : IDisposable
         // phase may extend the toast to include the resolved SSID/AP — out of scope for v1.)
         foreach (var station in stations)
         {
+            // Phase 18 D-03 — _knownMacs.Add runs UNCONDITIONALLY so the MAC is recorded the
+            // first time it is seen, EVEN if no operator is watching. This is precisely what
+            // prevents a station seen-while-away from being re-toasted as "new" on reconnect:
+            // by the time a visitor connects, the MAC is already in the set, so Add returns false.
             if (_knownMacs.Add(station.MacAddress))
             {
-                await _toasts.Show(
-                    "New station",
-                    $"{DisplayName(station)} (`{station.MacAddress}`) appeared on the network.",
-                    "info");
+                if (canEmit)
+                {
+                    await _toasts.Show(
+                        "New station",
+                        $"{DisplayName(station)} (`{station.MacAddress}`) appeared on the network.",
+                        "info");
+                }
             }
         }
     }

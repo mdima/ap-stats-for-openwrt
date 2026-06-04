@@ -141,6 +141,7 @@ public sealed class WlansPageTests
         public int PollingIntervalSeconds => 30;
         public string? UIPasswordHash => null;
         public bool WizardDismissed { get; private set; }
+        public int SetWizardDismissedCallCount;
         public int RefreshIntervalSeconds => 3600;
         public IReadOnlyList<string> LocalDomainSuffixes { get; } = Array.Empty<string>();
 
@@ -153,6 +154,7 @@ public sealed class WlansPageTests
         public Task SetWizardDismissedAsync(bool dismissed, CancellationToken ct = default)
         {
             WizardDismissed = dismissed;
+            SetWizardDismissedCallCount++;
             return Task.CompletedTask;
         }
 
@@ -168,6 +170,8 @@ public sealed class WlansPageTests
 
         // Phase 17 Plan 17-01 M-UPD-02 — minimal mutable update-check stub members.
         public bool UpdateCheckEnabled { get; private set; } = true;
+        public bool HistoryEnabled => true;
+        public Task SetHistoryEnabledAsync(bool enabled, CancellationToken ct = default) => Task.CompletedTask;
         public string? LatestKnownVersion { get; private set; }
         public string? LatestReleaseUrl { get; private set; }
         public DateTime? LastCheckedAtUtc { get; private set; }
@@ -299,29 +303,53 @@ public sealed class WlansPageTests
             // Assert: alert-warning advisory present
             Assert.Contains("alert-warning", cut.Markup);
 
-            // Finish button NOT disabled
-            var finishBtn = cut.FindAll("button").FirstOrDefault(b => b.TextContent.Contains("Finish"));
-            Assert.NotNull(finishBtn);
-            Assert.False(finishBtn!.HasAttribute("disabled"));
+            // Next button NOT disabled (19-05: "Finish"→"Next")
+            var nextBtn = cut.FindAll("button").FirstOrDefault(b => b.TextContent.Contains("Next"));
+            Assert.NotNull(nextBtn);
+            Assert.False(nextBtn!.HasAttribute("disabled"));
+        }
+    }
+
+    // ── 19-05 (D-01) — "Finish"→"Next": the Wlans step now advances to /setup/history and
+    //    NO LONGER dismisses the wizard. The dismiss moved to the History terminus so that
+    //    skipping the opt-in step cannot leave the wizard dismissed before the choice write.
+    [Fact]
+    public async Task NextButton_NavigatesToSetupHistory()
+    {
+        var (ctx, _, _, _, _) = Build();
+        using (ctx)
+        {
+            // Arrange: no nodes — empty state is fine; Next is always enabled
+            var cut = ctx.Render<WlansPage>();
+            await cut.InvokeAsync(() => Task.CompletedTask);
+
+            // Act: click the Next button
+            var nextBtn = cut.FindAll("button").First(b => b.TextContent.Contains("Next"));
+            await cut.InvokeAsync(() => nextBtn.Click());
+
+            // Assert: navigated to the new history terminus, not to root.
+            var nav = ctx.Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>();
+            Assert.EndsWith("/setup/history", nav.Uri);
         }
     }
 
     [Fact]
-    public async Task FinishButton_SetsWizardDismissed_NavigatesToRoot()
+    public async Task NextButton_DoesNotDismissWizard()
     {
         var (ctx, _, _, _, settings) = Build();
         using (ctx)
         {
-            // Arrange: no nodes — empty state is fine; Finish is always enabled
+            // Arrange: no nodes — empty state is fine; Next is always enabled
             var cut = ctx.Render<WlansPage>();
             await cut.InvokeAsync(() => Task.CompletedTask);
 
-            // Act: click the Finish button
-            var finishBtn = cut.FindAll("button").First(b => b.TextContent.Contains("Finish"));
-            await cut.InvokeAsync(() => finishBtn.Click());
+            // Act: click the Next button
+            var nextBtn = cut.FindAll("button").First(b => b.TextContent.Contains("Next"));
+            await cut.InvokeAsync(() => nextBtn.Click());
 
-            // Assert: WizardDismissed set to true
-            Assert.True(settings.WizardDismissed);
+            // Assert: the dismiss moved to the History step — Wlans must NOT call it.
+            Assert.Equal(0, settings.SetWizardDismissedCallCount);
+            Assert.False(settings.WizardDismissed);
         }
     }
 
@@ -373,10 +401,11 @@ public sealed class WlansPageTests
             // The error banner is shown (same alert-danger marker as the existing
             // DiscoveryFailure_RendersErrorBanner test uses).
             Assert.Contains("alert-danger", cut.Markup);
-            // Forward guard: the page is in a usable state -- the Finish button
-            // is still rendered (operator can complete setup even when discovery failed).
-            var finishBtn = cut.FindAll("button").FirstOrDefault(b => b.TextContent.Contains("Finish"));
-            Assert.NotNull(finishBtn);
+            // Forward guard: the page is in a usable state -- the Next button (19-05:
+            // "Finish"→"Next") is still rendered (operator can advance to the history
+            // step even when discovery failed).
+            var nextBtn = cut.FindAll("button").FirstOrDefault(b => b.TextContent.Contains("Next"));
+            Assert.NotNull(nextBtn);
         }
     }
 }
