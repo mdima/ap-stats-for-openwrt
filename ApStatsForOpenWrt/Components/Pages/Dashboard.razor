@@ -183,9 +183,12 @@ else
                                         <td>
                                             @if (Settings.HistoryEnabled)
                                             {
-                                                <span class="d-inline-flex align-items-center gap-2">
+                                                @* d-flex (not inline) fills the td and ms-auto pins the sparkline to the
+                                                   column's right edge — charts align across rows even when the left side
+                                                   is just the offline em-dash (260604 operator finding, option A). *@
+                                                <span class="d-flex align-items-center gap-2">
                                                     <RssiCell Rss="row.Rss" />
-                                                    <a href="@($"/Stations/{Uri.EscapeDataString(row.Mac)}")" class="d-inline-flex"
+                                                    <a href="@($"/Stations/{Uri.EscapeDataString(row.Mac)}")" class="d-inline-flex ms-auto"
                                                        data-testid="sparkline-link" aria-label="@($"RSSI history for {row.Mac}")">
                                                         <RssiSparkline Points="@GetSparkline(row.Mac)" />
                                                     </a>
