@@ -182,11 +182,16 @@
    The full vendor rides the native title tooltip on the same span (Dashboard.razor vendor
    cell), so the clamped tail stays reachable on hover. The -webkit- prefixed trio is the
    form every engine actually implements (Blink/WebKit/Gecko); the unprefixed line-clamp is
-   the standards-track alias where supported. */
+   the standards-track alias where supported. Consolidated here from the operator's app.css
+   draft (app.css loads AFTER site.css, so a duplicate there would silently win — one home
+   only): line-height 1.2 tightens the two lines; max-height caps the box at exactly two
+   lines as a belt-and-braces fallback for any engine without -webkit-box clamping. */
 .two-line-ellipsis {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
   overflow: hidden;
+  line-height: 1.2;
+  max-height: calc(1.2em * 2);
 }
