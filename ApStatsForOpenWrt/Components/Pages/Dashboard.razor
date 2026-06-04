@@ -447,6 +447,14 @@ else
     {
         if (_tooltipInterop is not null)
         {
+            // 260604 operator-reported bug: SPA navigation away (e.g. sparkline click-through to
+            // Detail) removes the dashboard DOM with no mouseleave and no Bootstrap dispose — a
+            // hover-open tooltip's body-appended popper node survives the swap and parks stuck at
+            // the viewport's top-left until F5. disposeTooltips() drops any live instances and
+            // sweeps orphaned popper nodes BEFORE the module ref is released. Each call tolerates
+            // a torn-down circuit (JSDisconnectedException) — on refresh/close the browser rebuilds
+            // <body> anyway, so the sweep is moot there.
+            try { await _tooltipInterop.InvokeVoidAsync("disposeTooltips"); } catch { }
             try { await _tooltipInterop.DisposeAsync(); } catch { }
         }
     }

@@ -38,6 +38,10 @@
  */
 export function initTooltips(rootSelector = '[data-bs-toggle="tooltip"]') {
     try {
+        // Self-heal first: sweep any popper node orphaned by a prior SPA navigation
+        // (see removeOrphanedTooltipNodes below) before (re)initializing.
+        removeOrphanedTooltipNodes();
+
         // Bundle not parsed yet / unavailable (prerender, sandbox) — no-op.
         if (typeof bootstrap === 'undefined' || !bootstrap.Tooltip) return;
 
@@ -106,6 +110,9 @@ let overflowLastSelector = '[data-bs-toggle="tooltip-overflow"]';
  */
 export function initOverflowTooltips(rootSelector = '[data-bs-toggle="tooltip-overflow"]') {
     try {
+        // Self-heal first: sweep any popper node orphaned by a prior SPA navigation.
+        removeOrphanedTooltipNodes();
+
         // Bundle not parsed yet / unavailable (prerender, sandbox) — no-op.
         if (typeof bootstrap === 'undefined' || !bootstrap.Tooltip) return;
 
@@ -137,5 +144,52 @@ export function initOverflowTooltips(rootSelector = '[data-bs-toggle="tooltip-ov
         }
     } catch (e) {
         // bootstrap / DOM unavailable — silently no-op (matches chart-interop.js shape).
+    }
+}
+
+// ORPHANED-POPPER SWEEP (260604 operator-reported bug): Bootstrap appends the tooltip
+// popper element to <body> and links it to its trigger via the trigger's aria-describedby.
+// When Blazor SPA navigation swaps the page WHILE a tooltip is open (hover the sparkline,
+// click through to the Detail page), the trigger leaves the DOM with no mouseleave and no
+// dispose() — the body-level popper node is orphaned, loses its Popper anchor, and parks
+// at the viewport's top-left until a full page reload rebuilds <body>. An orphan is any
+// body-level .tooltip whose id no live element references via aria-describedby. Pure DOM —
+// needs no `bootstrap` global, so it also runs under prerender/sandbox without harm.
+function removeOrphanedTooltipNodes() {
+    try {
+        for (const tip of document.querySelectorAll('body > .tooltip')) {
+            try {
+                if (!tip.id || !document.querySelector('[aria-describedby="' + tip.id + '"]')) {
+                    tip.remove();
+                }
+            } catch (e) {
+                // One bad node must not abort the sweep.
+            }
+        }
+    } catch (e) {
+        // DOM unavailable — silently no-op.
+    }
+}
+
+/**
+ * Page-teardown counterpart to the init functions — called from Dashboard.DisposeAsync
+ * when the component leaves (SPA navigation). Disposes every tooltip instance this module
+ * created (both opt-in selectors) and sweeps orphaned popper nodes. NOTE: by DisposeAsync
+ * time the page DOM has usually ALREADY been swapped, so the per-element dispose loop
+ * finds nothing — the orphan sweep is the load-bearing part; the loop is belt + braces
+ * for teardown orderings where the old DOM is still attached.
+ */
+export function disposeTooltips() {
+    try {
+        if (typeof bootstrap !== 'undefined' && bootstrap.Tooltip) {
+            const optIns = document.querySelectorAll(
+                '[data-bs-toggle="tooltip"], [data-bs-toggle="tooltip-overflow"]');
+            for (const el of optIns) {
+                try { bootstrap.Tooltip.getInstance(el)?.dispose(); } catch (e) { }
+            }
+        }
+        removeOrphanedTooltipNodes();
+    } catch (e) {
+        // bootstrap / DOM unavailable — silently no-op.
     }
 }
