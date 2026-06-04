@@ -83,6 +83,18 @@ export function initTooltips(rootSelector = '[data-bs-toggle="tooltip"]') {
 // any stale instance before re-evaluating; we only construct a fresh tooltip when the
 // element currently overflows. PLAIN TEXT only (no html:true) per the 260531 pitfall.
 
+// RESIZE RE-EVALUATION (260604-a5u follow-up, operator live finding): truncation state
+// changes when the window — and with it the table column — resizes, but Blazor only
+// re-renders on the next poll Cycle, so the gate went stale between cycles. A single
+// debounced window-resize listener re-runs the overflow evaluation. It is wired ONCE on
+// the first successful initOverflowTooltips call (the function runs after EVERY render;
+// the module-scoped flag keeps listeners from stacking) and intentionally persists for
+// the page's lifetime: this module is a page-scoped singleton, and the handler is a
+// harmless no-op on pages with no opt-in elements (querySelectorAll returns empty).
+let overflowResizeWired = false;
+let overflowResizeTimer = 0;
+let overflowLastSelector = '[data-bs-toggle="tooltip-overflow"]';
+
 /**
  * (Re)initialize Bootstrap tooltips ONLY on opt-in elements that currently overflow
  * their -webkit-line-clamp box (scrollHeight > clientHeight). Dispose-then-recreate
@@ -96,6 +108,17 @@ export function initOverflowTooltips(rootSelector = '[data-bs-toggle="tooltip-ov
     try {
         // Bundle not parsed yet / unavailable (prerender, sandbox) — no-op.
         if (typeof bootstrap === 'undefined' || !bootstrap.Tooltip) return;
+
+        // Remember the selector and arm the one-time debounced resize re-evaluation.
+        overflowLastSelector = rootSelector;
+        if (!overflowResizeWired) {
+            overflowResizeWired = true;
+            window.addEventListener('resize', () => {
+                clearTimeout(overflowResizeTimer);
+                overflowResizeTimer = setTimeout(
+                    () => initOverflowTooltips(overflowLastSelector), 150);
+            });
+        }
 
         const elements = document.querySelectorAll(rootSelector);
         for (const el of elements) {
