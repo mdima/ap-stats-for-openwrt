@@ -251,6 +251,76 @@ public sealed class RssiHistoryQueryServiceTests : IAsyncLifetime
         Assert.Equal(-52, series.Points[^1]);
     }
 
+    [Fact]
+    public async Task GetDetailSeriesAsync_ZeroRowsButKpiSnapshot_AnchorsToKpiClock_NotEmpty()
+    {
+        // Bug 1/2 (QUAL-02 follow-up): a station with NO RSSI samples in the window but an active
+        // poll clock (a KPI snapshot exists) must show empty axes up to the current poll time, NOT
+        // the permanent "Collecting history…" placeholder. The grid anchors to MAX(KpiHistorySnapshots
+        // .TimestampUtc); Series is empty (no samples for this MAC); IsEmpty is false (history exists).
+        var ct = TestContext.Current.CancellationToken;
+        var kpiClock = DateTime.UtcNow.AddMinutes(-1);
+        await using (var db = _fixture.CreateContext())
+        {
+            // Seed only a KPI snapshot — NO RSSI rows for MacA.
+            await HistorySeed.SeedKpiAsync(db, kpiClock, 3, 1, 0, ct);
+        }
+
+        var dto = await BuildService().GetDetailSeriesAsync(MacA, ct);
+
+        Assert.False(dto.IsEmpty);
+        Assert.Empty(dto.Series);
+        Assert.NotEmpty(dto.BucketsUtc);
+        // Last grid bucket = floor of the KPI snapshot timestamp (the polling clock).
+        Assert.Equal(FloorBucket(kpiClock), dto.BucketsUtc[^1]);
+    }
+
+    [Fact]
+    public async Task GetDetailSeriesAsync_StationRowsOlderThanKpiClock_TrailingNullsToAnchor()
+    {
+        // Bug 1/2 (disconnect case): a disconnected station's chart must slide forward with trailing
+        // null gaps anchored to the polling clock (the latest KPI snapshot) instead of freezing at its
+        // last sample. The station's RSSI rows sit ~30 min before the KPI clock; the grid ends at the
+        // floored KPI-clock bucket, the series carries data in the older bucket and null at the anchor.
+        var ct = TestContext.Current.CancellationToken;
+        var kpiClock = DateTime.UtcNow.AddMinutes(-1);
+        var stationTs = kpiClock.AddMinutes(-30);   // last sample 30 min before the poll clock
+        int nodeId, netId;
+        await using (var db = _fixture.CreateContext())
+        {
+            (nodeId, netId) = await HistorySeed.SeedNodeAndNetworkAsync(db, "ap1", "wifi", ct);
+            await HistorySeed.SeedRssiAsync(db, stationTs, MacA, nodeId, netId, -57, ct);
+            // Later KPI snapshot — the poll clock has advanced past the station's last sample.
+            await HistorySeed.SeedKpiAsync(db, kpiClock, 2, 0, 1, ct);
+        }
+
+        var dto = await BuildService().GetDetailSeriesAsync(MacA, ct);
+
+        Assert.False(dto.IsEmpty);
+        // Grid anchored to the KPI clock, NOT the station's last sample.
+        Assert.Equal(FloorBucket(kpiClock), dto.BucketsUtc[^1]);
+        var series = dto.Series.Single();
+        // Anchor bucket is a trailing null gap (station disconnected before the poll clock).
+        Assert.Null(series.Points[^1]);
+        // An earlier bucket (the station's last sample bucket) carries the seeded RSSI.
+        var stationBucket = FloorBucket(stationTs);
+        var idx = Enumerable.Range(0, dto.BucketsUtc.Count).Single(i => dto.BucketsUtc[i] == stationBucket);
+        Assert.Equal(-57, series.Points[idx]);
+    }
+
+    [Fact]
+    public async Task GetDetailSeriesAsync_NoKpiSnapshotAndNoRows_ReportsEmptyState()
+    {
+        // The truly-empty contract: with NEITHER a KPI snapshot NOR any station row, the placeholder
+        // is truthful — IsEmpty true, empty Series, empty BucketsUtc (no axes to draw).
+        var ct = TestContext.Current.CancellationToken;
+        var dto = await BuildService().GetDetailSeriesAsync(MacA, ct);
+
+        Assert.True(dto.IsEmpty);
+        Assert.Empty(dto.Series);
+        Assert.Empty(dto.BucketsUtc);
+    }
+
     private static DateTime FloorBucket(DateTime t) =>
         new(t.Ticks - t.Ticks % TimeSpan.FromMinutes(HistorySeed.BucketMinutes).Ticks, DateTimeKind.Utc);
 }

@@ -128,7 +128,9 @@
     // Chart.js leaves the bar empty for that bucket (D-03).
     private static object ToInterop(KpiHistoryDto dto) => new
     {
-        labels  = dto.Buckets.Select(b => b.BucketUtc.ToString("HH:mm")).ToArray(),
+        // 260604-rq7: emit ISO-8601 UTC (BucketUtc is DateTimeKind.Utc → trailing 'Z'); chart-interop.js
+        // localHm converts to browser-local HH:mm so x-axis ticks/tooltips read in operator local time.
+        labels  = dto.Buckets.Select(b => b.BucketUtc.ToString("o")).ToArray(),
         online  = dto.Buckets.Select(b => b.OnlineCount).ToArray(),
         stale   = dto.Buckets.Select(b => b.StaleCount).ToArray(),
         offline = dto.Buckets.Select(b => b.OfflineCount).ToArray(),

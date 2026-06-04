@@ -33,7 +33,11 @@
     <div class="card-body p-3">
         @if (_data is null || _data.IsEmpty)
         {
-            @* D-03 zero-rows placeholder — NOT an empty axes frame. *@
+            @* D-03 / 260604-rq7: placeholder appears ONLY when NO history exists at all (no KPI poll
+               clock AND no station samples). A station with samples-but-not-in-window, or none yet
+               while the poll clock is live, now gets empty axes to the current poll time via the
+               KPI-anchored grid (IsEmpty=false), so this branch no longer freezes a reconnecting
+               station on the placeholder. *@
             <p class="text-body-secondary mb-0">Collecting history…</p>
         }
         else
@@ -178,12 +182,14 @@
     }
 
     // Project the typed multi-series DTO into the flat shape chart-interop.js consumes
-    // ({ labels, series: [{ label, data[] }] }). Bucket timestamps → HH:mm labels; each
-    // RssiDetailSeries → one dataset preserving per-AP detail (NO cross-series aggregation,
+    // ({ labels, series: [{ label, data[] }] }). Bucket timestamps → ISO-8601 UTC label strings
+    // (260604-rq7: BucketUtc carries DateTimeKind.Utc, so .ToString("o") emits the round-trip ISO
+    // string with trailing 'Z'; chart-interop.js's localHm converts it to browser-local HH:mm).
+    // Each RssiDetailSeries → one dataset preserving per-AP detail (NO cross-series aggregation,
     // L-06). Null points pass through as gaps (offline bucket) so the line breaks visibly.
     private static object ToInterop(RssiDetailDto dto) => new
     {
-        labels = dto.BucketsUtc.Select(b => b.ToString("HH:mm")).ToArray(),
+        labels = dto.BucketsUtc.Select(b => b.ToString("o")).ToArray(),
         series = dto.Series.Select(s => new
         {
             label = s.Label,
