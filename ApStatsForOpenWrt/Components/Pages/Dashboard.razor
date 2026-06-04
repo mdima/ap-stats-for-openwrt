@@ -163,7 +163,7 @@ else
                                                 </span>
                                             }
                                         </td>
-                                        <td class="">
+                                        <td>
                                             @if (!string.IsNullOrEmpty(row.Vendor))
                                             {
                                                 @row.Vendor
@@ -761,22 +761,6 @@ else
         _lastFilteredKpiRows = _rows
             .Select(r => new DashboardKpiRow(r.StationStatus, IsStale(r)))
             .ToList();
-    }
-
-    /// <summary>
-    /// Phase 10 DASH-20 — row hover tooltip exposing the full identifier set per
-    /// CONTEXT D-07. Bar-separated single-line format (newline behavior in HTML title
-    /// attributes is browser-inconsistent; the bar is the safest cross-browser shape).
-    /// HostnameDisplay.StripLocalSuffix produces the short form; the persisted FQDN is
-    /// also surfaced verbatim. Random-MAC indicator mirrors DASH-21.
-    /// </summary>
-    private string BuildRowTooltip(DashboardRow row)
-    {
-        var shortHostname = HostnameDisplay.StripLocalSuffix(row.Hostname, Settings.LocalDomainSuffixes) ?? string.Empty;
-        var name = string.IsNullOrEmpty(row.Name) ? string.Empty : row.Name;
-        var fqdn = row.Hostname ?? string.Empty;
-        var random = row.IsRandomMac ? "Yes" : "No";
-        return $"Name: {name} | Hostname: {shortHostname} | FQDN: {fqdn} | MAC: {row.Mac} | Random MAC: {random}";
     }
 
     private static string RelativeTime(DateTime t)
