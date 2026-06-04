@@ -279,12 +279,16 @@ public sealed class DashboardTests
     }
 
     [Fact]
-    public void TableRow_VendorColumn_ClampedWithTwoLineEllipsis_FullNameInTitleTooltip()
+    public void TableRow_VendorColumn_ClampedWithTwoLineEllipsis_FullNameInOverflowTooltip()
     {
-        // 260604-vel — vendor cell markup contract: the vendor name renders inside a span
+        // 260604-a5u — vendor cell markup contract: the vendor name renders inside a span
         // carrying .two-line-ellipsis (site.css clamps to 2 lines, ellipsis only on overflow)
-        // with the FULL vendor name on the native title tooltip. bUnit has no layout engine,
-        // so the clamp itself is CSS-only; this pins the class + title wiring.
+        // that opts in to the overflow-gated Bootstrap tooltip instead of a native title.
+        // bUnit has no layout engine and JSInterop is stubbed here, so the scrollHeight >
+        // clientHeight gating is JS-only and is live-verified; this test pins only the markup
+        // OPT-IN CONTRACT (the attributes initOverflowTooltips reads), not the gating itself:
+        // data-bs-toggle="tooltip-overflow", full vendor name on data-bs-title, the shared
+        // .app-tooltip skin via data-bs-custom-class, and NO native title attribute.
         var nodes = new[] { new WiFiNode { Id = 1, Hostname = "ap-1", Username = "root" } };
         var networks = new Dictionary<int, List<WiFiNetwork>>
         {
@@ -301,7 +305,10 @@ public sealed class DashboardTests
         {
             var cut = ctx.Render<Dashboard>();
             var vendorSpan = cut.Find("span.two-line-ellipsis");
-            Assert.Equal("Telefonaktiebolaget LM Ericsson", vendorSpan.GetAttribute("title"));
+            Assert.Equal("tooltip-overflow", vendorSpan.GetAttribute("data-bs-toggle"));
+            Assert.Equal("Telefonaktiebolaget LM Ericsson", vendorSpan.GetAttribute("data-bs-title"));
+            Assert.Equal("app-tooltip", vendorSpan.GetAttribute("data-bs-custom-class"));
+            Assert.Null(vendorSpan.GetAttribute("title"));  // no native title — AngleSharp returns null for an absent attribute
             Assert.Contains("Telefonaktiebolaget LM Ericsson", vendorSpan.TextContent);
         }
     }
