@@ -68,8 +68,15 @@ export function initTooltips(rootSelector = '[data-bs-toggle="tooltip"]') {
 // keeps initTooltips from double-initializing them (no tooltip on names that fit).
 //
 // The gate is a vertical-truncation test: with -webkit-line-clamp the rendered box is
-// capped at clientHeight while the full (unclamped) content measures scrollHeight, so
-// el.scrollHeight > el.clientHeight is true exactly when the name overflows two lines.
+// capped at clientHeight while the full (unclamped) content measures scrollHeight.
+//
+// ROUNDING TOLERANCE (260604-a5u post-ship fix): a strict scrollHeight > clientHeight
+// fired on NON-truncated one-line names. .two-line-ellipsis sets line-height:1.2, so a
+// line's height is fractional (e.g. 14px font -> 16.8px); scrollHeight rounds UP while
+// clientHeight rounds to nearest, so a fully-visible span can report e.g. 17 vs 16 — a
+// permanent off-by-one. A genuinely clamped line differs by a FULL line-height
+// (>= ~17px), so a small constant tolerance (> 2px) cleanly separates rounding noise
+// from real truncation at any sane font size or zoom level.
 //
 // DISPOSE-FIRST, UNCONDITIONALLY: an element may have STOPPED overflowing since the
 // last render (rows replace every poll Cycle, container can resize), so we always drop
@@ -96,7 +103,9 @@ export function initOverflowTooltips(rootSelector = '[data-bs-toggle="tooltip-ov
                 // Always drop any prior instance first — the element may have stopped
                 // overflowing since the last render, in which case it gets no tooltip.
                 bootstrap.Tooltip.getInstance(el)?.dispose();
-                if (el.scrollHeight > el.clientHeight) {
+                // > 2px tolerance: see ROUNDING TOLERANCE note above — strict > fires
+                // on every cell because fractional line-height rounds asymmetrically.
+                if (el.scrollHeight - el.clientHeight > 2) {
                     new bootstrap.Tooltip(el);
                 }
             } catch (e) {
