@@ -166,9 +166,9 @@ else
                                         <td>
                                             @if (!string.IsNullOrEmpty(row.Vendor))
                                             {
-                                                <span class="two-line-ellipsis" title="@row.Vendor">
+                                                <span class="two-line-ellipsis" data-bs-toggle="tooltip-overflow" data-bs-title="@row.Vendor" data-bs-custom-class="app-tooltip">
                                                     @row.Vendor
-                                                </span>                                                
+                                                </span>
                                             }
                                             else
                                             {
@@ -322,6 +322,15 @@ else
         if (_tooltipInterop is not null)
         {
             try { await _tooltipInterop.InvokeVoidAsync("initTooltips"); }
+            catch (JSException) { }
+            catch (ObjectDisposedException) { }
+
+            // 260604-a5u (QUAL-02) — re-evaluate the vendor column's overflow tooltips after the
+            // sparkline tooltips. Same module ref, same guard + catch shape. The overflow gate
+            // (scrollHeight > clientHeight) is re-checked every render: rows replace on each poll
+            // Cycle, so truncation self-heals on resize at the NEXT cycle (known limitation — a
+            // bare window resize between cycles does not re-evaluate until the next re-render).
+            try { await _tooltipInterop.InvokeVoidAsync("initOverflowTooltips"); }
             catch (JSException) { }
             catch (ObjectDisposedException) { }
         }
