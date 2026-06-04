@@ -56,3 +56,54 @@ export function initTooltips(rootSelector = '[data-bs-toggle="tooltip"]') {
         // bootstrap / DOM unavailable — silently no-op (matches chart-interop.js shape).
     }
 }
+
+// Quick task 260604-a5u (QUAL-02) — overflow-gated sibling of initTooltips.
+//
+// WHY a SEPARATE export with a DISTINCT data-bs-toggle value: the Dashboard vendor
+// column (Dashboard.razor) clamps long OUI names to two lines (.two-line-ellipsis,
+// site.css). The full name should reveal in a tooltip ONLY when the clamp actually
+// truncated it — a short name that fits two lines must show NO tooltip. The standard
+// initTooltips selector ([data-bs-toggle="tooltip"]) is unconditional, so these
+// elements opt in with the distinct value data-bs-toggle="tooltip-overflow"; that
+// keeps initTooltips from double-initializing them (no tooltip on names that fit).
+//
+// The gate is a vertical-truncation test: with -webkit-line-clamp the rendered box is
+// capped at clientHeight while the full (unclamped) content measures scrollHeight, so
+// el.scrollHeight > el.clientHeight is true exactly when the name overflows two lines.
+//
+// DISPOSE-FIRST, UNCONDITIONALLY: an element may have STOPPED overflowing since the
+// last render (rows replace every poll Cycle, container can resize), so we always drop
+// any stale instance before re-evaluating; we only construct a fresh tooltip when the
+// element currently overflows. PLAIN TEXT only (no html:true) per the 260531 pitfall.
+
+/**
+ * (Re)initialize Bootstrap tooltips ONLY on opt-in elements that currently overflow
+ * their -webkit-line-clamp box (scrollHeight > clientHeight). Dispose-then-recreate
+ * per element, same try/catch-safe shape as initTooltips (silent no-op under prerender
+ * / sandbox where global `bootstrap` is absent).
+ *
+ * @param {string} rootSelector CSS selector for opt-in elements; defaults to every
+ *                              element carrying data-bs-toggle="tooltip-overflow".
+ */
+export function initOverflowTooltips(rootSelector = '[data-bs-toggle="tooltip-overflow"]') {
+    try {
+        // Bundle not parsed yet / unavailable (prerender, sandbox) — no-op.
+        if (typeof bootstrap === 'undefined' || !bootstrap.Tooltip) return;
+
+        const elements = document.querySelectorAll(rootSelector);
+        for (const el of elements) {
+            try {
+                // Always drop any prior instance first — the element may have stopped
+                // overflowing since the last render, in which case it gets no tooltip.
+                bootstrap.Tooltip.getInstance(el)?.dispose();
+                if (el.scrollHeight > el.clientHeight) {
+                    new bootstrap.Tooltip(el);
+                }
+            } catch (e) {
+                // A single element failing must not abort the rest of the page.
+            }
+        }
+    } catch (e) {
+        // bootstrap / DOM unavailable — silently no-op (matches chart-interop.js shape).
+    }
+}

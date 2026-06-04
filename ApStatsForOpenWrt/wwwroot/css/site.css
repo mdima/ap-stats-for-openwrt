@@ -162,15 +162,17 @@
     box-shadow: inset 3px 0 0 0 var(--bs-primary), 0 0 1px rgba(var(--bs-body-color-rgb), .125), 0 1px 3px rgba(var(--bs-body-color-rgb), .2) !important;
 }
 
-/* === Quick task 260603-968 — RSSI sparkline tooltip background (operator request). =====
+/* === Quick task 260603-968 — shared opaque dark-gray tooltip skin (operator request). =====
    Match the always-dark left sidebar (.app-sidebar.bg-body-secondary @ data-bs-theme="dark",
    MainLayout.razor:62), which resolves to #343a40 = the theme-invariant --bs-gray-800.
    Using --bs-gray-800 (NOT --bs-secondary-bg, which is #e9ecef in light mode) keeps the tooltip
    the SAME dark gray in both page themes, exactly like the sidebar. Setting --bs-tooltip-bg also
    recolors the arrow (Bootstrap 5.3 .tooltip-arrow::before borders read var(--bs-tooltip-bg)),
-   and opacity:1 matches the fully-opaque sidebar. Scoped via data-bs-custom-class on the sparkline
-   trigger (RssiSparkline.razor), so ONLY the sparkline tooltips are affected. */
-.rssi-sparkline-tooltip {
+   and opacity:1 matches the fully-opaque sidebar. Applied via data-bs-custom-class="app-tooltip".
+   260604-a5u — generalized from the former sparkline-only rule to this shared .app-tooltip
+   skin, now worn by BOTH the RSSI sparkline trigger (RssiSparkline.razor) AND the Dashboard
+   vendor cell's overflow tooltip (Dashboard.razor). */
+.app-tooltip {
   --bs-tooltip-bg: var(--bs-gray-800);
   --bs-tooltip-color: var(--bs-gray-100);
   --bs-tooltip-opacity: 1;
