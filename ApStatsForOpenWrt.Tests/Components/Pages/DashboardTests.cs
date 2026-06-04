@@ -755,9 +755,11 @@ public sealed class DashboardTests
     }
 
     [Fact]
-    public void Dashboard_RowTooltip_ExposesFullIdentifierSet()
+    public void Dashboard_BodyRows_CarryNoTitleTooltip()
     {
-        // DASH-20 — row title attribute contains Name | Hostname (short) | FQDN | MAC | Random MAC.
+        // DASH-20 retired (260604 cosmetic tune) — the row-level title tooltip was removed; body
+        // rows must carry NO title attribute even when every identifier (Name, Hostname, FQDN,
+        // MAC, Random MAC) is populated. Identifiers live in the visible columns instead.
         var (node, net) = MakeApAndNet();
         var s = new WLANStation { Id = 100, MacAddress = "AA:BB:CC:DD:EE:FF", WiFiNetworkId = 10, Name = "Pi", Hostname = "dev.michelecasa", IsRandomMac = true, Status = Status.Online, LastPollDate = DateTime.UtcNow };
         var (ctx, _, _, _, _) = Build(new[] { node }, new[] { s }, anyEnabled: true,
@@ -767,12 +769,8 @@ public sealed class DashboardTests
         {
             var cut = ctx.Render<Dashboard>();
             var bodyRow = cut.FindAll("tbody tr").First();
-            var title = bodyRow.GetAttribute("title") ?? string.Empty;
-            Assert.Contains("Name: Pi", title);
-            Assert.Contains("Hostname: dev", title);
-            Assert.Contains("FQDN: dev.michelecasa", title);
-            Assert.Contains("MAC: AA:BB:CC:DD:EE:FF", title);
-            Assert.Contains("Random MAC: Yes", title);
+            Assert.False(bodyRow.HasAttribute("title"),
+                "Body rows must not carry a title tooltip (DASH-20 tooltip removed in the pre-v0.14-close cosmetic tune).");
         }
     }
 

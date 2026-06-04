@@ -150,11 +150,10 @@ else
                         <tbody>
                             <Virtualize Items="ComputeFilteredRows()" ItemSize="40" Context="row">
                                 <ItemContent>
-                                    <tr class="@(_changedRowMacs.Contains(row.Mac) ? "row-status-changed" : null)"
-                                        title="@BuildRowTooltip(row)">
+                                    <tr class="@(_changedRowMacs.Contains(row.Mac) ? "row-status-changed" : null)">
                                         <td><a href="@($"/Stations/{Uri.EscapeDataString(row.Mac)}")">@(string.IsNullOrEmpty(row.Name) ? (string.IsNullOrEmpty(row.Hostname) ? row.Mac : HostnameDisplay.StripLocalSuffix(row.Hostname, Settings.LocalDomainSuffixes)) : row.Name)</a></td>
                                         <td>
-                                            <code class="font-monospace">@row.Mac</code>
+                                            <code class="font-monospace"><small>@row.Mac</small></code>
                                             @if (row.IsRandomMac)
                                             {
                                                 <span class="badge text-bg-warning ms-2"
@@ -164,7 +163,7 @@ else
                                                 </span>
                                             }
                                         </td>
-                                        <td>
+                                        <td class="">
                                             @if (!string.IsNullOrEmpty(row.Vendor))
                                             {
                                                 @row.Vendor
@@ -174,7 +173,7 @@ else
                                                 <span class="text-body-secondary">Unknown vendor</span>
                                             }
                                         </td>
-                                        <td><code class="font-monospace">@(string.IsNullOrEmpty(row.Ip) ? "—" : row.Ip)</code></td>
+                                        <td><code class="font-monospace"><small>@(string.IsNullOrEmpty(row.Ip) ? "—" : row.Ip)</small></code></td>
                                         <td>@row.Ssid</td>
                                         <td class="text-nowrap">@row.ApHostname</td>
                                         @* Merged "RSSI" cell: current RSSI (bars + dBm) and, when history is on, the
@@ -788,10 +787,10 @@ else
         // an Unspecified value as UTC; ToUniversalTime() would otherwise interpret it
         // as local and subtract the local offset (off-by-N hours bug).
         var d = DateTime.UtcNow - DateTime.SpecifyKind(t, DateTimeKind.Utc);
-        if (d.TotalSeconds < 60) return "just now";
-        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes}m ago";
-        if (d.TotalHours < 24)   return $"{(int)d.TotalHours}h ago";
-        return $"{(int)d.TotalDays}d ago";
+        if (d.TotalSeconds < 60) return "now";
+        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes}m";
+        if (d.TotalHours < 24)   return $"{(int)d.TotalHours}h";
+        return $"{(int)d.TotalDays}d";
     }
 
     private sealed record DashboardRow(

@@ -59,27 +59,28 @@ public sealed class RssiSparklineTests
     }
 
     [Fact]
-    public void ZeroData_RendersEmDashSpan_NoSvg()
+    public void ZeroData_RendersNothing_NoSvg()
     {
-        // D-03 — empty Points (MAC absent from the map) → em-dash, no <svg>.
+        // D-03 revised (260604 cosmetic tune) — empty Points (MAC absent from the map) → the
+        // component renders NOTHING (the em-dash "No history yet" span was removed pre-v0.14-close).
         using var ctx = new BunitContext();
         var cut = ctx.Render<RssiSparkline>(p => p.Add(c => c.Points, Array.Empty<RssiSparklinePoint>()));
 
         Assert.Empty(cut.FindAll("svg"));
-        Assert.Contains("—", cut.Markup);
-        Assert.Contains("aria-label=\"No history yet\"", cut.Markup);
+        Assert.Equal(string.Empty, cut.Markup.Trim());
     }
 
     [Fact]
-    public void AllGapPoints_RendersEmDash_NoPolyline()
+    public void AllGapPoints_RendersNothing_NoPolyline()
     {
-        // All-null window (present in the map but every bucket a gap) → no segments → em-dash.
+        // All-null window (present in the map but every bucket a gap) → no segments → nothing
+        // rendered (D-03 revised, 260604 — em-dash empty-state removed).
         var points = new List<RssiSparklinePoint> { P(0, null), P(5, null) };
         using var ctx = new BunitContext();
         var cut = ctx.Render<RssiSparkline>(p => p.Add(c => c.Points, points));
 
         Assert.Empty(cut.FindAll("polyline"));
-        Assert.Contains("—", cut.Markup);
+        Assert.Equal(string.Empty, cut.Markup.Trim());
     }
 
     [Fact]

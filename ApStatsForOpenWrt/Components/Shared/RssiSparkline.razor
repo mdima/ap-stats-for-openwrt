@@ -32,12 +32,7 @@
 
 @using ApStatsForOpenWrt.Data.Repositories.History
 
-@if (_segments.Count == 0)
-{
-    @* D-03 — no present points (MAC absent from the map, or all-gap window). *@
-    <span class="text-body-secondary" aria-label="No history yet">—</span>
-}
-else
+@if (_segments.Count > 0)
 {
     @* #1 — Bootstrap tooltip opt-in on a WRAPPING span (latest + tier word + range). The attributes
        go on the span, NOT the bare <svg> (Bootstrap tooltips are finicky attached directly to SVG).
