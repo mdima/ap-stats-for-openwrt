@@ -11,7 +11,7 @@
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](#try-it-in-60-seconds)
 [![SQLite](https://img.shields.io/badge/SQLite-EF%20Core%2010-003B57?logo=sqlite&logoColor=white)](#architecture-at-a-glance)
 [![Version](https://img.shields.io/badge/version-0.12-blue)](Directory.Build.props)
-[![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
 ---
 
@@ -238,9 +238,7 @@ Conventions, anti-patterns, and architectural invariants are documented in [`CLA
 
 ## License
 
-This project is released under the [PolyForm Noncommercial License 1.0.0](LICENSE). In plain terms: you may use, study, modify, and redistribute the source — including modified versions — for any noncommercial purpose, provided you keep the `Required Notice:` attribution line that names the original author. Commercial use is not granted by this license; contact the maintainer if you need a separate commercial arrangement.
-
-PolyForm Noncommercial is a *source-available* license, not an OSI-approved open-source license — the noncommercial restriction is incompatible with the OSI definition. The canonical license text is hosted at <https://polyformproject.org/licenses/noncommercial/1.0.0>; the verbatim copy that governs this repository lives in [`LICENSE`](LICENSE).
+This project is open source under the [GNU General Public License v3.0](LICENSE). In plain terms: you are free to use, study, modify, and redistribute the software — including modified versions — provided that any distributed derivative stays under GPL-3.0 and keeps the copyright and license notices intact. The canonical license text is hosted at <https://www.gnu.org/licenses/gpl-3.0.txt>; the verbatim copy that governs this repository lives in [`LICENSE`](LICENSE).
 
 ## Trademarks
 
