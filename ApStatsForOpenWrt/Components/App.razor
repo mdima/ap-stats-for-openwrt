@@ -54,7 +54,12 @@
 
     <HeadOutlet @rendermode="@PageRenderMode" />
 </head>
-<body class="layout-fixed sidebar-expand-lg bg-body-tertiary">
+@* fixed-header (260605): AdminLTE 4's canonical pinned-navbar mechanism — activates the
+   vendored rule `.fixed-header .app-header{position:sticky;top:0;z-index:1030}` (see
+   support/AdminLTE-4.0.0-rc7.zip dist/layout/fixed-header.html). Bootstrap's `fixed-top`
+   on the nav is WRONG here: it pulls the header out of the .app-wrapper grid, spans the
+   full viewport, and the sidebar (z-index 1038) paints over the sidebar-toggle hamburger. *@
+<body class="layout-fixed fixed-header sidebar-expand-lg bg-body-tertiary">
     <Routes @rendermode="@PageRenderMode" />
     @* Script load order is load-bearing:
        1. bootstrap.bundle.min.js — AdminLTE 4 RC7 hard-deps on "bootstrap": "^5.3.8";
