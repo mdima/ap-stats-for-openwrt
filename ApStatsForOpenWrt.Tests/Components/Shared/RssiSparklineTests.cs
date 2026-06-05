@@ -18,19 +18,23 @@ public sealed class RssiSparklineTests
     [Fact]
     public void RendersPolyline_WithGapAtOfflineBucket_SplitsIntoTwoSegments()
     {
-        // present, present, GAP, present → two contiguous runs → two <polyline> segments (L-05).
+        // present, present, present, GAP, present, present → two runs of >=2 → two <polyline>
+        // segments (L-05). (Both runs must be length >=2 so neither collapses to a dot per 260605-8dr.)
         var points = new List<RssiSparklinePoint>
         {
             P(0, -55),
             P(5, -60),
-            P(10, null),   // gap (offline bucket)
-            P(15, -52),
+            P(10, -58),
+            P(15, null),   // gap (offline bucket)
+            P(20, -52),
+            P(25, -54),
         };
         using var ctx = new BunitContext();
         var cut = ctx.Render<RssiSparkline>(p => p.Add(c => c.Points, points));
 
         var polylines = cut.FindAll("polyline");
         Assert.Equal(2, polylines.Count);
+        Assert.Empty(cut.FindAll("circle"));
     }
 
     [Fact]
@@ -221,5 +225,110 @@ public sealed class RssiSparklineTests
 
         var title = cut.Find("[data-bs-toggle=\"tooltip\"]").GetAttribute("data-bs-title")!;
         Assert.Contains("Latest -62 dBm", title);
+    }
+
+    // ── 260605-8dr: isolated single-bucket samples render as a <circle> dot ──────────────────────
+    // SVG paints a one-point <polyline> as nothing, so a length-1 contiguous run must render a dot
+    // (class rssi-sparkline-dot, r=2, fill currentColor) at the bucket-index x / auto-scaled y.
+
+    [Fact]
+    public void IsolatedPointBetweenTwoGaps_RendersOneCircle_NoPolyline()
+    {
+        // gap, present, gap → the single present bucket is an isolated run → one dot, zero polylines.
+        var points = new List<RssiSparklinePoint> { P(0, null), P(5, -60), P(10, null) };
+        using var ctx = new BunitContext();
+        var cut = ctx.Render<RssiSparkline>(p => p.Add(c => c.Points, points));
+
+        Assert.Single(cut.FindAll("circle"));
+        Assert.Empty(cut.FindAll("polyline"));
+    }
+
+    [Fact]
+    public void SinglePresentSampleInWindow_RendersCircle_NotEmptySvg()
+    {
+        // The whole window has exactly one present bucket → one <svg> with one <circle>, no polyline,
+        // and the markup is NOT empty (the bug: it used to render an empty svg / nothing visible).
+        var points = new List<RssiSparklinePoint> { P(0, -60) };
+        using var ctx = new BunitContext();
+        var cut = ctx.Render<RssiSparkline>(p => p.Add(c => c.Points, points));
+
+        Assert.Single(cut.FindAll("svg"));
+        Assert.Single(cut.FindAll("circle"));
+        Assert.Empty(cut.FindAll("polyline"));
+        Assert.NotEqual(string.Empty, cut.Markup.Trim());
+    }
+
+    [Fact]
+    public void IsolatedPointAtIndexZero_RendersCircle()
+    {
+        // present at index 0 then a gap → isolated run at the leading edge.
+        var points = new List<RssiSparklinePoint> { P(0, -60), P(5, null) };
+        using var ctx = new BunitContext();
+        var cut = ctx.Render<RssiSparkline>(p => p.Add(c => c.Points, points));
+
+        Assert.Single(cut.FindAll("circle"));
+    }
+
+    [Fact]
+    public void IsolatedPointAtLastIndex_RendersCircle()
+    {
+        // a gap then present at the last index → isolated run at the trailing edge.
+        var points = new List<RssiSparklinePoint> { P(0, null), P(5, -60) };
+        using var ctx = new BunitContext();
+        var cut = ctx.Render<RssiSparkline>(p => p.Add(c => c.Points, points));
+
+        Assert.Single(cut.FindAll("circle"));
+    }
+
+    [Fact]
+    public void AdjacentRun_RendersPolyline_NoCircles()
+    {
+        // A run of >=2 present points still renders as a pure polyline with NO per-vertex dots.
+        var points = new List<RssiSparklinePoint> { P(0, -55), P(5, -60), P(10, -58) };
+        using var ctx = new BunitContext();
+        var cut = ctx.Render<RssiSparkline>(p => p.Add(c => c.Points, points));
+
+        Assert.NotEmpty(cut.FindAll("polyline"));
+        Assert.Empty(cut.FindAll("circle"));
+    }
+
+    [Fact]
+    public void MixedWindow_RunGapIsolatedGapRun_RendersTwoPolylinesAndOneCircle()
+    {
+        // run of 3, gap, isolated 1, gap, run of 2 → 2 polylines + 1 circle.
+        var points = new List<RssiSparklinePoint>
+        {
+            P(0, -55), P(5, -57), P(10, -56),   // run of 3
+            P(15, null),                         // gap
+            P(20, -62),                          // isolated 1
+            P(25, null),                         // gap
+            P(30, -58), P(35, -59),              // run of 2
+        };
+        using var ctx = new BunitContext();
+        var cut = ctx.Render<RssiSparkline>(p => p.Add(c => c.Points, points));
+
+        Assert.Equal(2, cut.FindAll("polyline").Count);
+        Assert.Single(cut.FindAll("circle"));
+    }
+
+    [Fact]
+    public void Dot_CxCy_MatchBucketIndexAndAutoScaledY()
+    {
+        // For the isolated-mid-window case, cx = i/(count-1)*100 for the present index (invariant
+        // culture), cy is in-range [0,22], and the dot carries the documented attributes.
+        var points = new List<RssiSparklinePoint> { P(0, null), P(5, -60), P(10, null) };
+        const int presentIndex = 1;
+        const int count = 3;
+        var expectedCx = (double)presentIndex / (count - 1) * 100d; // 50
+
+        using var ctx = new BunitContext();
+        var cut = ctx.Render<RssiSparkline>(p => p.Add(c => c.Points, points));
+
+        var circle = cut.Find("circle");
+        Assert.Equal(expectedCx, D(circle.GetAttribute("cx")), precision: 2);
+        Assert.InRange(D(circle.GetAttribute("cy")), 0d, 22d);
+        Assert.Equal("rssi-sparkline-dot", circle.GetAttribute("class"));
+        Assert.Equal("2", circle.GetAttribute("r"));
+        Assert.Equal("currentColor", circle.GetAttribute("fill"));
     }
 }
