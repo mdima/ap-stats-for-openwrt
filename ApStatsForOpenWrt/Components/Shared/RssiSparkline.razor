@@ -8,6 +8,10 @@
      - fixed viewBox="0 0 100 22" + preserveAspectRatio="none" so the path scales to the ~90×20 CSS box.
      - one <polyline> per contiguous run of present points; a gap (null Rssi) splits the line into
        separate segments (L-05 — offline/zero-row bucket = a visible break, distinct from a roam).
+       A length-1 run (an ISOLATED present bucket) instead renders a single <circle> dot
+       (class rssi-sparkline-dot, fill currentColor, r=2) — because SVG paints a one-point <polyline>
+       as NOTHING, so an isolated sample would otherwise be invisible. This applies at EVERY position:
+       index 0, the last index, mid-window between two gaps, and the sole-present-in-window case.
      - x = bucketIndex / (count-1) * 100.
      - stroke="currentColor" (D-02 — inherits --bs-body-color in both themes, no JS), line-only (no fill).
      - vector-effect="non-scaling-stroke" keeps the 1.5px stroke crisp despite the none aspect ratio.
@@ -32,7 +36,7 @@
 
 @using ApStatsForOpenWrt.Data.Repositories.History
 
-@if (_segments.Count > 0)
+@if (_segments.Count > 0 || _dots.Count > 0)
 {
     @* #1 — Bootstrap tooltip opt-in on a WRAPPING span (latest + tier word + range). The attributes
        go on the span, NOT the bare <svg> (Bootstrap tooltips are finicky attached directly to SVG).
@@ -51,6 +55,12 @@
             {
                 <polyline fill="none" stroke="currentColor" stroke-width="1.5"
                           vector-effect="non-scaling-stroke" points="@seg" />
+            }
+            @* Isolated (length-1) runs — SVG paints a one-point polyline as nothing, so render a dot
+               instead (D-02 currentColor theming, no stroke). *@
+            @foreach (var dot in _dots)
+            {
+                <circle class="rssi-sparkline-dot" cx="@dot.Cx" cy="@dot.Cy" r="2" fill="currentColor" />
             }
         </svg>
     </span>
@@ -81,8 +91,12 @@
 
     private const double BandEpsilon = 0.05d; // sub-pixel bands aren't worth an element.
 
-    // One "x,y x,y …" string per contiguous run of present points (gaps split the line).
+    // One "x,y x,y …" string per contiguous run of >=2 present points (gaps split the line).
     private List<string> _segments = new();
+
+    // One (cx, cy) per ISOLATED (length-1) run of present points — rendered as a <circle> dot, since
+    // SVG paints a one-point polyline as nothing.
+    private List<(string Cx, string Cy)> _dots = new();
 
     // #3 tier bands (only those with visible height under the current scale), back-to-front.
     private List<TierBand> _bands = new();
@@ -104,6 +118,7 @@
         {
             // D-03 — no present samples; render the em-dash, no bands/title.
             _segments = new();
+            _dots = new();
             _bands = new();
             _title = null;
             return;
@@ -120,7 +135,7 @@
             hi = mid + MinSpan / 2d;
         }
 
-        _segments = BuildSegments(Points, lo, hi);
+        (_segments, _dots) = BuildSegments(Points, lo, hi);
         _bands = BuildTierBands(lo, hi);
 
         // #1 — tooltip: latest reading + tier word (colour-blind-safe) + the window's range.
@@ -175,26 +190,38 @@
         return VbHeight * (1d - norm);
     }
 
-    private static List<string> BuildSegments(IReadOnlyList<RssiSparklinePoint> points, double lo, double hi)
+    private static (List<string> Segments, List<(string Cx, string Cy)> Dots) BuildSegments(
+        IReadOnlyList<RssiSparklinePoint> points, double lo, double hi)
     {
         var segments = new List<string>();
-        if (points.Count == 0) return segments;
+        var dots = new List<(string Cx, string Cy)>();
+        if (points.Count == 0) return (segments, dots);
 
         // x maps by bucket INDEX across the full point set (gaps still consume an x slot so the
         // horizontal time axis stays linear). Single point → divide-by-zero guard pins x=0.
         var span = points.Count > 1 ? points.Count - 1 : 1;
 
-        var current = new System.Text.StringBuilder();
-        var hasCurrent = false;
+        // The current contiguous run's vertices (formatted x,y), buffered so the run can be classified
+        // by LENGTH at Flush time: length 1 → a dot; length >=2 → one polyline.
+        var run = new List<(string X, string Y)>();
 
         void Flush()
         {
-            if (hasCurrent && current.Length > 0)
+            if (run.Count == 1)
             {
-                segments.Add(current.ToString().TrimEnd());
+                // Isolated present bucket — SVG paints a one-point polyline as nothing, so emit a dot.
+                dots.Add((run[0].X, run[0].Y));
             }
-            current.Clear();
-            hasCurrent = false;
+            else if (run.Count >= 2)
+            {
+                var sb = new System.Text.StringBuilder();
+                foreach (var (x, y) in run)
+                {
+                    sb.Append(x).Append(',').Append(y).Append(' ');
+                }
+                segments.Add(sb.ToString().TrimEnd());
+            }
+            run.Clear();
         }
 
         for (var i = 0; i < points.Count; i++)
@@ -209,12 +236,11 @@
             var x = (double)i / span * VbWidth;
             var y = YOf(rssi.Value, lo, hi);
 
-            current.Append(Fmt(x)).Append(',').Append(Fmt(y)).Append(' ');
-            hasCurrent = true;
+            run.Add((Fmt(x), Fmt(y)));
         }
         Flush();
 
-        return segments;
+        return (segments, dots);
     }
 
     // Invariant-culture, trimmed numeric formatting so the points string is stable + locale-safe.
