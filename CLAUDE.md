@@ -94,6 +94,6 @@ Do not make direct repo edits outside a GSD workflow unless the user explicitly 
 
 ## Branching & Git workflow
 
-- **Integration branch is `master`** (this repo has no `main`). Defined milestones merge back to `master` with `--no-ff` plus an annotated `vX.Y` tag at close — see `milestone/v0.10` and `milestone/v0.11` for the established pattern.
-- **Defined-milestone work goes on a dedicated `milestone/vX.Y` branch** cut from `master`. Create it at milestone start (`git switch -c milestone/vX.Y`) and keep all of that milestone's commits — features, fixes, milestone quick tasks, planning/docs — on it until the milestone closes and merges to `master`.
-- **Small / ad-hoc / out-of-milestone work MAY be committed directly to `master`.** These branch rules apply ONLY to defined milestones — not to one-off fixes, doc tweaks, or quick tasks that aren't part of a milestone. (No hard stop on `master`; use judgment about whether the work belongs to a milestone.)
+- **Integration branch is `main`.** Defined milestones merge back to `main` with `--no-ff` plus an annotated `vX.Y` tag at close — see `milestone/v0.10` and `milestone/v0.11` for the established pattern.
+- **Defined-milestone work goes on a dedicated `milestone/vX.Y` branch** cut from `main`. Create it at milestone start (`git switch -c milestone/vX.Y`) and keep all of that milestone's commits — features, fixes, milestone quick tasks, planning/docs — on it until the milestone closes and merges to `main`.
+- **Small / ad-hoc / out-of-milestone work MAY be committed directly to `main`.** These branch rules apply ONLY to defined milestones — not to one-off fixes, doc tweaks, or quick tasks that aren't part of a milestone. (No hard stop on `main`; use judgment about whether the work belongs to a milestone.)
