@@ -56,9 +56,19 @@ public sealed class CspScriptHashTests
     {
         var razor = File.ReadAllText(LocateAppRazor());
 
+        // Plan 21-04 fix (Rule 1 bug the Playwright CSP gate surfaced): strip Razor `@* *@`
+        // comments BEFORE matching. App.razor's header comment contains the literal word
+        // "<script>" ("…locks the <link> order … and <script> order (AdminLTE first, then
+        // blazor.web.js)"), and that comment has no closing "</script>". A naive
+        // `<script>(.*?)</script>` over the raw razor therefore opens at the COMMENT's
+        // "<script>" and closes at the real block's "</script>", hashing ~1781 bytes of
+        // comment-tail + boot script instead of the ~1078-byte boot script the browser hashes.
+        // Stripping comments first makes this extraction match the rendered text node exactly.
+        var razorNoComments = Regex.Replace(razor, @"@\*.*?\*@", string.Empty, RegexOptions.Singleline);
+
         // Extract the single inline <script>…</script> (no src=) block — the anti-FOUC boot
         // script (App.razor lines ~21-43). Singleline so '.' spans the multi-line body.
-        var m = Regex.Match(razor, @"<script>(?<body>.*?)</script>", RegexOptions.Singleline);
+        var m = Regex.Match(razorNoComments, @"<script>(?<body>.*?)</script>", RegexOptions.Singleline);
         Assert.True(m.Success, "App.razor inline <script> block not found.");
 
         // Normalize CRLF/CR → LF so the hash is identical regardless of git checkout state

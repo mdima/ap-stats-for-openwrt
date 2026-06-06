@@ -66,8 +66,17 @@ public sealed class SecurityHeadersMiddleware : IMiddleware
     // ws:/wss: wildcards — Csp__ConnectSrc appends proxy origins at startup). The hash below is
     // LF-normalized and PINNED by CspScriptHashTests — if the App.razor boot script changes,
     // that test fails and prints the fresh hash to paste here.
+    //
+    // Plan 21-04 correction (Rule 1 bug): the original pin sha256-T5YSl+2a… never matched the
+    // bytes the browser actually hashes. CspScriptHashTests extracted the script body with
+    // `<script>(.*?)</script>` over the RAW razor, which greedily swallowed the literal
+    // "<script> order (AdminLTE first…)" word inside the App.razor `@* *@` header comment —
+    // hashing 1781 bytes of comment-tail + script instead of the real 1078-byte boot script.
+    // The Playwright CSP browser gate (CspBrowserSmokeTests) caught the divergence: the browser
+    // computes sha256-N+XgxVzS… over the rendered text node. Both the test (now strips razor
+    // comments first) and this const are corrected to the real rendered hash.
     internal const string ContentSecurityPolicyValue =
-        "default-src 'self'; script-src 'self' 'sha256-T5YSl+2aUjhEmzNd2Iq7VZTu7E+XPoHJndyYSmqCng8='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+        "default-src 'self'; script-src 'self' 'sha256-N+XgxVzS7xHbt2VJ63Smp/xmf8x7iq10qnQZ1+ljDiY='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 
     // M-HRD-04: the assembled CSP (const + any Csp__ConnectSrc origins) injected at startup.
     // Falls back to the const when the middleware is resolved without options registered (e.g.
