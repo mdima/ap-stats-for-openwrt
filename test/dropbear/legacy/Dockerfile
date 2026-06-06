@@ -16,8 +16,15 @@ FROM alpine:3.10@sha256:451eee8bedcb2f029756dc3e9d73bab0e7943c1ac55cff3a4861c52a
 #   apk update so the 3.10 (EOL) index is fetched before install; install dropbear +
 #   dropbear-ssh; create the throwaway `apstats` test user (T-22-07 — test-only creds);
 #   set the password to `apstats`; generate the RSA host key Dropbear serves.
+# WR-04 review fix: pin the apk packages to the exact =version-release the
+# negotiation asserts expect (DropbearCompatTests hard-asserts 2019.78). The base
+# image is digest-pinned, but Alpine could still serve a patched point-release for
+# the same digest and shift the advertised algorithm set — pinning the package is
+# what actually enforces the determinism contract. If alpine:3.10 (EOL) ever stops
+# serving -r1, that build failure is the signal to re-pin the test asserts, which
+# beats silent drift.
 RUN apk update \
- && apk add --no-cache dropbear dropbear-ssh \
+ && apk add --no-cache 'dropbear=2019.78-r1' 'dropbear-ssh=2019.78-r1' \
  && adduser -D -s /bin/sh apstats \
  && echo 'apstats:apstats' | chpasswd \
  && mkdir -p /etc/dropbear \

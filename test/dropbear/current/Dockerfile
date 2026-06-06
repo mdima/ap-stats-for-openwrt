@@ -13,7 +13,11 @@ FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d650
 # Single combined RUN (root Dockerfile single-RUN-no-cache-leak hygiene, Dockerfile:21-23):
 #   install dropbear + dropbear-ssh; create the throwaway `apstats` test user;
 #   set the password; generate the RSA host key Dropbear serves.
-RUN apk add --no-cache dropbear dropbear-ssh \
+# WR-04 review fix: pin the apk packages to the exact =version-release the
+# negotiation asserts expect (DropbearCompatTests hard-asserts 2024.86). Enforces
+# the determinism contract at the layer that produces the binary, not just the base
+# image digest (Alpine can serve a patched point-release for the same digest).
+RUN apk add --no-cache 'dropbear=2024.86-r0' 'dropbear-ssh=2024.86-r0' \
  && adduser -D -s /bin/sh apstats \
  && echo 'apstats:apstats' | chpasswd \
  && mkdir -p /etc/dropbear \
