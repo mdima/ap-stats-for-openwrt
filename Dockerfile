@@ -33,8 +33,15 @@ WORKDIR /app
 EXPOSE 8080
 
 # ── BUILD STAGE ───────────────────────────────────────────────────────────
-FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION} AS build
+# Pin the build stage to the build host's platform so the .NET SDK runs NATIVELY
+# instead of being QEMU-emulated per target arch (M-REL-03, RESEARCH Pattern 1 — documented
+# 80s→17s improvement). `-a $TARGETARCH` then cross-compiles the publish output for
+# each target RID; only the small `base`/runtime stage is pulled per-arch.
+# Under a plain `docker build` (DockerSmokeFixture path) $TARGETARCH is EMPTY and
+# `dotnet ... -a` falls back to the host RID — intentional (RESEARCH Pitfall 4).
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION} AS build
 ARG BUILD_CONFIGURATION=Release
+ARG TARGETARCH
 WORKDIR /src
 
 # csproj-only restore for cache-friendly layer ordering. Only the production csproj is
@@ -45,12 +52,13 @@ WORKDIR /src
 COPY ApStatsForOpenWrt.sln Directory.Build.props global.json ./
 COPY ApStatsForOpenWrt/ApStatsForOpenWrt.csproj ApStatsForOpenWrt/
 
-RUN dotnet restore ApStatsForOpenWrt/ApStatsForOpenWrt.csproj
+RUN dotnet restore -a $TARGETARCH ApStatsForOpenWrt/ApStatsForOpenWrt.csproj
 
 COPY . .
 
 RUN dotnet publish ApStatsForOpenWrt/ApStatsForOpenWrt.csproj \
     -c ${BUILD_CONFIGURATION} \
+    -a $TARGETARCH \
     -o /app/publish \
     --no-restore \
     /p:UseAppHost=false
