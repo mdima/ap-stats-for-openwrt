@@ -1,0 +1,57 @@
+# Phase 22 / Plan 22-01 — M-FLD-01 / D-07. Dropbear-in-Docker SSH-negotiation arm.
+#
+# Mirrors ci.yml's smoke-tests job (ubuntu-latest, trait-filtered, coverage-exempt):
+# the Category=DropbearCompat trait runs the production SSH.NET path against two
+# digest-pinned Dropbear servers spun by Testcontainers and asserts the negotiated
+# KEX/host-key/cipher/MAC per version + one round-trip. It does NOT route through
+# the Blazor liveness endpoint (D-07 / CLAUDE.md) — it exercises the SSH layer directly.
+#
+# Ships INERT in Phase 22 (no remote until the Phase 23 cutover — D-03). The
+# Category=DropbearCompat trait it filters on is created in plan 22-03; referencing
+# a not-yet-existing trait in inert config is expected.
+name: dropbear-compat
+
+on:
+  push:
+    # T7 path filter: the SSH negotiation surface (SshAlgorithmFallbackPolicy.cs
+    # lives under Services/Polling/Ssh/), the Dropbear test surface, and this
+    # workflow file itself.
+    paths:
+      - 'ApStatsForOpenWrt/Services/Polling/Ssh/**'
+      - 'ApStatsForOpenWrt.Tests/Dropbear/**'
+      - 'test/dropbear/**'
+      - '.github/workflows/dropbear-compat.yml'
+  pull_request:
+    paths:
+      - 'ApStatsForOpenWrt/Services/Polling/Ssh/**'
+      - 'ApStatsForOpenWrt.Tests/Dropbear/**'
+      - 'test/dropbear/**'
+      - '.github/workflows/dropbear-compat.yml'
+  schedule:
+    - cron: '0 3 * * *'   # nightly negotiation regression (T7)
+
+jobs:
+  # runs-on: ubuntu-latest — only the Linux runners ship a Docker daemon in the
+  # GitHub-hosted pool (Testcontainers needs it), same rationale as ci.yml smoke-tests.
+  dropbear-compat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build (Release)
+        run: dotnet build -c Release --no-restore
+
+      # Coverage-exempt (the coverage flag is omitted), same as smoke. No Playwright
+      # step (that is CSP-smoke-only). The trait runs the SSH negotiation arm directly
+      # via Testcontainers — never through the Blazor liveness endpoint.
+      - name: Dropbear compat tests (requires Docker daemon)
+        run: |
+          dotnet test --no-build -c Release \
+            -- --filter-trait "Category=DropbearCompat"
