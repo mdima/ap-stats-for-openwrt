@@ -59,6 +59,19 @@ public sealed class DashboardTests
         public Task DeleteAbsentAsync(int wiFiNodeId, IReadOnlyCollection<string> presentMacs, CancellationToken ct = default) => Task.CompletedTask;
         public Task DeleteAbsentAsync(ApStatsForOpenWrt.Data.DatabaseContext db, int wiFiNodeId, IReadOnlyCollection<string> presentMacs, CancellationToken ct = default) => Task.CompletedTask;
         public Task<bool> AnyEnabledAsync(CancellationToken ct = default) => Task.FromResult(AnyEnabledOverride);
+
+        // M-HRD-10: batched dashboard read. Derive from the same ByNode map the per-node
+        // GetByNodeAsync stub serves so both paths render identical rows; nodes with zero
+        // networks contribute no key (matches the production GroupBy semantics).
+        public int GetAllGroupedByNodeCallCount { get; private set; }
+        public Task<IReadOnlyDictionary<int, IReadOnlyList<WiFiNetwork>>> GetAllGroupedByNodeAsync(CancellationToken ct = default)
+        {
+            GetAllGroupedByNodeCallCount++;
+            var dict = ByNode
+                .Where(kvp => kvp.Value.Count > 0)
+                .ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<WiFiNetwork>)kvp.Value);
+            return Task.FromResult<IReadOnlyDictionary<int, IReadOnlyList<WiFiNetwork>>>(dict);
+        }
     }
 
     private sealed class StubStationRepo(IEnumerable<WLANStation> seed) : IStationRepo
@@ -1031,6 +1044,60 @@ public sealed class DashboardTests
             Assert.Empty(cut.FindAll("a[data-testid=\"sparkline-link\"]"));
             Assert.Empty(cut.FindAll("rect.rssi-sparkline-tier"));
             Assert.DoesNotContain("Activity — last 12 h", cut.Markup);
+        }
+    }
+
+    // ── M-HRD-10 — batched node→networks read (BuildRowsAsync uses GetAllGroupedByNodeAsync) ──
+
+    [Fact]
+    public void Dashboard_BuildRows_UsesBatchedGroupedRead_RowsIdenticalToPerNodeLoop()
+    {
+        // M-HRD-10 render-neutral refactor guard. Multi-node, multi-WLAN fixed seed; the
+        // rendered rows (Name, MAC, SSID, AP-hostname cells) MUST be byte-identical to the
+        // pre-change per-node GetByNodeAsync output. The StubNetworkRepo serves the batched
+        // read from the SAME ByNode map, so any divergence in BuildRowsAsync's consumption
+        // (wrong key, dropped node, swapped tuple field) surfaces as a cell mismatch here.
+        var nodeA = new WiFiNode { Id = 1, Hostname = "ap-A", Username = "root", Password = "x", Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var nodeB = new WiFiNode { Id = 2, Hostname = "ap-B", Username = "root", Password = "x", Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var netA1 = new WiFiNetwork { Id = 10, WiFiNodeId = 1, MacAddress = "00:11:22:33:44:01", SSID = "guest", Enabled = true };
+        var netA2 = new WiFiNetwork { Id = 11, WiFiNodeId = 1, MacAddress = "00:11:22:33:44:02", SSID = "main",  Enabled = true };
+        var netB1 = new WiFiNetwork { Id = 20, WiFiNodeId = 2, MacAddress = "00:11:22:33:55:01", SSID = "iot",   Enabled = true };
+        var sA1 = new WLANStation { Id = 100, MacAddress = "AA:00:00:00:00:01", WiFiNetworkId = 10, Name = "alice", Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var sA2 = new WLANStation { Id = 101, MacAddress = "AA:00:00:00:00:02", WiFiNetworkId = 11, Name = "bob",   Status = Status.Online, LastPollDate = DateTime.UtcNow };
+        var sB1 = new WLANStation { Id = 102, MacAddress = "BB:00:00:00:00:01", WiFiNetworkId = 20, Name = "carol", Status = Status.Online, LastPollDate = DateTime.UtcNow };
+
+        var (ctx, _, nws, _, _) = Build(
+            new[] { nodeA, nodeB },
+            new[] { sA1, sA2, sB1 },
+            anyEnabled: true,
+            networkMap: new Dictionary<int, List<WiFiNetwork>>
+            {
+                [1] = new List<WiFiNetwork> { netA1, netA2 },
+                [2] = new List<WiFiNetwork> { netB1 },
+            });
+        using (ctx)
+        {
+            var cut = ctx.Render<Dashboard>();
+
+            // The batched read was consulted (the N+1 loop was replaced).
+            Assert.True(nws.GetAllGroupedByNodeCallCount >= 1,
+                "BuildRowsAsync must call GetAllGroupedByNodeAsync (the batched M-HRD-10 read).");
+
+            // Per-station row identity: each station resolves to the SSID + AP hostname of its
+            // network, exactly as the per-node loop produced. Columns: 0=Name, 1=MAC, 4=SSID, 5=AP.
+            var expected = new (string Mac, string Ssid, string Ap)[]
+            {
+                ("AA:00:00:00:00:01", "guest", "ap-A"),
+                ("AA:00:00:00:00:02", "main",  "ap-A"),
+                ("BB:00:00:00:00:01", "iot",   "ap-B"),
+            };
+            foreach (var (mac, ssid, ap) in expected)
+            {
+                var row = cut.FindAll("tbody tr").First(tr => tr.TextContent.Contains(mac));
+                var cells = row.QuerySelectorAll("td");
+                Assert.Equal(ssid, cells[4].TextContent.Trim());
+                Assert.Equal(ap,   cells[5].TextContent.Trim());
+            }
         }
     }
 

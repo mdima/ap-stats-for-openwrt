@@ -150,4 +150,16 @@ public sealed class NetworkRepo(IDbContextFactory<DatabaseContext> factory) : IN
         await using var db = await factory.CreateDbContextAsync(ct);
         return await db.WiFiNetworks.AsNoTracking().AnyAsync(n => n.Enabled, ct);
     }
+
+    // ── M-HRD-10 (v1.0 hardening): batched dashboard read ───────────────────
+    // Single AsNoTracking() pull over the whole table, grouped in-memory by WiFiNodeId —
+    // replaces the dashboard's per-node GetByNodeAsync N+1 loop. Read-only; never injects a
+    // scoped DbContext (PER-05 IDbContextFactory per-call pattern).
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<WiFiNetwork>>> GetAllGroupedByNodeAsync(CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var all = await db.WiFiNetworks.AsNoTracking().ToListAsync(ct);
+        return all.GroupBy(w => w.WiFiNodeId)
+                  .ToDictionary(g => g.Key, g => (IReadOnlyList<WiFiNetwork>)g.ToList());
+    }
 }
