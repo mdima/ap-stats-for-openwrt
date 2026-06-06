@@ -45,21 +45,14 @@ public interface INodeRepo
     Task UpdatePasswordAsync(int id, string encryptedPassword, CancellationToken ct = default);
 
     /// <summary>
-    /// D-18 SET-03 bulk path. Sets <c>HostKeyFingerprint = null</c> on every <see cref="WiFiNode"/>.
-    /// CR-02-safe: single-property <c>ExecuteUpdateAsync</c> — never touches Password.
+    /// D-18 SET-03 per-node re-trust path. Sets <c>HostKeyFingerprint = null</c> on the single
+    /// targeted <see cref="WiFiNode"/> so the next poll re-pins (TOFU) the host key. Used by the
+    /// per-node Re-trust button on /Nodes/{id}. CR-02-safe: single-property
+    /// <c>ExecuteUpdateAsync</c> — never touches Password.
     /// <para>
-    /// M-SEC-06 / v0.12 (plan 16-04): marked Obsolete. The "Clear all host keys" button was
-    /// removed from <c>Settings/Index.razor</c>; the per-node Re-trust button on
-    /// <c>Nodes/Detail.razor</c> is the sole remaining re-trust path. v0.13 will delete this
-    /// method and its deprecation-gate tests in a single mechanical sweep.
+    /// M-HRD-03 / v1.0 (plan 21-02): the obsolete all-rows bulk-reset variant was removed; this
+    /// per-node path is now the sole re-trust surface (SET-03 / M-SEC-06 follow-through).
     /// </para>
-    /// </summary>
-    [Obsolete("Removed in v0.13. Use ClearHostKeyFingerprintAsync(int nodeId) instead. The bulk Clear-all-host-keys path is no longer reachable from the UI.")]
-    Task ClearAllHostKeyFingerprintsAsync(CancellationToken ct = default);
-
-    /// <summary>
-    /// D-18 SET-03 per-node path. Single-row variant of <see cref="ClearAllHostKeyFingerprintsAsync"/>.
-    /// Used by the per-node Re-trust button on /Nodes/{id}.
     /// </summary>
     Task ClearHostKeyFingerprintAsync(int nodeId, CancellationToken ct = default);
 
