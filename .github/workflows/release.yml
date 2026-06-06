@@ -1,0 +1,78 @@
+# Phase 22 / Plan 22-01 — M-REL-03 + M-REL-04. Tag-triggered multi-arch Docker Hub
+# push + DRAFT GitHub Release with the embedded image digest.
+#
+# Ships INERT in Phase 22 (no remote exists until the Phase 23 cutover — D-03 /
+# Phase 20 trigger-redesign precedent). The image name is parameterized via the
+# repo variable vars.DOCKERHUB_IMAGE (D-05) so the throwaway-repo → real-coords
+# flip at Phase 23 is a one-line change. Auth via DOCKERHUB_USERNAME /
+# DOCKERHUB_TOKEN repo secrets (T3). Distinct from ci.yml: tags-only, no branches.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write          # required for the draft GitHub Release (M-REL-04)
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # KEEP setup-qemu even though the Dockerfile cross-compiles: buildx still
+      # needs binfmt to assemble the arm64 *runtime* base layer (RESEARCH Pitfall 5).
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # D-05 one-line flip: throwaway (mdima/apstats-pipeline-test) → real
+          # (mdima/ap-stats-for-openwrt) by changing only this repo variable.
+          images: ${{ vars.DOCKERHUB_IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=semver,pattern={{version}}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  draft-release:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true                  # T4: CI drafts, operator reviews + publishes
+          generate_release_notes: true # auto commit/PR list (hybrid bottom half)
+          body: |                      # hand-written highlights header (prepended hybrid top half)
+            ## Highlights
+            <!-- operator edits before publishing -->
+
+            ### Container image
+            ```
+            docker pull ${{ vars.DOCKERHUB_IMAGE }}:${{ github.ref_name }}
+            ```
+            Digest: `${{ needs.build-and-push.outputs.digest }}`
+
+            ### Upgrade
+            Schema migrates automatically; **back up `/data` first.**
