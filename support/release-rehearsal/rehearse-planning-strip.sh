@@ -119,11 +119,19 @@ if [[ "$PRE_TAG_COUNT" -ne "$EXPECTED_TAG_COUNT" ]]; then
 fi
 
 # ---- 2) The strip (Pitfall 3: trailing-slash subtree, invert keeps everything else) ----
+# IMPORTANT (Phase 22 rehearsal finding — REQUIRED for Phase 23):
+#   `--path .planning/` matches a path PREFIX FROM THE REPO ROOT, so it removes the
+#   top-level .planning/ only. History also contains a NESTED .planning/ under an old
+#   GSD worktree path (.claude/worktrees/<id>/.planning/...) that carries the SAME T2
+#   lab fingerprint (192.168.22.0/24). A bare `--path .planning/` would leave that nested
+#   copy in public history. We therefore ALSO pass `--path-glob '*/.planning/*'` so EVERY
+#   .planning/ subtree — root and nested — is stripped. The leak gate below (step 4)
+#   asserts this is complete; the Phase 23 real strip MUST use the same two selectors.
 echo ""
-echo "[2/5] git filter-repo --invert-paths --path .planning/  (inside the throwaway clone only) ..."
+echo "[2/5] git filter-repo --invert-paths --path .planning/ --path-glob '*/.planning/*'  (throwaway clone only) ..."
 # filter-repo rewrites the repo of the CWD; cd into the throwaway clone first (Pitfall 2).
 # Run in a subshell so the cd does not leak; the wrapper picks git-subcommand vs python -m.
-( cd "$CLONE" && run_filter_repo --invert-paths --path .planning/ )
+( cd "$CLONE" && run_filter_repo --invert-paths --path .planning/ --path-glob '*/.planning/*' )
 
 # ===================== LEAK-VERIFICATION GATE (T2 / Pitfall 3) =====================
 # Each assertion fails LOUD (exit 1) on violation.
@@ -152,10 +160,14 @@ fi
 # .planning/-pathed blob across ALL rewritten refs.
 echo ""
 echo "[4/5] Assert: T2 lab-network fingerprint (192.168.) absent from rewritten .planning/ history ..."
-FINGERPRINT_HITS="$(git -C "$CLONE" grep -nI -e '192\.168\.' $(git -C "$CLONE" rev-list --all) -- '*.planning/*' '.planning/*' 2>/dev/null | wc -l | tr -d ' ')"
+# NOTE: `git grep` exits 1 when it finds NO match. Under `set -euo pipefail` that would
+# abort the script on the (desired) clean case — so capture with a no-match-safe guard.
+ALL_REVS="$(git -C "$CLONE" rev-list --all)"
+FINGERPRINT_OUT="$(git -C "$CLONE" grep -nI -e '192\.168\.' $ALL_REVS -- '*.planning/*' '.planning/*' 2>/dev/null || true)"
+FINGERPRINT_HITS="$(printf '%s' "$FINGERPRINT_OUT" | grep -c . || true)"
 if [[ "$FINGERPRINT_HITS" -ne 0 ]]; then
   echo "  FAIL: T2 leak driver SURVIVED — $FINGERPRINT_HITS '192.168.' match(es) remain in .planning/-pathed blobs." >&2
-  git -C "$CLONE" grep -nI -e '192\.168\.' $(git -C "$CLONE" rev-list --all) -- '*.planning/*' '.planning/*' 2>/dev/null | head -10 >&2
+  printf '%s\n' "$FINGERPRINT_OUT" | head -10 >&2
   RC=1
 else
   echo "  PASS: no '192.168.' lab fingerprint remains in any .planning/-pathed blob (T2 driver verified clean)."
