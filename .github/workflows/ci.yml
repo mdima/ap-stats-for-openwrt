@@ -93,6 +93,15 @@ jobs:
       - name: Build (Release)
         run: dotnet build -c Release --no-restore
 
+      # Phase 21 / Plan 21-04 — M-HRD-04 D-05/D-06. The Microsoft.Playwright NuGet package
+      # ships only the managed driver, not the Chromium binary. CspBrowserSmokeTests (the
+      # CSP browser gate) needs Chromium provisioned in the fresh runner before the smoke
+      # run, otherwise Playwright throws "Executable doesn't exist". chromium ONLY (not all
+      # browsers) to minimize download; ubuntu-latest ships pwsh. This job stays coverage-
+      # exempt (no --coverage), same as the smoke run below.
+      - name: Install Playwright Chromium
+        run: pwsh ApStatsForOpenWrt.Tests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
       - name: Smoke tests (requires Docker daemon)
         run: |
           dotnet test --no-build -c Release \
