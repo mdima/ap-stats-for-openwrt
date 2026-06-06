@@ -69,6 +69,15 @@
          boxes and from the 80/80 coverage gate; CI's smoke-tests job runs them on
          ubuntu-latest with `filter-trait Category=Smoke`. -->
     <PackageReference Include="Testcontainers" Version="4.12.0" />
+    <!-- Phase 21 Plan 21-04 / M-HRD-04 D-05 — Microsoft.Playwright drives headless Chromium for
+         the CSP browser smoke gate (CspBrowserSmokeTests) ONLY. RESEARCH-pinned 1.60.0 (published
+         2026-05-21, netstandard2.0, computed-compatible up through net10.0); package legitimacy was
+         human-verified on nuget.org (Microsoft first-party, no advisory) via the blocking
+         checkpoint:human-verify gate before install. The NuGet package ships only the managed
+         driver — the Chromium binary is provisioned separately by the `playwright.ps1 install`
+         chromium step (with deps) in the CI smoke-tests job + the local user_setup step; the
+         browser cache lands under bin/ (gitignored), never committed. -->
+    <PackageReference Include="Microsoft.Playwright" Version="1.60.0" />
   </ItemGroup>
 
   <ItemGroup>
