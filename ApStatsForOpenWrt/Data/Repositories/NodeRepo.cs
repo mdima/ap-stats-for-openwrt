@@ -75,17 +75,9 @@ public sealed class NodeRepo(IDbContextFactory<DatabaseContext> factory) : INode
             .ExecuteUpdateAsync(s => s.SetProperty(n => n.Password, encryptedPassword), ct);
     }
 
-    // ── D-18 (Phase 3): SET-03 known-hosts cache clear ──────────────────────
-    // M-SEC-06 / v0.12 (plan 16-04): Obsolete. UI surface removed from Settings/Index.razor;
-    // per-node ClearHostKeyFingerprintAsync is the sole re-trust path. v0.13 removes this method.
-    [Obsolete("Removed in v0.13. Use ClearHostKeyFingerprintAsync(int nodeId) instead. The bulk Clear-all-host-keys path is no longer reachable from the UI.")]
-    public async Task ClearAllHostKeyFingerprintsAsync(CancellationToken ct = default)
-    {
-        await using var db = await factory.CreateDbContextAsync(ct);
-        await db.WiFiNodes
-            .ExecuteUpdateAsync(s => s.SetProperty(n => n.HostKeyFingerprint, (string?)null), ct);
-    }
-
+    // ── D-18 (Phase 3): SET-03 per-node known-hosts cache clear ─────────────
+    // M-HRD-03 / v1.0 (plan 21-02): the obsolete all-rows bulk-reset variant was removed;
+    // this per-node path is now the sole re-trust surface. CR-02-safe single-property update.
     public async Task ClearHostKeyFingerprintAsync(int nodeId, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
