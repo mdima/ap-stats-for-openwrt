@@ -18,16 +18,20 @@ namespace ApStatsForOpenWrt.Tests.Security;
 /// The CSP <c>connect-src</c> directive tightens from <c>'self' ws: wss:</c> to <c>'self'</c>.
 /// Proxied deployments append their WebSocket origin via the optional, comma-separated
 /// <c>Csp__ConnectSrc</c> env var. Each origin is validated at startup against
-/// <see cref="Uri.TryCreate(string, UriKind, out Uri)"/> PLUS a scheme allow-list
-/// (<c>ws</c>/<c>wss</c>/<c>http</c>/<c>https</c>); a malformed or disallowed-scheme value
-/// throws <see cref="InvalidOperationException"/> at startup — mirroring the
-/// <c>ForwardedHeaders__*</c> throw-on-invalid pattern (D-07: a misconfigured security knob
-/// never silently degrades).
+/// <see cref="Uri.TryCreate(string, UriKind, out Uri)"/> PLUS a scheme allow-list of
+/// <c>ws</c>/<c>wss</c> ONLY (WR-02 / 21-REVIEW: <c>http</c>/<c>https</c> are rejected — the knob
+/// exists solely to enable the SignalR <c>ws</c> upgrade, and an http(s) entry would only broaden
+/// the fetch/XHR allow-list), AND a bare-origin check (no path/query/fragment). A malformed,
+/// disallowed-scheme, or non-origin value throws <see cref="InvalidOperationException"/> at
+/// startup — mirroring the <c>ForwardedHeaders__*</c> throw-on-invalid pattern (D-07: a
+/// misconfigured security knob never silently degrades).
 /// </para>
 ///
 /// <list type="number">
 ///   <item>Malformed origin (not a URI) → host build throws naming the bad value.</item>
 ///   <item>Disallowed scheme (<c>ftp://</c>) → host build throws naming the bad value.</item>
+///   <item>Disallowed scheme (<c>https://</c>) → host build throws (WR-02: ws/wss only).</item>
+///   <item>Origin carrying a path (<c>wss://x/y</c>) → host build throws (WR-02: bare origins only).</item>
 ///   <item>Valid <c>wss://</c> origin → appended to <c>connect-src 'self'</c> in the emitted CSP.</item>
 ///   <item>No env var → CSP <c>connect-src 'self'</c> with NO appended origins, NO <c>ws:</c>/<c>wss:</c> literals.</item>
 /// </list>
@@ -90,6 +94,52 @@ public sealed class CspConnectSrcConfigTests
 
             AssertFailFastMessage(new[] { factory.StartupException, thrown },
                 "Csp__ConnectSrc contains invalid origin: 'ftp://x.example.com'");
+            await Task.CompletedTask;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(ConnectSrcVar, prior);
+        }
+    }
+
+    // ── Case 2b (WR-02): http/https scheme → fail-fast (ws/wss only) ────────────
+
+    [Fact]
+    public async Task HttpsScheme_FailsFastAtStartup()
+    {
+        var prior = Environment.GetEnvironmentVariable(ConnectSrcVar);
+        try
+        {
+            Environment.SetEnvironmentVariable(ConnectSrcVar, "https://proxy.example.com");
+
+            await using var factory = new CspFactory();
+            var thrown = Record.Exception(() => _ = factory.Services);
+
+            AssertFailFastMessage(new[] { factory.StartupException, thrown },
+                "Csp__ConnectSrc contains invalid origin: 'https://proxy.example.com'");
+            await Task.CompletedTask;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(ConnectSrcVar, prior);
+        }
+    }
+
+    // ── Case 2c (WR-02): origin carrying a path → fail-fast (bare origins only) ──
+
+    [Fact]
+    public async Task OriginWithPath_FailsFastAtStartup()
+    {
+        var prior = Environment.GetEnvironmentVariable(ConnectSrcVar);
+        try
+        {
+            Environment.SetEnvironmentVariable(ConnectSrcVar, "wss://proxy.example.com/hub");
+
+            await using var factory = new CspFactory();
+            var thrown = Record.Exception(() => _ = factory.Services);
+
+            AssertFailFastMessage(new[] { factory.StartupException, thrown },
+                "Csp__ConnectSrc contains invalid origin: 'wss://proxy.example.com/hub'");
             await Task.CompletedTask;
         }
         finally

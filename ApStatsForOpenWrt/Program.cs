@@ -93,9 +93,15 @@ var forwardedNetworkCount = validatedNetworks.Count;
 // WebSocket origin(s) via this optional comma-separated env var. Validated EAGERLY here (above
 // the host try/catch, mirroring the ForwardedHeaders block) so a malformed or disallowed-scheme
 // origin throws the offending entry to the operator BEFORE the host is built — a misconfigured
-// security knob must NEVER silently degrade in SetHeaders (D-07: throw at startup). Allowed
-// schemes are ws/wss/http/https; the validated origins are APPENDED to "connect-src 'self'" to
-// assemble the final CSP injected into the middleware (Open Question 1: build-once-inject).
+// security knob must NEVER silently degrade in SetHeaders (D-07: throw at startup). WR-02
+// (21-REVIEW): the knob exists ONLY to append a proxy's WebSocket origin so the Blazor
+// InteractiveServer SignalR circuit negotiates — so the allow-list is restricted to ws/wss
+// ORIGINS (no http/https: a connect-src http(s):// entry cannot enable the ws upgrade the knob
+// exists for but DOES broaden the fetch/XHR allow-list — ineffective and a quiet attack-surface
+// expansion). Entries carrying a path/query/fragment are rejected too: a CSP source expression
+// expects a bare host/scheme origin, and a stray path would be emitted verbatim into the header.
+// The validated origins are APPENDED to "connect-src 'self'" to assemble the final CSP injected
+// into the middleware (Open Question 1: build-once-inject).
 var cspConnectSrcRaw = Environment.GetEnvironmentVariable("Csp__ConnectSrc");
 var validatedConnectSrc = new List<string>();
 foreach (var entry in (cspConnectSrcRaw ?? "")
@@ -103,8 +109,11 @@ foreach (var entry in (cspConnectSrcRaw ?? "")
     .Select(s => s.Trim())
     .Where(s => s.Length > 0))
 {
-    if (!Uri.TryCreate(entry, UriKind.Absolute, out var origin) ||
-        origin.Scheme is not ("ws" or "wss" or "http" or "https"))
+    if (!Uri.TryCreate(entry, UriKind.Absolute, out var origin)
+        || origin.Scheme is not ("ws" or "wss")
+        || origin.AbsolutePath is not ("" or "/")
+        || !string.IsNullOrEmpty(origin.Query)
+        || !string.IsNullOrEmpty(origin.Fragment))
     {
         throw new InvalidOperationException(
             $"Csp__ConnectSrc contains invalid origin: '{entry}'");
