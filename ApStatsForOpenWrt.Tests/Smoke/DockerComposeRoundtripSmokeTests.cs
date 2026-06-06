@@ -65,7 +65,9 @@ public sealed class DockerComposeRoundtripSmokeTests(DockerSmokeFixture fixture)
         }
         finally
         {
+#pragma warning disable xUnit1051 // deliberate None — teardown must run even if the test's token is cancelled
             await container1.StopAsync(CancellationToken.None);
+#pragma warning restore xUnit1051
             await container1.DisposeAsync();
         }
 
@@ -120,7 +122,9 @@ public sealed class DockerComposeRoundtripSmokeTests(DockerSmokeFixture fixture)
         }
         finally
         {
+#pragma warning disable xUnit1051 // deliberate None — teardown must run even if the test's token is cancelled
             await container2.StopAsync(CancellationToken.None);
+#pragma warning restore xUnit1051
             await container2.DisposeAsync();
         }
     }

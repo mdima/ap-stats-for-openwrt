@@ -207,7 +207,7 @@ public sealed class UpdateBadgeTests
             var cut = ctx.Render<UpdateBadge>();
             Assert.Single(cut.FindAll("a"));
 
-            await settings.SetUpdateCheckEnabledAsync(false);
+            await settings.SetUpdateCheckEnabledAsync(false, Xunit.TestContext.Current.CancellationToken);
 
             cut.WaitForState(() => cut.FindAll("a").Count == 0, TimeSpan.FromSeconds(2));
             Assert.Empty(cut.FindAll("a"));
