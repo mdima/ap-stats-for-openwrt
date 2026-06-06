@@ -31,8 +31,15 @@ public sealed class MigrationsHostedService(
         // M-HRD-02 / T10: resolve the DB path the SAME way the connection string does
         // (Program.cs: Data Source={DATA_ROOT}/AP-Stats-for-OpenWrt.db). Hardcoding "/data"
         // here would break local Windows dev, which sets DATA_ROOT to redirect storage.
-        var dataRoot = Environment.GetEnvironmentVariable("DATA_ROOT") ?? "/data";
-        var dbPath = $"{dataRoot}/AP-Stats-for-OpenWrt.db";
+        // WR-04 (21-REVIEW): build the path with Path.Combine (matching MigrationsBackupTests'
+        // harness) instead of "{dataRoot}/..." string interpolation. The interpolation only
+        // happened to work on the documented Windows dev path (DATA_ROOT=C:\dev\data) because
+        // Windows tolerates a forward slash; a trailing separator in DATA_ROOT ("/data/") would
+        // also yield a "//AP-Stats..." double-slash .bak path. Trim a trailing separator once so
+        // Path.Combine produces a single clean separator on every platform.
+        var dataRoot = (Environment.GetEnvironmentVariable("DATA_ROOT") ?? "/data")
+            .TrimEnd('/', '\\');
+        var dbPath = Path.Combine(dataRoot, "AP-Stats-for-OpenWrt.db");
 
         // M-HRD-02 fresh-volume guard (RESEARCH Pitfall 2): snapshot existence BEFORE
         // CreateDbContextAsync — GetPendingMigrationsAsync opens a connection that materializes
