@@ -12,7 +12,18 @@
 name: dropbear-compat
 
 on:
+  # WR-03 review fix: the `pull_request` trigger was REMOVED. This job builds and
+  # runs the PR-author-controlled test/dropbear/* Dockerfiles + sentinel.sh on the
+  # runner via Testcontainers. On a public repo a fork PR can edit those exact paths,
+  # turning the runner into an untrusted-code execution surface (cryptominer /
+  # runner-abuse) with no maintainer gate. (There is no secret-exfil path — this was
+  # `pull_request`, not `pull_request_target` — but the build/run surface alone is the
+  # risk.) T7's "exercise the SSH negotiation arm when SSH/Dropbear paths change"
+  # intent is preserved for TRUSTED pushes only: push to `main` (path-filtered) +
+  # nightly cron + manual dispatch. PR-time coverage, if ever wanted, must go behind
+  # an `environment:` with required reviewers — see the review note for WR-03.
   push:
+    branches: [main]
     # T7 path filter: the SSH negotiation surface (SshAlgorithmFallbackPolicy.cs
     # lives under Services/Polling/Ssh/), the Dropbear test surface, and this
     # workflow file itself.
@@ -21,14 +32,9 @@ on:
       - 'ApStatsForOpenWrt.Tests/Dropbear/**'
       - 'test/dropbear/**'
       - '.github/workflows/dropbear-compat.yml'
-  pull_request:
-    paths:
-      - 'ApStatsForOpenWrt/Services/Polling/Ssh/**'
-      - 'ApStatsForOpenWrt.Tests/Dropbear/**'
-      - 'test/dropbear/**'
-      - '.github/workflows/dropbear-compat.yml'
   schedule:
     - cron: '0 3 * * *'   # nightly negotiation regression (T7)
+  workflow_dispatch:       # manual maintainer-triggered run (e.g. to vet a PR after review)
 
 jobs:
   # runs-on: ubuntu-latest — only the Linux runners ship a Docker daemon in the
