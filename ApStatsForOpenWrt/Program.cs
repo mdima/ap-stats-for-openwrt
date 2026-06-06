@@ -88,6 +88,41 @@ if (forwardedHeadersEnabled)
 var forwardedProxyCount = validatedProxies.Count;
 var forwardedNetworkCount = validatedNetworks.Count;
 
+// M-HRD-04 / D-07 (plan 21-03) — Csp__ConnectSrc fail-loud knob. The CSP connect-src directive
+// is tightened to 'self' (SecurityHeadersMiddleware const); proxied deployments append their
+// WebSocket origin(s) via this optional comma-separated env var. Validated EAGERLY here (above
+// the host try/catch, mirroring the ForwardedHeaders block) so a malformed or disallowed-scheme
+// origin throws the offending entry to the operator BEFORE the host is built — a misconfigured
+// security knob must NEVER silently degrade in SetHeaders (D-07: throw at startup). Allowed
+// schemes are ws/wss/http/https; the validated origins are APPENDED to "connect-src 'self'" to
+// assemble the final CSP injected into the middleware (Open Question 1: build-once-inject).
+var cspConnectSrcRaw = Environment.GetEnvironmentVariable("Csp__ConnectSrc");
+var validatedConnectSrc = new List<string>();
+foreach (var entry in (cspConnectSrcRaw ?? "")
+    .Split(',')
+    .Select(s => s.Trim())
+    .Where(s => s.Length > 0))
+{
+    if (!Uri.TryCreate(entry, UriKind.Absolute, out var origin) ||
+        origin.Scheme is not ("ws" or "wss" or "http" or "https"))
+    {
+        throw new InvalidOperationException(
+            $"Csp__ConnectSrc contains invalid origin: '{entry}'");
+    }
+    validatedConnectSrc.Add(entry);
+}
+
+// Assemble the final CSP ONCE: the const has "connect-src 'self';" — append the validated
+// origins (space-separated) just before the trailing ';' of that directive when any are set.
+var assembledCsp = ApStatsForOpenWrt.Services.Security.SecurityHeadersMiddleware.ContentSecurityPolicyValue;
+if (validatedConnectSrc.Count > 0)
+{
+    const string baseConnect = "connect-src 'self'";
+    assembledCsp = assembledCsp.Replace(
+        baseConnect + ";",
+        baseConnect + " " + string.Join(' ', validatedConnectSrc) + ";");
+}
+
 try
 {
     Log.Information("ApStatsForOpenWrt starting");
@@ -415,6 +450,11 @@ try
     // Registered as transient per IMiddleware pattern. Pipeline registration below
     // (immediately before app.UseStaticFiles()).
     builder.Services.AddTransient<ApStatsForOpenWrt.Services.Security.SecurityHeadersMiddleware>();
+    // M-HRD-04 (plan 21-03) — inject the startup-assembled CSP (const + validated
+    // Csp__ConnectSrc origins) so SetHeaders stays a pure REPLACE. assembledCsp was built and
+    // fail-loud-validated above (before the host try/catch).
+    builder.Services.Configure<ApStatsForOpenWrt.Services.Security.SecurityHeadersOptions>(
+        o => o.ContentSecurityPolicy = assembledCsp);
 
     builder.Services.AddAuthentication(Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme)
         .AddCookie(o =>
@@ -422,7 +462,15 @@ try
             o.Cookie.Name = "ApStatsForOpenWrt.Auth";   // D-05 verbatim
             o.Cookie.HttpOnly = true;
             o.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
-            o.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest;
+            // M-HRD-05 / T9 (plan 21-03) — proxy-conditional SecurePolicy, ZERO new knobs.
+            // Behind a TLS-terminating reverse proxy (forwardedHeadersEnabled, computed at
+            // host-build time from ForwardedHeaders__KnownProxies/KnownNetworks) the auth cookie
+            // may traverse a cleartext internal leg, so REQUIRE Secure (T-21-05 Information
+            // Disclosure mitigation). On the plain-HTTP LAN default (no proxy env) keep
+            // SameAsRequest so unencrypted LAN login still works (HTTP-on-LAN is first-class).
+            o.Cookie.SecurePolicy = forwardedHeadersEnabled
+                ? Microsoft.AspNetCore.Http.CookieSecurePolicy.Always
+                : Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest;
             o.LoginPath = "/Login";
             o.LogoutPath = "/Logout";
             o.ExpireTimeSpan = TimeSpan.FromDays(7);          // M-SEC-04 — UNCHANGED from v0.11

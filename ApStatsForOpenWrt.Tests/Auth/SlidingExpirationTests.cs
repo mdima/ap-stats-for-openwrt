@@ -76,6 +76,12 @@ public sealed class SlidingExpirationTests
         {
             AllowAutoRedirect = false,
             HandleCookies = true,
+            // M-HRD-05 (plan 21-03): FakeClockFactory sets ForwardedHeaders__KnownNetworks, so
+            // forwardedHeadersEnabled=true flips the auth cookie SecurePolicy to Always. A Secure
+            // cookie round-trips only over https, so drive the TestServer over https://localhost
+            // — otherwise the cookie is dropped and the sliding-expiration GETs redirect to
+            // /Login. Behavior-neutral for the 7-day sliding-window contract under test.
+            BaseAddress = new Uri("https://localhost"),
         });
         client.DefaultRequestHeaders.Add("X-Forwarded-For", "10.99.6.1");
 

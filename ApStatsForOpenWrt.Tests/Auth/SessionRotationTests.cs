@@ -134,6 +134,12 @@ public sealed class SessionRotationTests(SessionRotationTests.ForwardedHeadersTr
         {
             AllowAutoRedirect = false,
             HandleCookies = true,
+            // M-HRD-05 (plan 21-03): this factory sets ForwardedHeaders__KnownNetworks, so the
+            // app now runs with forwardedHeadersEnabled=true and the auth cookie SecurePolicy is
+            // Always. A Secure cookie is only sent back over https, so drive the TestServer over
+            // https://localhost — otherwise the cookie is silently dropped and every authed GET
+            // redirects to /Login. The change is behavior-neutral for the rotation contract.
+            BaseAddress = new Uri("https://localhost"),
         });
         client.DefaultRequestHeaders.Add("X-Forwarded-For", xForwardedFor);
         return client;
