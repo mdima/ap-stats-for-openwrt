@@ -160,17 +160,65 @@ fi
 # .planning/-pathed blob across ALL rewritten refs.
 echo ""
 echo "[4/5] Assert: T2 lab-network fingerprint (192.168.) absent from rewritten .planning/ history ..."
-# NOTE: `git grep` exits 1 when it finds NO match. Under `set -euo pipefail` that would
-# abort the script on the (desired) clean case — so capture with a no-match-safe guard.
-ALL_REVS="$(git -C "$CLONE" rev-list --all)"
-FINGERPRINT_OUT="$(git -C "$CLONE" grep -nI -e '192\.168\.' $ALL_REVS -- '*.planning/*' '.planning/*' 2>/dev/null || true)"
-FINGERPRINT_HITS="$(printf '%s' "$FINGERPRINT_OUT" | grep -c . || true)"
-if [[ "$FINGERPRINT_HITS" -ne 0 ]]; then
-  echo "  FAIL: T2 leak driver SURVIVED — $FINGERPRINT_HITS '192.168.' match(es) remain in .planning/-pathed blobs." >&2
-  printf '%s\n' "$FINGERPRINT_OUT" | head -10 >&2
+# WR-06 review fix — make this gate ARG_MAX-safe AND fail-loud (it guards the
+# irreversible Phase 23 history rewrite, so a false-PASS is the worst outcome):
+#   1. Batch the revs. The old code expanded an unquoted $ALL_REVS (EVERY rev in the
+#      repo) onto a single `git grep` command line — on a large history that can blow
+#      ARG_MAX ("Argument list too long"), and the old `|| true` swallowed that failure
+#      into an empty result that reads as a clean PASS while never grepping. We instead
+#      read revs into an array and grep them in fixed-size batches (bounded => never
+#      hits ARG_MAX). NOTE: `git grep --stdin` is NOT used — it is unsupported on some
+#      git builds (e.g. Git-for-Windows returns usage-error 129), which would itself
+#      trip the fail-loud branch; bounded positional-rev batches are portable.
+#   2. Use `:(glob)` pathspec magic so the path matching is explicit and correct: the
+#      top-level .planning/ subtree AND any nested .planning/ subtree (e.g. an old GSD
+#      worktree path), rather than the fnmatch glob `'*.planning/*'` which also matched
+#      unintended paths like `foo.planning/bar`.
+#   3. Distinguish git grep's exit codes per batch: 0 = match found (leak SURVIVED),
+#      1 = no match (clean), >1 = real error (grep did NOT run → ABORT, never silently
+#      pass). The worst per-batch outcome wins. Captured via a success/else split (not
+#      `|| true`) so a genuine error cannot masquerade as a clean run, and `$?` is git
+#      grep's own code under `set -euo pipefail`.
+echo "      (batched positional revs; pathspecs ':(glob).planning/**' + ':(glob)**/.planning/**')"
+FP_OUT="$SCRATCH/fingerprint.out"
+: > "$FP_OUT"
+# Read all revs into an array (newline-separated; SHAs never contain spaces).
+mapfile -t ALL_REVS_ARR < <(git -C "$CLONE" rev-list --all)
+if [[ ${#ALL_REVS_ARR[@]} -eq 0 ]]; then
+  echo "  FATAL: rev-list returned NO revs — cannot run the leak gate; refusing to report PASS." >&2
   RC=1
 else
-  echo "  PASS: no '192.168.' lab fingerprint remains in any .planning/-pathed blob (T2 driver verified clean)."
+  BATCH=200            # bounded batch size keeps each invocation well under ARG_MAX
+  grep_worst=1         # 1 = clean default; promoted to 0 (found) or >1 (error) as seen
+  i=0
+  n=${#ALL_REVS_ARR[@]}
+  while [[ $i -lt $n ]]; do
+    batch=("${ALL_REVS_ARR[@]:i:BATCH}")
+    if git -C "$CLONE" grep -nI -e '192\.168\.' "${batch[@]}" \
+         -- ':(glob).planning/**' ':(glob)**/.planning/**' >> "$FP_OUT" 2>/dev/null; then
+      st=0
+    else
+      st=$?
+    fi
+    if [[ $st -gt 1 ]]; then
+      grep_worst=$st            # real error dominates — abort below
+      break
+    elif [[ $st -eq 0 ]]; then
+      grep_worst=0              # at least one match somewhere => leak survived
+    fi
+    i=$((i + BATCH))
+  done
+  if [[ "$grep_worst" -gt 1 ]]; then
+    echo "  FATAL: leak grep ERRORED (git grep exit $grep_worst) — the gate did NOT run to completion; refusing to report PASS." >&2
+    RC=1
+  elif [[ "$grep_worst" -eq 0 ]]; then
+    FINGERPRINT_HITS="$(wc -l < "$FP_OUT" | tr -d ' ')"
+    echo "  FAIL: T2 leak driver SURVIVED — $FINGERPRINT_HITS '192.168.' match(es) remain in .planning/-pathed blobs." >&2
+    head -10 "$FP_OUT" >&2
+    RC=1
+  else
+    echo "  PASS: no '192.168.' lab fingerprint remains in any .planning/-pathed blob (T2 driver verified clean)."
+  fi
 fi
 
 # ---- 5) All 9 release tags still resolve (to new rewritten SHAs) ----
@@ -213,5 +261,5 @@ echo "RESULT: REHEARSAL PASSED — strip mechanics + leak gate proven on the thr
 echo ""
 echo "VERIFY: re-run any of these against the THROWAWAY clone (NOT the working tree); each must hold:"
 echo "  1. git log --all --oneline -- .planning/                                  # expect: 0 lines (.planning/ gone)"
-echo "  2. git grep -nI -e '192\\.168\\.' \$(git rev-list --all) -- '.planning/*'    # expect: 0 lines (T2 driver clean)"
+echo "  2. git grep -nI -e '192\\.168\\.' \$(git rev-list --all) -- ':(glob).planning/**' ':(glob)**/.planning/**'   # expect: 0 lines, exit 1 (T2 driver clean; the script batches revs to stay ARG_MAX-safe)"
 echo "  3. git tag --list | wc -l                                                  # expect: ${EXPECTED_TAG_COUNT} (all release tags re-pointed)"
