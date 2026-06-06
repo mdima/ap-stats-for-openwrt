@@ -5,7 +5,9 @@
 # / ssh-ed25519 / chacha20-poly1305 / hmac-sha2 family). Captured at execute time
 # (docker pull alpine:3.21 -> sha256:48b0309c...); do NOT float the tag.
 #
-# Test-only image — scoped under test/dropbear/** (T-22-06).
+# Test-only image — scoped under test/dropbear/** (T-22-06). `.dockerignore`
+# excludes the whole `test/` subtree (explicit `test/` entry — WR-01 review fix)
+# so this fixture never enters any prod image layer.
 FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
 
 # Single combined RUN (root Dockerfile single-RUN-no-cache-leak hygiene, Dockerfile:21-23):

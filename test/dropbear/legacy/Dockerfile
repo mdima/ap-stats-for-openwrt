@@ -8,7 +8,8 @@
 #
 # Test-only image — scoped entirely under test/dropbear/** (T-22-06). The
 # deliberately-weak legacy crypto here is NEVER referenced by the root Dockerfile
-# or release.yml; .dockerignore already excludes test source from the prod image.
+# or release.yml; `.dockerignore` excludes the whole `test/` subtree (the explicit
+# `test/` entry — WR-01 review fix) so these fixtures never enter ANY image layer.
 FROM alpine:3.10@sha256:451eee8bedcb2f029756dc3e9d73bab0e7943c1ac55cff3a4861c52a0fdd3e98
 
 # Single combined RUN (root Dockerfile single-RUN-no-cache-leak hygiene, Dockerfile:21-23):
