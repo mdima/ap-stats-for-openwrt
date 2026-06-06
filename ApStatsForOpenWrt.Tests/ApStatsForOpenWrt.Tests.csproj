@@ -95,5 +95,12 @@
          (UpdateCheck/Fixtures/...), outside the top-level Fixtures\ glob above, so they need an
          explicit copy-to-output entry. -->
     <None Update="UpdateCheck\Fixtures\**\*.*" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Phase 22 Plan 22-03 / M-FLD-01: the DropbearCompat arm reads NO runtime asset from the new
+         ApStatsForOpenWrt.Tests/Dropbear/ folder — the round-trip sentinel is authored INLINE in the
+         two test/dropbear/*/Dockerfile images and the fixture builds those images from the
+         solution-root build context. The folder holds only .cs (Compile) files, so the MTP
+         "new fixture folder needs a None Update glob" rule does not apply here (no data files to
+         copy to output). A glob matching *.* would redundantly touch the .cs Compile items; omitted
+         deliberately. See 22-03-SUMMARY.md "glob not needed" note. -->
   </ItemGroup>
 </Project>
