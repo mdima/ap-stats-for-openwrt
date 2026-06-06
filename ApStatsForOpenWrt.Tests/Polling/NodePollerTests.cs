@@ -401,4 +401,88 @@ public sealed class NodePollerTests
         }
         finally { try { Directory.Delete(fixtureDir, true); } catch { } }
     }
+
+    // ── M-HRD-07 (v1.0 / plan 21-05): the within-cycle re-entry invariant pinned as
+    //    "exactly one of two concurrent same-node polls is skipped". This complements
+    //    PerNodeSemaphore_PreventsWithinCycleReentry above by asserting the partition of the
+    //    two results directly (exactly one Failed/within-cycle-reentry, exactly one Success),
+    //    so a future refactor that let BOTH proceed (racing the SSH session) goes provably red.
+    [Fact]
+    public async Task WithinCycleReentry_ExactlyOneConcurrentSameNodePollIsSkipped_M_HRD_07()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var fixtureDir = BuildSyntheticFixtureDir("m-hrd-07-reentry");
+        try
+        {
+            // Unique id keeps us isolated from the static _perNodeGate across the suite.
+            var nodeId = 91000 + Random.Shared.Next(0, 8999);
+            NodePoller.RemoveNodeGate(nodeId); // belt + braces: ensure no leftover gate for this id
+
+            var release = new TaskCompletionSource();
+            // The call that wins the gate blocks inside ConnectAsync until released, guaranteeing
+            // the gate is held when the second call attempts its WaitAsync(0).
+            var holder = new FakeSshSession(fixtureDir) { ConnectDelay = async _ => await release.Task };
+            var contender = new FakeSshSession(fixtureDir);
+            var dpp = new ConstantPlaintextProtectionProvider("dummy");
+            var node = new WiFiNode { Id = nodeId, Hostname = "ap-m-hrd-07", Username = "root", Password = "Y2lwaGVydGV4dA==" };
+
+            var pollerA = new NodePoller(node, holder, new OpenWrtAdapterCache(), dpp, NullLogger<NodePoller>.Instance);
+            var pollerB = new NodePoller(node, contender, new OpenWrtAdapterCache(), dpp, NullLogger<NodePoller>.Instance);
+
+            var taskA = pollerA.PollAsync(ct);
+            // Spin until A is in-flight (holding the gate) before launching B.
+            for (int i = 0; i < 50 && !taskA.IsCompleted; i++)
+            {
+                if (NodePoller.HasNodeGate(nodeId)) break;
+                await Task.Delay(10, ct);
+            }
+
+            var resultB = await pollerB.PollAsync(ct);
+            release.SetResult();
+            var resultA = await taskA;
+
+            // Exactly one within-cycle-reentry skip across the two results.
+            var results = new[] { resultA, resultB };
+            var reentries = results.OfType<NodeProbeResult.Failed>()
+                                   .Where(f => f.Reason == "within-cycle-reentry")
+                                   .ToList();
+            var successes = results.OfType<NodeProbeResult.Success>().ToList();
+
+            Assert.Single(reentries);
+            Assert.Single(successes);
+            Assert.Equal(nodeId, reentries[0].NodeId);
+        }
+        finally { try { Directory.Delete(fixtureDir, true); } catch { } }
+    }
+
+    // ── M-HRD-09 (v1.0 / plan 21-05): RemoveNodeGate removes a previously-present gate entry ──
+    [Fact]
+    public async Task RemoveNodeGate_RemovesPreviouslyPresentGateEntry_M_HRD_09()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var fixtureDir = BuildSyntheticFixtureDir("m-hrd-09-gate");
+        try
+        {
+            var nodeId = 92000 + Random.Shared.Next(0, 8999);
+            NodePoller.RemoveNodeGate(nodeId); // clean slate
+
+            // A successful poll populates _perNodeGate[nodeId] via GetOrAdd inside PollAsync.
+            var fake = new FakeSshSession(fixtureDir);
+            var dpp = new ConstantPlaintextProtectionProvider("dummy");
+            var node = new WiFiNode { Id = nodeId, Hostname = "ap-gate-cleanup", Username = "root", Password = "Y2lwaGVydGV4dA==" };
+            var poller = new NodePoller(node, fake, new OpenWrtAdapterCache(), dpp, NullLogger<NodePoller>.Instance);
+
+            var result = await poller.PollAsync(ct);
+            Assert.IsType<NodeProbeResult.Success>(result);
+            Assert.True(NodePoller.HasNodeGate(nodeId), "precondition: poll should have added a gate entry");
+
+            NodePoller.RemoveNodeGate(nodeId);
+
+            Assert.False(NodePoller.HasNodeGate(nodeId), "M-HRD-09: gate entry must be gone after RemoveNodeGate");
+            // Idempotent / harmless no-op on a missing id.
+            NodePoller.RemoveNodeGate(nodeId);
+            Assert.False(NodePoller.HasNodeGate(nodeId));
+        }
+        finally { try { Directory.Delete(fixtureDir, true); } catch { } }
+    }
 }
