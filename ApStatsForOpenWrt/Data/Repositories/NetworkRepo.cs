@@ -110,6 +110,13 @@ public sealed class NetworkRepo(IDbContextFactory<DatabaseContext> factory) : IN
     }
 
     // ── D-15 Phase 3: absent-WLAN handling for discovery's transaction ──────
+    // WR-05 (21-REVIEW): MarkAbsentDisabledAsync is LIVE (called by WlanDiscoveryService) and the
+    // repo-owned DeleteAbsentAsync overload retains dedicated test coverage, so neither is removed.
+    // Latent-correctness note for a future v2 discovery caller: `!presentMacs.Contains(...)` inside
+    // ExecuteUpdate/DeleteAsync translates to a SQL `(NOT) IN (@p0, @p1, ...)` — one parameter per
+    // MAC. SQLite caps host parameters (~999 on older builds, ~32766 on modern ones), so a node
+    // with a very large station set could blow the ceiling. v1 keeps the set small, but a v2
+    // discovery path against a busy AP MUST batch presentMacs (chunk the IN-list) before calling.
     public async Task MarkAbsentDisabledAsync(
         int wiFiNodeId,
         IReadOnlyCollection<string> presentMacs,
