@@ -123,13 +123,25 @@ foreach (var entry in (cspConnectSrcRaw ?? "")
 
 // Assemble the final CSP ONCE: the const has "connect-src 'self';" — append the validated
 // origins (space-separated) just before the trailing ';' of that directive when any are set.
+// WR-01 (21-REVIEW): assert the directive was actually found before relying on the replace.
+// A bare string.Replace silently no-ops (returns the input unchanged) if a future reorder or
+// reformat of ContentSecurityPolicyValue moves/renames the directive — which would drop the
+// operator's validated proxy WebSocket origins with NO startup error and NO log line, leaving a
+// proxied Blazor circuit unable to connect. Throwing here makes that invariant break fail-loud.
 var assembledCsp = ApStatsForOpenWrt.Services.Security.SecurityHeadersMiddleware.ContentSecurityPolicyValue;
 if (validatedConnectSrc.Count > 0)
 {
-    const string baseConnect = "connect-src 'self'";
+    const string baseConnect = "connect-src 'self';";
+    if (!assembledCsp.Contains(baseConnect))
+    {
+        throw new InvalidOperationException(
+            "CSP assembly invariant broken: the \"connect-src 'self';\" directive was not found in " +
+            "ContentSecurityPolicyValue, so the validated Csp__ConnectSrc origins cannot be appended. " +
+            "The const was reordered or reformatted — fix the assembly in Program.cs to match.");
+    }
     assembledCsp = assembledCsp.Replace(
-        baseConnect + ";",
-        baseConnect + " " + string.Join(' ', validatedConnectSrc) + ";");
+        baseConnect,
+        "connect-src 'self' " + string.Join(' ', validatedConnectSrc) + ";");
 }
 
 try
