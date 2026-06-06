@@ -33,19 +33,26 @@ public sealed class NodePoller(
     /// <summary>
     /// M-HRD-09 (v1.0 / plan 21-05): in-memory cleanup entry point invoked from
     /// <c>NodeRepo.DeleteAsync</c> AFTER the row deletion commits. Removes the per-node
-    /// <see cref="SemaphoreSlim"/> for <paramref name="nodeId"/> and disposes it, closing the
-    /// slow <c>SemaphoreSlim</c> leak (one orphaned semaphore per deleted node id) and removing
-    /// the stale-gate footgun a reused id could otherwise inherit. No DB write — the per-node
-    /// gate is process-scoped polling-plane state only (mirrors
+    /// <see cref="SemaphoreSlim"/> mapping for <paramref name="nodeId"/> so a reused id gets a
+    /// fresh gate, closing the stale-gate footgun. No DB write — the per-node gate is
+    /// process-scoped polling-plane state only (mirrors
     /// <see cref="OpenWrtAdapterCache.ClearForNode"/>'s <c>TryRemove</c> shape). Harmless no-op
     /// when no entry exists for the id.
+    /// <para>
+    /// CR-01 (21-REVIEW): deliberately does NOT <c>Dispose()</c> the removed semaphore. The UI
+    /// delete path and the polling fan-out are not mutually exclusive — a concurrent in-flight
+    /// <see cref="PollAsync"/> may still hold this instance and will call <c>Release()</c> in its
+    /// <c>finally</c>. Disposing here would throw <see cref="ObjectDisposedException"/> from that
+    /// outer finally (outside the broad probe catch), faulting the cycle. An orphaned
+    /// <see cref="SemaphoreSlim"/> with no materialized wait handle is GC-reclaimable, so dropping
+    /// the entry alone is sufficient — and leaking one int→semaphore entry per deleted id is
+    /// negligible.
+    /// </para>
     /// </summary>
     internal static void RemoveNodeGate(int nodeId)
     {
-        if (_perNodeGate.TryRemove(nodeId, out var sem))
-        {
-            sem.Dispose();
-        }
+        // Remove the mapping (do NOT Dispose — see XML-doc CR-01 note above).
+        _perNodeGate.TryRemove(nodeId, out _);
     }
 
     /// <summary>
