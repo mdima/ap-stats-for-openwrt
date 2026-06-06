@@ -20,6 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       digest: ${{ steps.build.outputs.digest }}
+      # The ACTUAL pushed Docker tag (semver-stripped, e.g. v1.0.0 -> 1.0.0).
+      # The draft-release pull command MUST use this, not github.ref_name —
+      # the dry run (22-05) proved the raw git tag 404s on Docker Hub.
+      version: ${{ steps.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -39,8 +43,10 @@ jobs:
           # D-05 one-line flip: throwaway (mdima/apstats-pipeline-test) → real
           # (mdima/ap-stats-for-openwrt) by changing only this repo variable.
           images: ${{ vars.DOCKERHUB_IMAGE }}
+          # type=semver auto-applies the moving `latest` (flavor latest=auto)
+          # ONLY for non-prerelease tags — a future rc/test tag can never
+          # hijack `latest` (dry-run finding, 22-05; was type=raw before).
           tags: |
-            type=raw,value=latest
             type=semver,pattern={{version}}
 
       - id: build
@@ -70,7 +76,7 @@ jobs:
 
             ### Container image
             ```
-            docker pull ${{ vars.DOCKERHUB_IMAGE }}:${{ github.ref_name }}
+            docker pull ${{ vars.DOCKERHUB_IMAGE }}:${{ needs.build-and-push.outputs.version }}
             ```
             Digest: `${{ needs.build-and-push.outputs.digest }}`
 
