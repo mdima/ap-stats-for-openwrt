@@ -28,6 +28,17 @@ public sealed class MigrationsHostedService(
         Directory.CreateDirectory("/data");
         Directory.CreateDirectory("/logs");
 
+        // M-HRD-02 / T10: resolve the DB path the SAME way the connection string does
+        // (Program.cs: Data Source={DATA_ROOT}/AP-Stats-for-OpenWrt.db). Hardcoding "/data"
+        // here would break local Windows dev, which sets DATA_ROOT to redirect storage.
+        var dataRoot = Environment.GetEnvironmentVariable("DATA_ROOT") ?? "/data";
+        var dbPath = $"{dataRoot}/AP-Stats-for-OpenWrt.db";
+
+        // M-HRD-02 fresh-volume guard (RESEARCH Pitfall 2): snapshot existence BEFORE
+        // CreateDbContextAsync — GetPendingMigrationsAsync opens a connection that materializes
+        // an empty .db, so File.Exists after that point would falsely report a pre-existing DB.
+        var dbPreExisted = File.Exists(dbPath);
+
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
 
         var pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
@@ -36,6 +47,47 @@ public sealed class MigrationsHostedService(
             log.LogInformation(
                 "Applying {Count} pending migrations: {Migrations}",
                 pending.Count, string.Join(", ", pending));
+        }
+
+        // M-HRD-02 / T10: a single rolling pre-migration .bak set protects operator data before
+        // any schema migration runs. Pure File.Copy (NOT a DB write, no checkpoint connection) —
+        // copying the -wal sidecar captures committed-but-not-checkpointed data after a dirty
+        // shutdown, which is precisely why no checkpoint is needed (D-01). Trigger = migrations
+        // pending AND a pre-existing DB (a fresh volume has nothing to protect — D-04). Rolling
+        // overwrite each start (T10). A copy failure ABORTS the boot before MigrateAsync — D-04
+        // forbids ever migrating without the safety net.
+        if (pending.Count > 0 && dbPreExisted)
+        {
+            try
+            {
+                File.Copy(dbPath, dbPath + ".bak", overwrite: true);
+
+                // D-01/D-02 naming: AP-Stats-for-OpenWrt.db-wal.bak / -shm.bak — copied ONLY
+                // when the sidecar actually exists (WAL may be absent in DELETE journal mode,
+                // -shm absent when no connection is currently mapping shared memory).
+                foreach (var suffix in new[] { "-wal", "-shm" })
+                {
+                    var sidecar = dbPath + suffix;
+                    if (File.Exists(sidecar))
+                        File.Copy(sidecar, sidecar + ".bak", overwrite: true);
+                }
+
+                log.LogInformation(
+                    "Pre-migration backup written before applying {Count} pending migration(s): {Bak} (+ -wal.bak/-shm.bak when present)",
+                    pending.Count, dbPath + ".bak");
+            }
+            catch (Exception ex)
+            {
+                // D-03/D-04: name the .bak files and the one-line restore action, then rethrow —
+                // NEVER swallow. The process exits 1 and migrations are NOT applied; the operator
+                // still has the untouched live DB to fall back on.
+                log.LogCritical(
+                    ex,
+                    "Pre-migration backup FAILED for {Db} — ABORTING before Database.Migrate() so no schema change is applied (M-HRD-02 / T10). " +
+                    "Recovery: stop the container, restore by renaming {Bak} (and {WalBak} / {ShmBak} if present) back to the live DB names, then run the PREVIOUS image. Migrations were NOT applied.",
+                    dbPath, dbPath + ".bak", dbPath + "-wal.bak", dbPath + "-shm.bak");
+                throw;
+            }
         }
 
         // Fail fast on error (PITFALL: migration silent failure).
