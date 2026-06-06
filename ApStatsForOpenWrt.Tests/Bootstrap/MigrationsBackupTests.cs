@@ -21,7 +21,10 @@ namespace ApStatsForOpenWrt.Tests.Bootstrap;
 /// backup path resolves identically to the production connection string. The
 /// <see cref="IDbContextFactory{TContext}"/> is pointed at <c>{DATA_ROOT}/AP-Stats-for-OpenWrt.db</c>
 /// so <c>GetPendingMigrationsAsync</c> reports the real migration set.
+/// Member of the <c>DataRootSerial</c> collection: <c>DATA_ROOT</c> is process-global, so this
+/// class must never run in parallel with anything else that reads or writes it.
 /// </summary>
+[Collection("DataRootSerial")]
 public sealed class MigrationsBackupTests
 {
     private const string DbFileName = "AP-Stats-for-OpenWrt.db";

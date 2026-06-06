@@ -13,7 +13,11 @@ namespace ApStatsForOpenWrt.Tests.Bootstrap;
 /// "/data/AP-Stats-for-OpenWrt.db" is exercised by a manual one-time WSL2 run, recorded in
 /// <c>01-VALIDATION.md §"Manual-Only Verifications"</c>); the factory-redirect proxy validates
 /// the migration pipeline itself. INF-03 (idempotent re-run) is asserted directly.
+/// Member of the <c>DataRootSerial</c> collection: <c>MigrationsHostedService.StartAsync</c>
+/// reads the process-global <c>DATA_ROOT</c> env var (M-HRD-02 backup path), which
+/// <c>MigrationsBackupTests</c> mutates — the two classes must never run in parallel.
 /// </summary>
+[Collection("DataRootSerial")]
 public sealed class MigrationsHostedServiceTests(TempDirectoryFixture temp) : IClassFixture<TempDirectoryFixture>
 {
     private readonly TempDirectoryFixture _temp = temp;
