@@ -90,12 +90,14 @@ public sealed class SettingsRoundTripTests(SmokeFactoryFixture factory) : IClass
     }
 
     [Fact]
-    public async Task ClearAllHostKeyFingerprintsAsync_NullsEveryFingerprint_PreservesPassword()
+    public async Task ClearHostKeyFingerprintAsync_NullsTargetFingerprint_PreservesPassword()
     {
-        // CR-02-safe regression — Plan 03-02's NodeRepoClearFingerprintsTests already covers
-        // the SQLite ExecuteUpdateAsync semantics; this test verifies the wiring through the
-        // real INodeRepo singleton resolved from the WebApplicationFactory composition root.
-        // It exercises exactly what /Settings Card 3's Clear-all button invokes end-to-end.
+        // CR-02-safe regression — NodeRepoClearFingerprintsTests covers the SQLite
+        // ExecuteUpdateAsync semantics; this test verifies the wiring through the real INodeRepo
+        // singleton resolved from the WebApplicationFactory composition root. It exercises exactly
+        // what the per-node Re-trust button on /Nodes/{id} invokes end-to-end.
+        // M-HRD-03 / v1.0 (plan 21-02): the obsolete all-rows bulk-clear path was removed; only the
+        // per-node ClearHostKeyFingerprintAsync re-trust surface remains.
         var ct = TestContext.Current.CancellationToken;
         using var scope = _factory.Services.CreateScope();
         var nodes = scope.ServiceProvider.GetRequiredService<INodeRepo>();
@@ -105,20 +107,16 @@ public sealed class SettingsRoundTripTests(SmokeFactoryFixture factory) : IClass
         await nodes.AddAsync(n1, ct);
         await nodes.AddAsync(n2, ct);
 
-        // M-SEC-06 (plan 16-04): the method is [Obsolete] (v0.13 removal target). This
-        // round-trip test still exercises the CR-02-safe bulk-clear repo behavior until the
-        // v0.13 mechanical sweep removes the method + this test together.
-#pragma warning disable CS0618
-        await nodes.ClearAllHostKeyFingerprintsAsync(ct);
-#pragma warning restore CS0618
+        await nodes.ClearHostKeyFingerprintAsync(n1.Id, ct);
 
         var f1 = await nodes.GetByIdAsync(n1.Id, ct);
         var f2 = await nodes.GetByIdAsync(n2.Id, ct);
         Assert.NotNull(f1);
         Assert.NotNull(f2);
         Assert.Null(f1!.HostKeyFingerprint);
-        Assert.Null(f2!.HostKeyFingerprint);
-        // CR-02-safe: Password column preserved across the bulk update.
+        // Only the targeted row is cleared; the other node's fingerprint is untouched.
+        Assert.Equal("FP2", f2!.HostKeyFingerprint);
+        // CR-02-safe: Password column preserved across the update.
         Assert.Equal("P1", f1.Password);
         Assert.Equal("P2", f2.Password);
     }
