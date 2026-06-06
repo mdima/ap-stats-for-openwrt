@@ -30,6 +30,31 @@ public sealed class NodePoller(
     // for the same NodeId in one cycle).
     private static readonly ConcurrentDictionary<int, SemaphoreSlim> _perNodeGate = new();
 
+    /// <summary>
+    /// M-HRD-09 (v1.0 / plan 21-05): in-memory cleanup entry point invoked from
+    /// <c>NodeRepo.DeleteAsync</c> AFTER the row deletion commits. Removes the per-node
+    /// <see cref="SemaphoreSlim"/> for <paramref name="nodeId"/> and disposes it, closing the
+    /// slow <c>SemaphoreSlim</c> leak (one orphaned semaphore per deleted node id) and removing
+    /// the stale-gate footgun a reused id could otherwise inherit. No DB write — the per-node
+    /// gate is process-scoped polling-plane state only (mirrors
+    /// <see cref="OpenWrtAdapterCache.ClearForNode"/>'s <c>TryRemove</c> shape). Harmless no-op
+    /// when no entry exists for the id.
+    /// </summary>
+    internal static void RemoveNodeGate(int nodeId)
+    {
+        if (_perNodeGate.TryRemove(nodeId, out var sem))
+        {
+            sem.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Test-only observation seam for the M-HRD-09 cleanup pin: reports whether a per-node gate
+    /// entry currently exists for <paramref name="nodeId"/>. The dictionary is private static;
+    /// this avoids reflection in the cleanup test (<c>RemoveNodeGate</c> removes; this observes).
+    /// </summary>
+    internal static bool HasNodeGate(int nodeId) => _perNodeGate.ContainsKey(nodeId);
+
     public async Task<NodeProbeResult> PollAsync(CancellationToken ct)
     {
         // POLL-03 / B2 LOCK: acquire per-node semaphore non-blockingly.

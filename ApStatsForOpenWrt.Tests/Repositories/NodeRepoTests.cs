@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using ApStatsForOpenWrt.Data;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Polling;
 using ApStatsForOpenWrt.Tests.TestSupport;
 using Xunit;
 
@@ -60,6 +61,46 @@ public sealed class NodeRepoTests(SqliteInMemoryFixture fixture) : IClassFixture
         await repo.DeleteAsync(node.Id, ct);
         var fetched = await repo.GetByIdAsync(node.Id, ct);
         Assert.Null(fetched);
+    }
+
+    // ── M-HRD-09 (v1.0 / plan 21-05): delete tears down the polling-plane adapter cache ──
+    [Fact]
+    public async Task DeleteAsync_RemovesAdapterCacheEntry_M_HRD_09()
+    {
+        // Pin the in-memory cleanup hung off DeleteAsync: after a node is added then deleted
+        // through the repo, the OpenWrtAdapterCache instance the repo was given no longer reports
+        // that node's adapter binding (ID-reuse staleness footgun closed). The repo here is
+        // constructed WITH the cache (the DI-equivalent path), unlike CreateRepo()'s legacy
+        // single-arg form, so the adapterCache?.ClearForNode(id) branch is exercised.
+        var ct = TestContext.Current.CancellationToken;
+        var cache = new OpenWrtAdapterCache();
+        var repo = new NodeRepo(new TestDbContextFactory(_fixture.Options), cache);
+
+        var node = new WiFiNode { Hostname = $"del-cache-{Guid.NewGuid():N}", Username = "root", Password = "" };
+        await repo.AddAsync(node, ct);
+
+        // Seed the adapter binding as if a prior poll had discovered iwinfo for this node id.
+        cache.Set(node.Id, "iwinfo");
+        Assert.Equal("iwinfo", cache.TryGet(node.Id)); // precondition
+
+        await repo.DeleteAsync(node.Id, ct);
+
+        Assert.Null(cache.TryGet(node.Id));            // M-HRD-09: cache entry gone after delete
+        Assert.Null(await repo.GetByIdAsync(node.Id, ct)); // row still removed (no regression)
+    }
+
+    [Fact]
+    public async Task DeleteAsync_WithCache_MissingNode_IsHarmlessNoOp_M_HRD_09()
+    {
+        // entity-is-null early-return semantics preserved: deleting an id that was never added
+        // (and whose cache entry was never set) must not throw and must leave the cache untouched.
+        var ct = TestContext.Current.CancellationToken;
+        var cache = new OpenWrtAdapterCache();
+        var repo = new NodeRepo(new TestDbContextFactory(_fixture.Options), cache);
+
+        const int neverAddedId = 987654; // not in the schema
+        await repo.DeleteAsync(neverAddedId, ct); // no throw
+        Assert.Null(cache.TryGet(neverAddedId));
     }
 
     [Fact]
