@@ -70,4 +70,15 @@ public interface INetworkRepo
     /// avoids the N+1-via-GetByNodeAsync pattern when the dashboard renders the empty state.
     /// </summary>
     Task<bool> AnyEnabledAsync(CancellationToken ct = default);
+
+    // ── M-HRD-10 (v1.0 hardening): batched dashboard read ───────────────────
+    /// <summary>
+    /// M-HRD-10 binding: returns every <see cref="WiFiNetwork"/> grouped by its owning
+    /// <c>WiFiNodeId</c> in a SINGLE <c>AsNoTracking().ToListAsync()</c> query — avoids the
+    /// N+1-via-GetByNodeAsync pattern the dashboard previously used to build its
+    /// (WiFiNetworkId → row metadata) lookup. A node with zero networks contributes NO key
+    /// (identical to the old per-node loop, where an empty <see cref="GetByNodeAsync"/>
+    /// result added nothing). <see cref="GetByNodeAsync"/> remains for per-node callers.
+    /// </summary>
+    Task<IReadOnlyDictionary<int, IReadOnlyList<WiFiNetwork>>> GetAllGroupedByNodeAsync(CancellationToken ct = default);
 }

@@ -57,6 +57,10 @@ public sealed class StaleHysteresisTests
         public Task DeleteAbsentAsync(int wiFiNodeId, IReadOnlyCollection<string> presentMacs, CancellationToken ct = default) => Task.CompletedTask;
         public Task DeleteAbsentAsync(ApStatsForOpenWrt.Data.DatabaseContext db, int wiFiNodeId, IReadOnlyCollection<string> presentMacs, CancellationToken ct = default) => Task.CompletedTask;
         public Task<bool> AnyEnabledAsync(CancellationToken ct = default) => Task.FromResult(AnyEnabledOverride);
+        // M-HRD-10: batched dashboard read derived from the same ByNode map (zero-network nodes omitted).
+        public Task<IReadOnlyDictionary<int, IReadOnlyList<WiFiNetwork>>> GetAllGroupedByNodeAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyDictionary<int, IReadOnlyList<WiFiNetwork>>>(
+                ByNode.Where(kvp => kvp.Value.Count > 0).ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<WiFiNetwork>)kvp.Value));
     }
 
     private sealed class StubStationRepo : IStationRepo

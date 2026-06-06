@@ -753,6 +753,10 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
 
         public Task<bool> AnyEnabledAsync(CancellationToken ct = default)
             => throw new NotImplementedException();
+
+        // M-HRD-10: dashboard-only batched read — not used by the orchestrator path under test.
+        public Task<IReadOnlyDictionary<int, IReadOnlyList<WiFiNetwork>>> GetAllGroupedByNodeAsync(CancellationToken ct = default)
+            => throw new NotImplementedException();
     }
 
     [Fact]
