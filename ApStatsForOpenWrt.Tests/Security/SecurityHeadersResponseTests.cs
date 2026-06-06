@@ -123,9 +123,13 @@ public sealed class SecurityHeadersResponseTests(SmokeFactoryFixture factory) : 
     {
         var ct = TestContext.Current.CancellationToken;
         using var resp = await _factory.CreateClient().GetAsync("/", ct);
-        // Verbatim CSP per REQUIREMENTS.md line 47.
+        // Verbatim CSP — M-HRD-04 (plan 21-03) hardened it: script-src drops 'unsafe-inline'
+        // for a sha256- hash of the single App.razor inline boot script (pinned by
+        // CspScriptHashTests); connect-src tightens to 'self' (no ws:/wss: literals); style-src
+        // KEEPS 'unsafe-inline'. The base value (no Csp__ConnectSrc env var set in this fixture)
+        // matches the middleware const exactly.
         const string expected =
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+            "default-src 'self'; script-src 'self' 'sha256-T5YSl+2aUjhEmzNd2Iq7VZTu7E+XPoHJndyYSmqCng8='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
         Assert.Equal(expected, GetHeader(resp, "Content-Security-Policy"));
         Assert.Equal(SecurityHeadersMiddleware.ContentSecurityPolicyValue,
             GetHeader(resp, "Content-Security-Policy"));
@@ -191,13 +195,33 @@ public sealed class SecurityHeadersResponseTests(SmokeFactoryFixture factory) : 
     // ── Case 11 ───────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task CspIncludesWsAndWssInConnectSrc_BlazorCompat()
+    public async Task CspConnectSrcIsSelfOnly_NoWsWildcards_BlazorCompat()
     {
         var ct = TestContext.Current.CancellationToken;
         using var resp = await _factory.CreateClient().GetAsync("/", ct);
         var csp = GetHeader(resp, "Content-Security-Policy");
         Assert.NotNull(csp);
-        // ws:/wss: in connect-src permits the Blazor InteractiveServer SignalR upgrade.
-        Assert.Contains("connect-src 'self' ws: wss:", csp!);
+        // M-HRD-04 (plan 21-03): connect-src tightened from 'self' ws: wss: to 'self'.
+        // Same-origin ws:// is covered by 'self' in modern CSP, so the plain-HTTP LAN
+        // Blazor InteractiveServer SignalR circuit still negotiates (proven by the Plan 04
+        // Playwright smoke test). The ws:/wss: WILDCARD literals are gone.
+        Assert.Contains("connect-src 'self';", csp!);
+        Assert.DoesNotContain("connect-src 'self' ws: wss:", csp!);
+    }
+
+    // ── Case 12 ───────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CspScriptSrc_DropsUnsafeInline_ForSha256Hash()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var resp = await _factory.CreateClient().GetAsync("/", ct);
+        var csp = GetHeader(resp, "Content-Security-Policy");
+        Assert.NotNull(csp);
+        // script-src carries the sha256- hash and no longer allows arbitrary inline scripts.
+        Assert.Contains("script-src 'self' 'sha256-", csp!);
+        Assert.DoesNotContain("script-src 'self' 'unsafe-inline'", csp!);
+        // style-src DELIBERATELY keeps 'unsafe-inline' (AdminLTE/Bootstrap inline <style>).
+        Assert.Contains("style-src 'self' 'unsafe-inline'", csp!);
     }
 }
