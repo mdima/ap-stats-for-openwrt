@@ -67,8 +67,15 @@ public sealed class MigrationsHostedService(
         {
             try
             {
-                File.Copy(dbPath, dbPath + ".bak", overwrite: true);
-
+                // WR-03 (21-REVIEW): copy-to-temp-then-promote so a mid-copy crash (OOM,
+                // container stop, full volume) can never leave a TRUNCATED .bak that has already
+                // clobbered the previous-cycle good backup. File.Copy(overwrite: true) truncates
+                // the destination at the START of the copy, so writing straight to ".bak" is the
+                // hazard. Instead: copy each source to a ".bak.tmp" (a torn .tmp is discardable —
+                // it never overwrote a good .bak), then File.Move(tmp -> .bak, overwrite: true) to
+                // promote it. The Move is the metadata-only rename of an already-complete file, so
+                // the previous good .bak is replaced atomically rather than truncated-in-place.
+                var sources = new List<string> { dbPath };
                 // D-01/D-02 naming: AP-Stats-for-OpenWrt.db-wal.bak / -shm.bak — copied ONLY
                 // when the sidecar actually exists (WAL may be absent in DELETE journal mode,
                 // -shm absent when no connection is currently mapping shared memory).
@@ -76,7 +83,22 @@ public sealed class MigrationsHostedService(
                 {
                     var sidecar = dbPath + suffix;
                     if (File.Exists(sidecar))
-                        File.Copy(sidecar, sidecar + ".bak", overwrite: true);
+                        sources.Add(sidecar);
+                }
+
+                // Phase 1: copy every source to its .bak.tmp (full write before any promotion).
+                // Discard any torn .tmp left by a prior interrupted run first.
+                foreach (var src in sources)
+                {
+                    var tmp = src + ".bak.tmp";
+                    if (File.Exists(tmp)) File.Delete(tmp);
+                    File.Copy(src, tmp, overwrite: true);
+                }
+
+                // Phase 2: promote each completed .bak.tmp over its .bak (atomic rename).
+                foreach (var src in sources)
+                {
+                    File.Move(src + ".bak.tmp", src + ".bak", overwrite: true);
                 }
 
                 log.LogInformation(
