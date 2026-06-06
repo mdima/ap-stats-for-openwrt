@@ -387,3 +387,13 @@ dotnet_naming_style.s_camelcase.required_suffix =
 dotnet_naming_style.s_camelcase.word_separator = 
 dotnet_naming_style.s_camelcase.capitalization = camel_case
 
+#### Test-project analyzer enforcement (M-HRD-06 / CONTEXT D-08) ####
+# xUnit1051: async APIs accepting a CancellationToken MUST forward
+# Xunit.TestContext.Current.CancellationToken. Pinned to `error` (scoped to the
+# test project, the only place xUnit1051 fires) so an un-tokened test async call
+# is a hard build failure regardless of TreatWarningsAsErrors (which the test
+# project deliberately leaves off). Deliberate CancellationToken.None teardown
+# sites are exempted per-site with `#pragma warning disable xUnit1051` + a comment.
+[ApStatsForOpenWrt.Tests/**/*.cs]
+dotnet_diagnostic.xUnit1051.severity = error
+
