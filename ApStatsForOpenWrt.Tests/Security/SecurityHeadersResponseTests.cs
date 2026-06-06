@@ -129,7 +129,7 @@ public sealed class SecurityHeadersResponseTests(SmokeFactoryFixture factory) : 
         // KEEPS 'unsafe-inline'. The base value (no Csp__ConnectSrc env var set in this fixture)
         // matches the middleware const exactly.
         const string expected =
-            "default-src 'self'; script-src 'self' 'sha256-T5YSl+2aUjhEmzNd2Iq7VZTu7E+XPoHJndyYSmqCng8='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+            "default-src 'self'; script-src 'self' 'sha256-N+XgxVzS7xHbt2VJ63Smp/xmf8x7iq10qnQZ1+ljDiY='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
         Assert.Equal(expected, GetHeader(resp, "Content-Security-Policy"));
         Assert.Equal(SecurityHeadersMiddleware.ContentSecurityPolicyValue,
             GetHeader(resp, "Content-Security-Policy"));
