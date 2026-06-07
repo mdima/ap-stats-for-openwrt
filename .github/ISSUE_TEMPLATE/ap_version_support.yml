@@ -1,0 +1,72 @@
+# GitHub issue FORM — AP / OpenWRT version support report.
+# This is the community fixture funnel (M-FLD-03): it wires tools/FixtureCapture
+# so contributors can grow the support matrix beyond versions tested on hardware.
+# YAML issue-form schema (name/description/body), 2-space indent.
+name: AP / OpenWRT version support
+description: Report results on an OpenWRT version or device, and contribute captured fixtures.
+title: "[AP support]: "
+labels: [ap-support]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Help grow the support matrix! Reporting your results on a device or
+        OpenWRT version — and attaching captured fixtures — is the single most
+        valuable contribution for expanding coverage beyond the versions tested
+        on the maintainer's own hardware.
+  - type: dropdown
+    id: openwrt-version
+    attributes:
+      label: OpenWRT version
+      description: The OpenWRT release line on the device you tested.
+      options:
+        - "23.05"
+        - "23.05-SNAPSHOT"
+        - "22.03"
+        - "21.02"
+        - "Other (specify in the device field)"
+    validations:
+      required: true
+  - type: input
+    id: device-model
+    attributes:
+      label: Device / model
+      description: The access point hardware model (and exact OpenWRT point release if "Other").
+      placeholder: "e.g. GL.iNet GL-MT6000, OpenWRT 24.10.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      description: Did the dashboard correctly show the stations on this device?
+      options:
+        - "Worked — stations shown correctly"
+        - "Partially worked — some data missing or wrong"
+        - "Did not work"
+    validations:
+      required: true
+  - type: textarea
+    id: fixture-capture
+    attributes:
+      label: FixtureCapture output
+      description: >
+        Run the bundled `tools/FixtureCapture` tool against this access point.
+        It SSHes into the AP, runs the canonical command set, and writes the
+        verbatim outputs to `Fixtures/ssh-output/openwrt-<version>/`.
+
+
+        BEFORE attaching anything, REDACT the captured output: replace real MAC
+        addresses, IP addresses, and hostnames following the redaction policy
+        under `support/redact-fixtures/` (locally-administered MACs, TEST-NET
+        IPs, placeholder hostnames). Never attach unredacted captures — they
+        may contain identifying network information.
+
+
+        Paste the redacted `Fixtures/ssh-output/openwrt-<version>/` contents
+        here, or attach them to this issue.
+      placeholder: |
+        # Output of tools/FixtureCapture, REDACTED per support/redact-fixtures/
+        # Fixtures/ssh-output/openwrt-<version>/...
+    validations:
+      required: true

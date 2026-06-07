@@ -1,0 +1,55 @@
+# GitHub issue FORM — Bug report.
+# YAML issue-form schema (name/description/body), 2-space indent.
+name: Bug report
+description: Report something that is broken or behaving incorrectly.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please fill in the
+        fields below so the problem can be reproduced. Do not include real
+        MAC addresses, IP addresses, or hostnames in logs — redact them first.
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: The version of AP Stats for OpenWrt you are running (shown in the UI footer).
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: openwrt-version
+    attributes:
+      label: OpenWRT version
+      description: The OpenWRT release running on the affected access point.
+      placeholder: "23.05"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the problem and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro-steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps that reliably reproduce the problem.
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste relevant log output. Redact real MACs, IPs, and hostnames first.
+      render: text
+    validations:
+      required: false
