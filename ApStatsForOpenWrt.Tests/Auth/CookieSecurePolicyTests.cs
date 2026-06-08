@@ -131,6 +131,13 @@ public sealed class CookieSecurePolicyTests
         private readonly string _dataSource = $"CookieSecPolicy-{Guid.NewGuid():N}";
         private SqliteConnection? _keepAlive;
 
+        // ci-test-data-writability (residual fix) -- redirect DATA_ROOT/LOGS_ROOT to a writable
+        // per-instance temp dir BEFORE the real Program.cs bootstrap runs, so the writability
+        // probe + MigrationsHostedService.CreateDirectory do not abort host startup on a non-root
+        // CI runner with an unwritable /data. Field initializer => constructed in the ctor, before
+        // the first CreateClient()/Services access triggers the host build. Restored on dispose.
+        private readonly ApStatsForOpenWrt.Tests.TestSupport.TempBootstrapRoots _roots = new();
+
         public CookieFactory()
         {
             _keepAlive = new SqliteConnection($"Data Source={_dataSource};Mode=Memory;Cache=Shared");
@@ -154,6 +161,7 @@ public sealed class CookieSecurePolicyTests
         {
             _keepAlive?.Dispose();
             _keepAlive = null;
+            _roots.Dispose();
             await base.DisposeAsync();
         }
     }

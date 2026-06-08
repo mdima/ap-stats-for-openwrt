@@ -228,4 +228,77 @@ public sealed class ArchitectureTests
             $"Offending csproj(s): {string.Join(", ", violators)}. " +
             $"Fix: delete the <Version> element from each listed file; Directory.Build.props is the single source of truth.");
     }
+
+    /// <summary>
+    /// ci-test-data-writability (residual-fix regression guard). EVERY
+    /// <see cref="Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory{TEntryPoint}"/>
+    /// subclass in the TEST assembly boots the real <c>Program.cs</c> bootstrap chain, whose
+    /// writability probe + <c>MigrationsHostedService.CreateDirectory</c> target the resolved
+    /// <c>DATA_ROOT</c>/<c>LOGS_ROOT</c>. On a non-root CI runner the default <c>/data</c> is
+    /// unwritable, so any host-booting factory that does NOT redirect those roots to a writable
+    /// temp dir aborts host startup and fails ONLY on a clean runner (the dev box masks it via a
+    /// writable <c>C:\data</c>). The original fix wired 5 factories; a real-runner re-run still
+    /// failed because 8 more host-boot sites were missed. This test asserts every such subclass
+    /// declares a <see cref="ApStatsForOpenWrt.Tests.TestSupport.TempBootstrapRoots"/> field so a
+    /// future host-booting test that forgets the redirect fails FAST locally, not only on CI.
+    /// </summary>
+    [Fact]
+    public void EveryWebApplicationFactory_RedirectsBootstrapRootsToTempDir()
+    {
+        var testAssembly = typeof(ArchitectureTests).Assembly;
+        var tempRootsType = typeof(ApStatsForOpenWrt.Tests.TestSupport.TempBootstrapRoots);
+
+        // Every concrete subclass of WebApplicationFactory<Program> in the test assembly.
+        var hostBootFactories = testAssembly.GetTypes()
+            .Where(t => t.IsClass && !t.IsAbstract)
+            .Where(IsWebApplicationFactoryOfProgram)
+            .ToList();
+
+        // Sanity: the reflection probe must actually find the known host-booting factories
+        // (e.g. SmokeFactoryFixture). A zero count would mean the matcher silently broke and
+        // the guard would vacuously pass.
+        Assert.NotEmpty(hostBootFactories);
+
+        var violators = hostBootFactories
+            .Where(t => !DeclaresTempBootstrapRootsField(t, tempRootsType))
+            .Select(t => t.FullName ?? t.Name)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            violators.Count == 0,
+            "ci-test-data-writability: every WebApplicationFactory<Program> subclass MUST hold a " +
+            "TempBootstrapRoots field so DATA_ROOT/LOGS_ROOT are redirected to a writable temp dir " +
+            "BEFORE the real Program.cs bootstrap runs (otherwise the writability probe aborts host " +
+            "startup on a non-root CI runner and the test fails only on a clean runner). " +
+            "Offending factory(ies): " + string.Join(", ", violators) + ". " +
+            "Fix: add `private readonly ApStatsForOpenWrt.Tests.TestSupport.TempBootstrapRoots _roots = new();` " +
+            "as a field initializer and dispose it in the factory's Dispose/DisposeAsync.");
+
+        static bool IsWebApplicationFactoryOfProgram(Type t)
+        {
+            for (var b = t.BaseType; b is not null; b = b.BaseType)
+            {
+                if (b.IsGenericType &&
+                    b.GetGenericTypeDefinition() == typeof(Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<>) &&
+                    b.GetGenericArguments()[0] == typeof(Program))
+                    return true;
+            }
+            return false;
+        }
+
+        static bool DeclaresTempBootstrapRootsField(Type t, Type tempRootsType)
+        {
+            // Walk the type and any (non-WAF) base types it introduces, so a shared base helper
+            // that holds the field also satisfies the guard.
+            for (var cur = t; cur is not null && cur != typeof(object); cur = cur.BaseType)
+            {
+                var fields = cur.GetFields(
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+                if (fields.Any(f => tempRootsType.IsAssignableFrom(f.FieldType)))
+                    return true;
+            }
+            return false;
+        }
+    }
 }

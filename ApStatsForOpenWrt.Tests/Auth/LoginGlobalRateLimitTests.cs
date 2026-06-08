@@ -69,6 +69,13 @@ public sealed class LoginGlobalRateLimitTests
         private readonly string _dataSource = $"LoginGlobalRL-{Guid.NewGuid():N}";
         private Microsoft.Data.Sqlite.SqliteConnection? _keepAlive;
 
+        // ci-test-data-writability (residual fix) -- redirect DATA_ROOT/LOGS_ROOT to a writable
+        // per-instance temp dir BEFORE the real Program.cs bootstrap runs, so the writability
+        // probe + MigrationsHostedService.CreateDirectory do not abort host startup on a non-root
+        // CI runner with an unwritable /data. Field initializer => constructed in the ctor, before
+        // the first CreateClient()/Services access triggers the host build. Restored on dispose.
+        private readonly ApStatsForOpenWrt.Tests.TestSupport.TempBootstrapRoots _roots = new();
+
         // M-SEC-05 / plan 16-01 Task 3 — the production ForwardedHeaders registration is now
         // env-var-gated (was unconditional in v0.11). This test needs X-Forwarded-For honored
         // so each request lands in a distinct /Login per-IP rate-limit partition (only the
@@ -115,6 +122,7 @@ public sealed class LoginGlobalRateLimitTests
         {
             Environment.SetEnvironmentVariable("ForwardedHeaders__KnownNetworks", _priorKnownNetworks);
             _keepAlive?.Dispose();
+            _roots.Dispose();
             base.Dispose();
             return ValueTask.CompletedTask;
         }

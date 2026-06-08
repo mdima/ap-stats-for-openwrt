@@ -243,6 +243,12 @@ public sealed class CspConnectSrcConfigTests
         private readonly string _dataSource = $"CspConnSrc-{Guid.NewGuid():N}";
         private SqliteConnection? _keepAlive;
 
+        // ci-test-data-writability (residual fix) -- redirect DATA_ROOT/LOGS_ROOT to a writable
+        // per-instance temp dir BEFORE the real Program.cs bootstrap runs. On a clean CI runner the
+        // writability probe would otherwise abort host startup BEFORE the Csp__ConnectSrc validation
+        // under test could throw -- masking the intended fail-fast. Restored on dispose.
+        private readonly ApStatsForOpenWrt.Tests.TestSupport.TempBootstrapRoots _roots = new();
+
         public CspFactory()
         {
             _keepAlive = new SqliteConnection($"Data Source={_dataSource};Mode=Memory;Cache=Shared");
@@ -281,6 +287,7 @@ public sealed class CspConnectSrcConfigTests
         {
             _keepAlive?.Dispose();
             _keepAlive = null;
+            _roots.Dispose();
             await base.DisposeAsync();
         }
     }

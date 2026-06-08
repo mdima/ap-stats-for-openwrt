@@ -339,6 +339,12 @@ public sealed class ForwardedHeadersConditionalTests
         private readonly InMemorySink _sink = new();
         private SqliteConnection? _keepAlive;
 
+        // ci-test-data-writability (residual fix) -- redirect DATA_ROOT/LOGS_ROOT to a writable
+        // per-instance temp dir BEFORE the real Program.cs bootstrap runs. On a clean CI runner the
+        // writability probe would otherwise abort host startup BEFORE the ForwardedHeaders validation
+        // under test could throw -- masking the intended fail-fast. Restored on dispose.
+        private readonly ApStatsForOpenWrt.Tests.TestSupport.TempBootstrapRoots _roots = new();
+
         public CapturingFactory()
         {
             _keepAlive = new SqliteConnection($"Data Source={_dataSource};Mode=Memory;Cache=Shared");
@@ -402,6 +408,7 @@ public sealed class ForwardedHeadersConditionalTests
         {
             _keepAlive?.Dispose();
             _keepAlive = null;
+            _roots.Dispose();
             await base.DisposeAsync();
         }
     }
