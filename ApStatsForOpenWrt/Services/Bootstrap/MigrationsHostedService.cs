@@ -24,21 +24,28 @@ public sealed class MigrationsHostedService(
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        // Idempotent — WSL2/container first-run convenience. /data and /logs are hardcoded per D-13.
-        Directory.CreateDirectory("/data");
-        Directory.CreateDirectory("/logs");
+        // M-HRD-02 / T10: resolve the data + logs roots the SAME way the connection string,
+        // key ring, Serilog sink, and the pre-migration backup path do (Program.cs reads
+        // DATA_ROOT/LOGS_ROOT; BootstrapPaths is the single resolver). RESOLVE FIRST, then create
+        // the dirs against the resolved roots — hard-coding "/data" here would (a) break local
+        // Windows dev / a non-root CI runner that sets DATA_ROOT to redirect storage, and (b)
+        // throw UnauthorizedAccessException trying to create "/data" on a non-root host. D-13
+        // invariant: env unset → "/data"/"/logs" (byte-identical to the old literals).
+        var dataRoot = BootstrapPaths.DataRoot;
+        var logsRoot = BootstrapPaths.LogsRoot;
 
-        // M-HRD-02 / T10: resolve the DB path the SAME way the connection string does
-        // (Program.cs: Data Source={DATA_ROOT}/AP-Stats-for-OpenWrt.db). Hardcoding "/data"
-        // here would break local Windows dev, which sets DATA_ROOT to redirect storage.
-        // WR-04 (21-REVIEW): build the path with Path.Combine (matching MigrationsBackupTests'
+        // Idempotent — WSL2/container first-run convenience. Targets the resolved roots so a
+        // redirected DATA_ROOT/LOGS_ROOT (dev box, CI runner) is honored exactly like the rest
+        // of the bootstrap chain.
+        Directory.CreateDirectory(dataRoot);
+        Directory.CreateDirectory(logsRoot);
+
+        // WR-04 (21-REVIEW): build the DB path with Path.Combine (matching MigrationsBackupTests'
         // harness) instead of "{dataRoot}/..." string interpolation. The interpolation only
         // happened to work on the documented Windows dev path (DATA_ROOT=C:\dev\data) because
         // Windows tolerates a forward slash; a trailing separator in DATA_ROOT ("/data/") would
-        // also yield a "//AP-Stats..." double-slash .bak path. Trim a trailing separator once so
-        // Path.Combine produces a single clean separator on every platform.
-        var dataRoot = (Environment.GetEnvironmentVariable("DATA_ROOT") ?? "/data")
-            .TrimEnd('/', '\\');
+        // also yield a "//AP-Stats..." double-slash .bak path. BootstrapPaths already trims a
+        // trailing separator once so Path.Combine produces a single clean separator everywhere.
         var dbPath = Path.Combine(dataRoot, "AP-Stats-for-OpenWrt.db");
 
         // M-HRD-02 fresh-volume guard (RESEARCH Pitfall 2): snapshot existence BEFORE

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using ApStatsForOpenWrt.Data;
 using ApStatsForOpenWrt.Tests.Integration;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -67,6 +68,12 @@ public sealed class DevelopmentEnvironmentWarningTests
     /// pure capturing pipeline (no Serilog, no console, no file sinks). The Serilog
     /// pipeline configured in Program.cs (via builder.Host.UseSerilog) is replaced from
     /// the test side via ILoggingBuilder.ClearProviders + AddProvider(CapturingProvider).
+    /// <para>
+    /// Also redirects <c>DATA_ROOT</c>/<c>LOGS_ROOT</c> to a writable temp dir
+    /// (<see cref="TempBootstrapRoots"/>) so the real <c>Program.cs</c> filesystem bootstrap
+    /// (writability probe + <c>MigrationsHostedService.CreateDirectory</c>) does not abort host
+    /// startup on a non-root CI runner with an unwritable <c>/data</c>.
+    /// </para>
     /// </summary>
     private sealed class CapturingFactory(string environmentName, ConcurrentBag<CapturedLog> captured)
         : WebApplicationFactory<Program>
@@ -74,6 +81,7 @@ public sealed class DevelopmentEnvironmentWarningTests
         private readonly string _environmentName = environmentName;
         private readonly ConcurrentBag<CapturedLog> _captured = captured;
         private readonly string _dataSource = $"DevEnvWarn-{Guid.NewGuid():N}";
+        private readonly TempBootstrapRoots _roots = new();
         private Microsoft.Data.Sqlite.SqliteConnection? _keepAlive;
 
         protected override IHost CreateHost(IHostBuilder builder)
@@ -114,6 +122,7 @@ public sealed class DevelopmentEnvironmentWarningTests
             _keepAlive?.Dispose();
             _keepAlive = null;
             await base.DisposeAsync();
+            _roots.Dispose();
         }
     }
 

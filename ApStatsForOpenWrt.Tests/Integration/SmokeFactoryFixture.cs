@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using ApStatsForOpenWrt.Data;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Xunit;
 
 namespace ApStatsForOpenWrt.Tests.Integration;
@@ -23,14 +24,20 @@ namespace ApStatsForOpenWrt.Tests.Integration;
 /// <para>
 /// The factory swaps the production SQLite <c>/data/AP-Stats-for-OpenWrt.db</c> connection string
 /// for in-memory SQLite (per-test) so the host can boot without <c>/data</c> being writable in
-/// CI. Hosted services (Migrations, DataProtectionHealth, AppSettingsBootstrap, Polling) still
-/// run; the in-memory shared-cache connection is held open across the fixture lifetime so
-/// the migration history and seeded AppSettings rows survive across requests.
+/// CI. It ALSO redirects <c>DATA_ROOT</c>/<c>LOGS_ROOT</c> to a writable temp dir
+/// (<see cref="TempBootstrapRoots"/>) so the real <c>Program.cs</c> filesystem bootstrap
+/// (the <c>WritabilityCheckHostedService</c> probe + <c>MigrationsHostedService.CreateDirectory</c>)
+/// targets that temp dir instead of the unwritable default <c>/data</c> on a non-root CI runner —
+/// the in-memory DB swap alone only avoids the DB WRITE, not those filesystem choke points.
+/// Hosted services (Migrations, DataProtectionHealth, AppSettingsBootstrap, Polling) still run;
+/// the in-memory shared-cache connection is held open across the fixture lifetime so the
+/// migration history and seeded AppSettings rows survive across requests.
 /// </para>
 /// </summary>
 public sealed class SmokeFactoryFixture : WebApplicationFactory<Program>, IAsyncLifetime
 {
     private readonly string _dataSource = $"Sharable-{Guid.NewGuid():N}";
+    private readonly TempBootstrapRoots _roots = new();
     private Microsoft.Data.Sqlite.SqliteConnection? _keepAlive;
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -69,6 +76,7 @@ public sealed class SmokeFactoryFixture : WebApplicationFactory<Program>, IAsync
     {
         _keepAlive?.Dispose();
         base.Dispose();
+        _roots.Dispose();
         return ValueTask.CompletedTask;
     }
 }
