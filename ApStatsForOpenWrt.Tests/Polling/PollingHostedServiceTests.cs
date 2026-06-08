@@ -136,8 +136,16 @@ public sealed class PollingHostedServiceTests
         public void Open()
         {
             Volatile.Write(ref _currentInt, (int)GateState.Live);
-            Volatile.Read(ref _tcs).TrySetResult(true);
+            // Fire Changed (synchronous OnGateChanged) BEFORE completing the WaitForVisitorAsync
+            // TCS. OnGateChanged has no await, so it runs to completion inline here and claims the
+            // cold-start flag; only afterwards does TrySetResult schedule ExecuteAsync's continuation
+            // (the loop-body `if (_coldStart)` fallback), which then deterministically no-ops. This
+            // matches production semantics (the gate's Changed event leads; the loop-body check is
+            // the documented fallback — PollingHostedService lines 80-82) and removes the cross-thread
+            // race where ExecuteAsync's pool-thread continuation could claim the flag first, leaving
+            // OnGateChanged to log "transitioned to Live" WITHOUT "(cold-start kick)" (CI flake, 260608).
             _ = (_changed?.Invoke(GateState.Live) ?? Task.CompletedTask);
+            Volatile.Read(ref _tcs).TrySetResult(true);
         }
 
         /// <summary>Test API — flips Paused, re-arms a fresh TCS, fires Changed(Paused).</summary>
@@ -390,11 +398,15 @@ public sealed class PollingHostedServiceTests
             gate.Open();   // Paused -> Live with _coldStart=true at construction -> "cold-start kick" rendered
 
             // Bounded poll — wait up to 2s for the Live log entry to appear.
+            // Wait for the EXACT entry the assertion needs (Live + cold-start kick), not merely any
+            // "Live" entry — otherwise the bounded poll could exit on a Live entry that lacks the
+            // cold-start marker and assert before the right one lands.
             var deadline = DateTime.UtcNow.AddSeconds(2);
             while (DateTime.UtcNow < deadline
                 && !capLogger.Entries.Any(e =>
                     e.Level == LogLevel.Information
-                    && e.Message.StartsWith("Visitor gate transitioned to Live", StringComparison.Ordinal)))
+                    && e.Message.StartsWith("Visitor gate transitioned to Live", StringComparison.Ordinal)
+                    && e.Message.Contains("cold-start kick", StringComparison.Ordinal)))
             {
                 await Task.Delay(20, ct);
             }
