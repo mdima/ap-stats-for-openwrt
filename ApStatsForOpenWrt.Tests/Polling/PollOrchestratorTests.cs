@@ -762,21 +762,25 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
     [Fact]
     public async Task FanOut_Parallelism_RunsNodesConcurrently()
     {
-        // B2 / POLL-03 LOCK — within one cycle, the 3 probeAsync invocations must enter
-        // concurrently. Recorded entry-tick spread across the 3 probes < 50ms; total cycle
-        // wall-clock < 500ms (sequential 3 × 200ms would be >= 600ms).
+        // B2 / POLL-03 LOCK — within one cycle, the probeAsync invocations must run CONCURRENTLY
+        // (fanned out), not sequentially. Proven STRUCTURALLY rather than by a wall-clock threshold:
+        // every probe signals entry, then awaits a gate that only releases once ALL probes have
+        // entered. Concurrent fan-out releases the gate immediately; sequential execution can never
+        // reach the entry count (probe k+1 cannot start while probe k awaits), so the per-probe wait
+        // trips its timeout and the test fails — independent of machine speed / CI runner contention.
+        // (Replaces the prior 50ms entry-spread + 500ms wall-clock checks, which flaked on shared
+        // runners — debug session ci-test-data-writability, 2026-06-08.)
         var ct = TestContext.Current.CancellationToken;
 
+        const int nodeCount = 3;
         var nodeBssids = new List<(int NodeId, string Bssid)>();
         await using (var seed = _fixture.CreateContext())
         {
-            for (int i = 0; i < 3; i++)
+            for (int i = 0; i < nodeCount; i++)
             {
                 // Phase 10: seed LastEnrichmentRefreshAt = recent so the orchestrator's enrichment
                 // trigger does NOT fire for these nodes — this test asserts probe fan-out concurrency
-                // (POLL-03), not the enrichment cycle. Without this, ShouldRefresh returns true
-                // (cold-start) and the orchestrator runs its enrichment per-node loop, blowing past
-                // the 500ms wall-clock budget.
+                // (POLL-03), not the enrichment cycle.
                 var node = new WiFiNode { Hostname = $"par-{Guid.NewGuid():N}", Username = "root", Password = "", LastEnrichmentRefreshAt = DateTimeOffset.UtcNow };
                 seed.WiFiNodes.Add(node);
                 await seed.SaveChangesAsync(ct);
@@ -788,18 +792,33 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
         }
         var bssidByNode = nodeBssids.ToDictionary(t => t.NodeId, t => t.Bssid);
 
-        var entryTicks = new System.Collections.Concurrent.ConcurrentBag<long>();
-        var sw = Stopwatch.StartNew();
+        var entered = 0;
+        var allEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sequentialDetected = false;
 
         Func<WiFiNode, CancellationToken, Task<NodeProbeResult>> probeAsync = async (n, cct) =>
         {
-            // IClassFixture-shared DB — entry-tick measurement applies only to THIS test's 3 nodes.
-            // Other tests' nodes (if any persist in the DB) return Failed without delaying.
+            // IClassFixture-shared DB — the gate applies only to THIS test's nodes. Other tests'
+            // nodes (if any persist in the DB) return Failed without touching the gate.
             if (!bssidByNode.TryGetValue(n.Id, out var bssid))
                 return new NodeProbeResult.Failed(n.Id, "not-this-test");
 
-            entryTicks.Add(sw.ElapsedTicks);
-            await Task.Delay(200, cct);
+            // Concurrency gate: the last probe to enter releases all peers. The 5s timeout is orders
+            // of magnitude above the time for concurrently-scheduled tasks to all reach this point,
+            // yet is never satisfied under sequential execution (the awaiting probe blocks the next
+            // from ever starting) — so a fan-out regression trips it deterministically.
+            if (Interlocked.Increment(ref entered) == nodeCount)
+                allEntered.TrySetResult();
+            try
+            {
+                await allEntered.Task.WaitAsync(TimeSpan.FromSeconds(5), cct);
+            }
+            catch (TimeoutException)
+            {
+                Volatile.Write(ref sequentialDetected, true);
+                return new NodeProbeResult.Failed(n.Id, "not-concurrent");
+            }
+
             var net = new WiFiNetwork { WiFiNodeId = n.Id, MacAddress = bssid, SSID = "par-net" };
             return new NodeProbeResult.Success(
                 NodeId: n.Id,
@@ -810,16 +829,11 @@ public sealed class PollOrchestratorTests(SqliteInMemoryFixture fixture) : IClas
 
         var orch = BuildOrchestrator(probeAsync);
 
-        var cycleSw = Stopwatch.StartNew();
         await orch.RunCycleAsync(ct);
-        cycleSw.Stop();
 
-        var ticks = entryTicks.OrderBy(t => t).ToList();
-        Assert.Equal(3, ticks.Count);
-        var spreadMs = TimeSpan.FromTicks(ticks[^1] - ticks[0]).TotalMilliseconds;
-        Assert.True(spreadMs < 50, $"Probe entry spread should be < 50ms (concurrent fan-out); actual={spreadMs:F1}ms");
-        Assert.True(cycleSw.Elapsed < TimeSpan.FromMilliseconds(500),
-            $"Total cycle wall-clock should be < 500ms (concurrent); actual={cycleSw.ElapsedMilliseconds}ms");
+        // All probes were invoked, and none tripped the no-peers timeout → genuinely concurrent fan-out.
+        Assert.Equal(nodeCount, Volatile.Read(ref entered));
+        Assert.False(sequentialDetected, "Probe fan-out was not concurrent: a probe timed out waiting for its peers to enter (POLL-03 fan-out regression).");
     }
 
     [Fact]
