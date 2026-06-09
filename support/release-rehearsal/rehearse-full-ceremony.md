@@ -149,6 +149,26 @@ gh repo delete <throwaway-owner/throwaway-repo> --yes
 
 > ⚠ **Everything below is IRREVERSIBLE / outward-facing on the REAL coordinates. It belongs to 23-05, not this plan.** Execute only after the operator signs off Part A ("rehearsal complete — throwaway infra deleted"). Execution can stop cleanly at the publish gate.
 
+### Step 0 — Private mirror backup (gated; runs FIRST, before anything irreversible)
+
+Before the merge → filter → cutover → public-flip sequence, mirror the **full pre-rewrite history** (all branches incl. `milestone/*`, all tags, all refs, incl. `.planning`) to the private homelab Gitea as the restore point for the irreversible `.planning` history rewrite that follows. Run this FIRST, before step 1 below:
+
+```bash
+# 1. Add the private Gitea remote (idempotent — skip if it already exists; create the repo on Gitea first).
+git remote add gitea http://dockerserver.michelecasa:8017/
+
+# 2. Exact mirror — ALL branches, tags, refs — INCLUDING .planning and the milestone/* branches.
+git push --mirror gitea
+
+# 3. Verify: compare the remote refs/tags against the local ones; they MUST match BEFORE proceeding to the filter step.
+git ls-remote --heads --tags gitea
+# This is the restore point for the history rewrite that follows.
+```
+
+> ⚠ **WARNING — direction is LOCAL → Gitea ONLY.** The backup MUST be a push from local → Gitea (`git push --mirror gitea`). Do NOT configure Gitea as a **pull-mirror FROM** the public GitHub repo — the public repo has `.planning` stripped by the filter (step 4 below), so a pull-mirror would silently fail to back up the private history that is the entire point of this step.
+>
+> This Step 0 reinstates a backup-first invariant that **supersedes D-01** (2026-06-05 "NO private remote"). See PROJECT.md Evolution Log 2026-06-09.
+
 1. **Pre-cutover — QUAL artifacts already committed.** `QUAL-01-signoff.md` (Task 1, `20418e2`) + `QUAL-02-signoff.md` (Task 3, `b268207`) are committed on the full-history lineage. (Pitfall 3: anything written after the cutover's `commit_docs`→false + `.planning/` gitignore is orphaned.)
 2. **`Directory.Build.props` → `1.0.0`** (T13; `NoCsprojDeclaresVersion` ArchitectureTest pins single-source — never in a csproj). Update the README version badge → `1.0.0`.
 3. **Merge `milestone/v1.0` → `main`** — normal `--no-ff`, full history.
