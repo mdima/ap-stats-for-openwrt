@@ -275,6 +275,10 @@ public sealed class PollingHostedServiceTests
 
         await sut.StartAsync(cts.Token);
 
+        // BackgroundService.StartAsync returns before ExecuteAsync runs `gate.Changed += OnGateChanged`;
+        // await the subscription (bounded) so the later Open() can't race an empty subscriber list.
+        await gate.SubscribedAsync.WaitAsync(TimeSpan.FromSeconds(2), ct);
+
         // Wait a short time — the gate is Paused, so no cycle should run.
         await Task.Delay(200, ct);
         Assert.Equal(0, cycleCount);
@@ -312,6 +316,9 @@ public sealed class PollingHostedServiceTests
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
         await sut.StartAsync(cts.Token);
+        // Await the SUT's gate.Changed subscription (bounded) before the first kick — StartAsync
+        // returns before ExecuteAsync subscribes, so an immediate Open() can race an empty list.
+        await gate.SubscribedAsync.WaitAsync(TimeSpan.FromSeconds(2), ct);
         gate.Open();                // first kick
         await WaitForCount(() => cycleCount, 1, ct);
 
@@ -344,6 +351,10 @@ public sealed class PollingHostedServiceTests
         await sut.StartAsync(cts.Token);
         try
         {
+            // Await the SUT's gate.Changed subscription (bounded) before the first transition —
+            // StartAsync returns before ExecuteAsync subscribes, so Open()/Close() here could
+            // otherwise fire against an empty subscriber list and the transition logs never appear.
+            await gate.SubscribedAsync.WaitAsync(TimeSpan.FromSeconds(2), ct);
             gate.Open();   // Paused -> Live (consume cold-start kick + first Live log)
             await Task.Delay(50, ct);
             gate.Close();  // Live -> Paused — emits the log line under test
