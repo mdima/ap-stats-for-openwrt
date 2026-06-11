@@ -500,3 +500,8 @@ coverage.cobertura.xml
 # (project conventions) stays tracked — it is a deliberate contributor-facing doc; only the
 # local-only .claude/ tree (settings.local.json, worktrees/) is ignored.
 .claude/
+
+# GSD planning artifacts — kept LOCAL post-v1.0 cutover (D-02). The strip removed .planning/
+# from public history; GSD keeps writing these locally, but they are deliberately never part
+# of the public repo. The machine + private Gitea mirror backup is the safety net.
+.planning/
