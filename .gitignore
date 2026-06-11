@@ -495,3 +495,8 @@ coverage.cobertura.xml
 # OpenWRT live-capture credentials (D-10) — operator-supplied per-machine; NEVER commit
 *.local.env
 **/.live-credentials.local.env
+
+# Claude Code per-developer tooling config (v1.0 public-release cleanup). The root CLAUDE.md
+# (project conventions) stays tracked — it is a deliberate contributor-facing doc; only the
+# local-only .claude/ tree (settings.local.json, worktrees/) is ignored.
+.claude/

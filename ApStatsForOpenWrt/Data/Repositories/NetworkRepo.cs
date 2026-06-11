@@ -110,6 +110,13 @@ public sealed class NetworkRepo(IDbContextFactory<DatabaseContext> factory) : IN
     }
 
     // ── D-15 Phase 3: absent-WLAN handling for discovery's transaction ──────
+    // WR-05 (21-REVIEW): MarkAbsentDisabledAsync is LIVE (called by WlanDiscoveryService) and the
+    // repo-owned DeleteAbsentAsync overload retains dedicated test coverage, so neither is removed.
+    // Latent-correctness note for a future v2 discovery caller: `!presentMacs.Contains(...)` inside
+    // ExecuteUpdate/DeleteAsync translates to a SQL `(NOT) IN (@p0, @p1, ...)` — one parameter per
+    // MAC. SQLite caps host parameters (~999 on older builds, ~32766 on modern ones), so a node
+    // with a very large station set could blow the ceiling. v1 keeps the set small, but a v2
+    // discovery path against a busy AP MUST batch presentMacs (chunk the IN-list) before calling.
     public async Task MarkAbsentDisabledAsync(
         int wiFiNodeId,
         IReadOnlyCollection<string> presentMacs,
@@ -149,5 +156,17 @@ public sealed class NetworkRepo(IDbContextFactory<DatabaseContext> factory) : IN
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         return await db.WiFiNetworks.AsNoTracking().AnyAsync(n => n.Enabled, ct);
+    }
+
+    // ── M-HRD-10 (v1.0 hardening): batched dashboard read ───────────────────
+    // Single AsNoTracking() pull over the whole table, grouped in-memory by WiFiNodeId —
+    // replaces the dashboard's per-node GetByNodeAsync N+1 loop. Read-only; never injects a
+    // scoped DbContext (PER-05 IDbContextFactory per-call pattern).
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<WiFiNetwork>>> GetAllGroupedByNodeAsync(CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var all = await db.WiFiNetworks.AsNoTracking().ToListAsync(ct);
+        return all.GroupBy(w => w.WiFiNodeId)
+                  .ToDictionary(g => g.Key, g => (IReadOnlyList<WiFiNetwork>)g.ToList());
     }
 }

@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using ApStatsForOpenWrt.Data;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Services.Polling;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Xunit;
 
 namespace ApStatsForOpenWrt.Tests.Integration;
@@ -148,6 +149,12 @@ public sealed class SigtermDrainTests
     /// Uses a unique shared-cache file path so each test run gets a clean DB (avoids cross-run
     /// state leak from the global SQLite file handle).
     /// </para>
+    /// <para>
+    /// Redirects <c>DATA_ROOT</c>/<c>LOGS_ROOT</c> to a writable temp dir
+    /// (<see cref="TempBootstrapRoots"/>) so the real <c>Program.cs</c> filesystem bootstrap
+    /// (writability probe + <c>MigrationsHostedService.CreateDirectory</c>) does not abort host
+    /// startup on a non-root CI runner with an unwritable <c>/data</c>.
+    /// </para>
     /// </summary>
     public sealed class SigtermFixture : WebApplicationFactory<Program>, IAsyncDisposable
     {
@@ -158,6 +165,9 @@ public sealed class SigtermDrainTests
         public static string ConnectionString
             => $"Data Source={DataSourceName};Mode=Memory;Cache=Shared";
 
+        // Constructed at fixture instantiation (before CreateClient) so the env redirect is live
+        // when Program.cs's bootstrap chain runs.
+        private readonly TempBootstrapRoots _roots = new();
         private SqliteConnection? _keepAlive;
 
         public TaskCompletionSource<bool> ProbeBlocker { get; } =
@@ -232,6 +242,7 @@ public sealed class SigtermDrainTests
             ProbeBlocker.TrySetResult(true);
             _keepAlive?.Dispose();
             await base.DisposeAsync();
+            _roots.Dispose();
         }
     }
 }

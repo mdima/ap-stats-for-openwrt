@@ -462,13 +462,19 @@ else
     private async Task<List<DashboardRow>> BuildRowsAsync(IReadOnlyList<WiFiNode> allNodes)
     {
         // Build a (WiFiNetworkId → (SSID, NodeHostname, NodeId, Enabled)) lookup.
+        // M-HRD-10 (v1.0 hardening): one batched read replaces the per-node GetByNodeAsync
+        // N+1 loop. Nodes absent from the dictionary contribute no entries — identical to a
+        // node with zero networks under the old loop. The lookup shape is unchanged.
         var networkLookup = new Dictionary<int, (string Ssid, string ApHostname, int ApNodeId, bool Enabled)>();
+        var byNode = await Networks.GetAllGroupedByNodeAsync();
         foreach (var n in allNodes)
         {
-            var networks = await Networks.GetByNodeAsync(n.Id);
-            foreach (var w in networks)
+            if (byNode.TryGetValue(n.Id, out var nets))
             {
-                networkLookup[w.Id] = (w.SSID, n.Hostname, n.Id, w.Enabled);
+                foreach (var w in nets)
+                {
+                    networkLookup[w.Id] = (w.SSID, n.Hostname, n.Id, w.Enabled);
+                }
             }
         }
 

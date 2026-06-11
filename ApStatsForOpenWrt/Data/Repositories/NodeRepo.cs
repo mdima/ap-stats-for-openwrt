@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using ApStatsForOpenWrt.Data.Models;
+using ApStatsForOpenWrt.Services.Polling;
 
 namespace ApStatsForOpenWrt.Data.Repositories;
 
@@ -9,8 +10,22 @@ namespace ApStatsForOpenWrt.Data.Repositories;
 /// The dual-overload pattern (D-07) routes repo-owned overloads through caller-owned
 /// implementations: repo-owned opens its own context + commits; caller-owned does NOT call
 /// <c>SaveChangesAsync</c> (the orchestrator owns the transaction).
+/// <para>
+/// M-HRD-09 (v1.0 / plan 21-05): <see cref="DeleteAsync"/> additionally tears down the deleted
+/// node's process-scoped polling-plane state — the static <c>NodePoller._perNodeGate</c>
+/// semaphore (via <see cref="NodePoller.RemoveNodeGate"/>) and the
+/// <see cref="OpenWrtAdapterCache"/> adapter-binding entry. This is the v1 layering choice
+/// from 21-RESEARCH Open Question 2 (option a): a direct call to two in-memory cleanups
+/// (one static, one injected singleton). It adds NO DB write — the cleanup runs only AFTER
+/// the existing <c>SaveChangesAsync</c>, so the orchestrator-only-writes rule and the
+/// captive-dependency / PER-04 invariants are unchanged (<see cref="OpenWrtAdapterCache"/>
+/// is a plain singleton, not a <see cref="DatabaseContext"/>, so it does not trip
+/// <c>ArchitectureTests.DbContext_IsOnlyUsedByRepositories</c>). The cache is OPTIONAL so
+/// existing direct-construction test call sites (<c>new NodeRepo(factory)</c>) keep compiling;
+/// DI always resolves the registered singleton.
+/// </para>
 /// </summary>
-public sealed class NodeRepo(IDbContextFactory<DatabaseContext> factory) : INodeRepo
+public sealed class NodeRepo(IDbContextFactory<DatabaseContext> factory, OpenWrtAdapterCache? adapterCache = null) : INodeRepo
 {
     // ── CRUD ────────────────────────────────────────────────────────────────
     public async Task<IReadOnlyList<WiFiNode>> GetAllAsync(CancellationToken ct = default)
@@ -39,6 +54,16 @@ public sealed class NodeRepo(IDbContextFactory<DatabaseContext> factory) : INode
         if (entity is null) return;
         db.WiFiNodes.Remove(entity);
         await db.SaveChangesAsync(ct);
+
+        // M-HRD-09 (v1.0 / plan 21-05): after the row deletion commits, tear down the deleted
+        // node's process-scoped polling-plane state so a reused id cannot inherit a stale gate or
+        // adapter binding, and the per-node semaphore is not leaked. IN-MEMORY ONLY — no new DB
+        // write (the cleanup deliberately runs AFTER SaveChangesAsync). Covering DeleteAsync covers
+        // both delete UI paths (Setup/Nodes.razor + Nodes/Index.razor). adapterCache is null only in
+        // legacy direct-construction unit tests that do not exercise the cache (harmless skip);
+        // DI always supplies the registered singleton.
+        NodePoller.RemoveNodeGate(id);
+        adapterCache?.ClearForNode(id);
     }
 
     // ── D-09 CR-02 closure (Phase 3): split metadata + password updates ─────
@@ -75,17 +100,9 @@ public sealed class NodeRepo(IDbContextFactory<DatabaseContext> factory) : INode
             .ExecuteUpdateAsync(s => s.SetProperty(n => n.Password, encryptedPassword), ct);
     }
 
-    // ── D-18 (Phase 3): SET-03 known-hosts cache clear ──────────────────────
-    // M-SEC-06 / v0.12 (plan 16-04): Obsolete. UI surface removed from Settings/Index.razor;
-    // per-node ClearHostKeyFingerprintAsync is the sole re-trust path. v0.13 removes this method.
-    [Obsolete("Removed in v0.13. Use ClearHostKeyFingerprintAsync(int nodeId) instead. The bulk Clear-all-host-keys path is no longer reachable from the UI.")]
-    public async Task ClearAllHostKeyFingerprintsAsync(CancellationToken ct = default)
-    {
-        await using var db = await factory.CreateDbContextAsync(ct);
-        await db.WiFiNodes
-            .ExecuteUpdateAsync(s => s.SetProperty(n => n.HostKeyFingerprint, (string?)null), ct);
-    }
-
+    // ── D-18 (Phase 3): SET-03 per-node known-hosts cache clear ─────────────
+    // M-HRD-03 / v1.0 (plan 21-02): the obsolete all-rows bulk-reset variant was removed;
+    // this per-node path is now the sole re-trust surface. CR-02-safe single-property update.
     public async Task ClearHostKeyFingerprintAsync(int nodeId, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);

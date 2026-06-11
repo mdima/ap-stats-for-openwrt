@@ -41,8 +41,27 @@ public sealed class DockerfileStructuralTests
     {
         // INF-01 base lock + multi-stage shape. ARG-substituted form
         // (FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION} AS build) matches the regex.
-        Assert.Matches(@"FROM\s+mcr\.microsoft\.com/dotnet/sdk:\$\{?DOTNET_VERSION\}?\s+AS\s+build",
+        // Phase 22 / M-REL-03: the build stage is now pinned to --platform=$BUILDPLATFORM so
+        // the SDK runs natively while cross-compiling per TARGETARCH — the regex allows the
+        // optional --platform=... prefix between FROM and the SDK image.
+        Assert.Matches(
+            @"FROM\s+(?:--platform=\S+\s+)?mcr\.microsoft\.com/dotnet/sdk:\$\{?DOTNET_VERSION\}?\s+AS\s+build",
             DockerfileText());
+    }
+
+    [Fact]
+    public void Dockerfile_BuildStage_CrossCompilesViaBuildPlatformAndTargetArch()
+    {
+        // Phase 22 / M-REL-03: positively pin the cross-compile contract so a future edit
+        // that drops --platform=$BUILDPLATFORM or the -a $TARGETARCH threading regresses
+        // multi-arch buildx loudly. $BUILDPLATFORM keeps the SDK native; -a $TARGETARCH
+        // cross-compiles the publish output per target RID (empty under plain docker build,
+        // host-RID fallback — the DockerSmokeFixture path).
+        var t = DockerfileText();
+        Assert.Matches(@"FROM\s+--platform=\$BUILDPLATFORM\s+mcr\.microsoft\.com/dotnet/sdk:", t);
+        Assert.Matches(@"(?m)^ARG\s+TARGETARCH\s*$", t);
+        Assert.Matches(@"dotnet\s+restore\s+-a\s+\$TARGETARCH", t);
+        Assert.Matches(@"dotnet\s+publish[\s\S]*?-a\s+\$TARGETARCH", t);
     }
 
     [Fact]

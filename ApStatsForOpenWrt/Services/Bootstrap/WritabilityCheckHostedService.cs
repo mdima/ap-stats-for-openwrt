@@ -9,9 +9,14 @@ namespace ApStatsForOpenWrt.Services.Bootstrap;
 /// <para>
 /// Per CLAUDE.md "Bootstrap order = registration order" the production registration order
 /// MUST be: Writability → Migrations → DataProtectionHealth → AppSettingsBootstrap → Polling.
-/// The probe targets <c>/data</c>, <c>/data/keys</c>, and <c>/logs</c>. These paths are
-/// hard-coded per Phase 1 D-13 (no appsettings indirection); the production container ALWAYS
-/// uses these literal paths.
+/// The probe targets the data root, the Data Protection key-ring dir, and the logs root —
+/// resolved through <see cref="BootstrapPaths"/> from the <c>DATA_ROOT</c> / <c>LOGS_ROOT</c>
+/// env vars. D-13 invariant is preserved: when those env vars are UNSET the probed paths are
+/// byte-identical to the historical literals <c>/data</c>, <c>/data/keys</c>, <c>/logs</c>, so
+/// the production container ALWAYS probes those exact paths. The indirection exists only so the
+/// host can boot against a writable temp dir on a non-root CI runner / Windows dev box (the same
+/// indirection <c>Program.cs</c> already applies to the SQLite connection string, the key ring,
+/// and the Serilog file sink).
 /// </para>
 /// <para>
 /// Failure mode (D-02): on <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/>,
@@ -29,14 +34,26 @@ namespace ApStatsForOpenWrt.Services.Bootstrap;
 /// </summary>
 public sealed class WritabilityCheckHostedService : IHostedService
 {
-    /// <summary>Production target paths (D-13 hard-coded; no env-var indirection).</summary>
-    internal static readonly string[] DefaultPaths = new[] { "/data", "/data/keys", "/logs" };
+    /// <summary>
+    /// Production target paths — resolved from <c>DATA_ROOT</c> / <c>LOGS_ROOT</c> via
+    /// <see cref="BootstrapPaths"/>. Evaluated per access (a property, NOT a
+    /// <c>static readonly</c> field) so the env-var resolution happens at host-build time —
+    /// when the production parameterless ctor runs — rather than being frozen at type load.
+    /// When the env vars are UNSET this is exactly <c>{ "/data", "/data/keys", "/logs" }</c>
+    /// (D-13 byte-identical).
+    /// </summary>
+    internal static string[] DefaultPaths => new[]
+    {
+        BootstrapPaths.DataRoot,
+        BootstrapPaths.KeysDir,
+        BootstrapPaths.LogsRoot,
+    };
 
     private readonly IHostApplicationLifetime _lifetime;
     private readonly ILogger<WritabilityCheckHostedService> _logger;
     private readonly IReadOnlyList<string> _paths;
 
-    /// <summary>Production constructor — uses the hard-coded <see cref="DefaultPaths"/>.</summary>
+    /// <summary>Production constructor — uses the resolved <see cref="DefaultPaths"/>.</summary>
     public WritabilityCheckHostedService(
         IHostApplicationLifetime lifetime,
         ILogger<WritabilityCheckHostedService> logger)

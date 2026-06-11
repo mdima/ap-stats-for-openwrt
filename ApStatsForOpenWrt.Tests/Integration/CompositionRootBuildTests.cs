@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using ApStatsForOpenWrt.Data;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Xunit;
 
 namespace ApStatsForOpenWrt.Tests.Integration;
@@ -68,6 +69,12 @@ public sealed class CompositionRootBuildTests
     {
         private readonly string _dataSource;
 
+        // Redirect DATA_ROOT/LOGS_ROOT to a writable temp dir for the host's lifetime so the
+        // real Program.cs filesystem bootstrap (writability probe + Migrations CreateDirectory)
+        // does not abort startup on a non-root CI runner with an unwritable /data. Constructed
+        // BEFORE CreateClient() (in the ctor) so the env var is live when the bootstrap chain runs.
+        private readonly TempBootstrapRoots _roots = new();
+
         public ValidatingFactory(string dataSource)
         {
             _dataSource = dataSource;
@@ -89,9 +96,8 @@ public sealed class CompositionRootBuildTests
             builder.ConfigureServices(services =>
             {
                 // Mirror SmokeFactoryFixture's DB swap so tests don't depend on /data
-                // being writable. The /data/keys directory is still produced by ASP.NET
-                // Data Protection in the test working dir, which is acceptable for the
-                // single-shot validation this test performs.
+                // being writable. The /data/keys directory is produced by ASP.NET Data
+                // Protection under the redirected DATA_ROOT temp dir, which is writable.
                 var dbDescriptor = services.FirstOrDefault(d =>
                     d.ServiceType == typeof(IDbContextFactory<DatabaseContext>));
                 if (dbDescriptor is not null) services.Remove(dbDescriptor);
@@ -99,6 +105,12 @@ public sealed class CompositionRootBuildTests
                 services.AddDbContextFactory<DatabaseContext>(opts =>
                     opts.UseSqlite($"Data Source={_dataSource};Mode=Memory;Cache=Shared"));
             });
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (disposing) _roots.Dispose();
         }
     }
 }

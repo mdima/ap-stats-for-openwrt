@@ -30,6 +30,38 @@ public sealed class NodePoller(
     // for the same NodeId in one cycle).
     private static readonly ConcurrentDictionary<int, SemaphoreSlim> _perNodeGate = new();
 
+    /// <summary>
+    /// M-HRD-09 (v1.0 / plan 21-05): in-memory cleanup entry point invoked from
+    /// <c>NodeRepo.DeleteAsync</c> AFTER the row deletion commits. Removes the per-node
+    /// <see cref="SemaphoreSlim"/> mapping for <paramref name="nodeId"/> so a reused id gets a
+    /// fresh gate, closing the stale-gate footgun. No DB write — the per-node gate is
+    /// process-scoped polling-plane state only (mirrors
+    /// <see cref="OpenWrtAdapterCache.ClearForNode"/>'s <c>TryRemove</c> shape). Harmless no-op
+    /// when no entry exists for the id.
+    /// <para>
+    /// CR-01 (21-REVIEW): deliberately does NOT <c>Dispose()</c> the removed semaphore. The UI
+    /// delete path and the polling fan-out are not mutually exclusive — a concurrent in-flight
+    /// <see cref="PollAsync"/> may still hold this instance and will call <c>Release()</c> in its
+    /// <c>finally</c>. Disposing here would throw <see cref="ObjectDisposedException"/> from that
+    /// outer finally (outside the broad probe catch), faulting the cycle. An orphaned
+    /// <see cref="SemaphoreSlim"/> with no materialized wait handle is GC-reclaimable, so dropping
+    /// the entry alone is sufficient — and leaking one int→semaphore entry per deleted id is
+    /// negligible.
+    /// </para>
+    /// </summary>
+    internal static void RemoveNodeGate(int nodeId)
+    {
+        // Remove the mapping (do NOT Dispose — see XML-doc CR-01 note above).
+        _perNodeGate.TryRemove(nodeId, out _);
+    }
+
+    /// <summary>
+    /// Test-only observation seam for the M-HRD-09 cleanup pin: reports whether a per-node gate
+    /// entry currently exists for <paramref name="nodeId"/>. The dictionary is private static;
+    /// this avoids reflection in the cleanup test (<c>RemoveNodeGate</c> removes; this observes).
+    /// </summary>
+    internal static bool HasNodeGate(int nodeId) => _perNodeGate.ContainsKey(nodeId);
+
     public async Task<NodeProbeResult> PollAsync(CancellationToken ct)
     {
         // POLL-03 / B2 LOCK: acquire per-node semaphore non-blockingly.

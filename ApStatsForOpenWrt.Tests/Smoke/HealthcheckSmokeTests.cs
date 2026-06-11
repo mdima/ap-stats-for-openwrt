@@ -107,7 +107,9 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
         }
         finally
         {
+#pragma warning disable xUnit1051 // deliberate None — teardown must run even if the test's token is cancelled
             await container.StopAsync(CancellationToken.None);
+#pragma warning restore xUnit1051
             await container.DisposeAsync();
         }
     }
@@ -147,7 +149,9 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
         }
         finally
         {
+#pragma warning disable xUnit1051 // deliberate None — teardown must run even if the test's token is cancelled
             await container.StopAsync(CancellationToken.None);
+#pragma warning restore xUnit1051
             await container.DisposeAsync();
         }
     }
@@ -170,7 +174,9 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
         }
         finally
         {
+#pragma warning disable xUnit1051 // deliberate None — teardown must run even if the test's token is cancelled
             await container.StopAsync(CancellationToken.None);
+#pragma warning restore xUnit1051
             await container.DisposeAsync();
         }
     }
@@ -223,7 +229,9 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
         }
         finally
         {
+#pragma warning disable xUnit1051 // deliberate None — teardown must run even if the test's token is cancelled
             await container.StopAsync(CancellationToken.None);
+#pragma warning restore xUnit1051
             await container.DisposeAsync();
         }
     }
@@ -261,7 +269,9 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
         }
         finally
         {
+#pragma warning disable xUnit1051 // deliberate None — teardown must run even if the test's token is cancelled
             await container.StopAsync(CancellationToken.None);
+#pragma warning restore xUnit1051
             await container.DisposeAsync();
         }
     }
@@ -327,7 +337,9 @@ public sealed class HealthcheckSmokeTests(DockerSmokeFixture fixture) : IClassFi
         }
         finally
         {
+#pragma warning disable xUnit1051 // deliberate None — teardown must run even if the test's token is cancelled
             await container.StopAsync(CancellationToken.None);
+#pragma warning restore xUnit1051
             await container.DisposeAsync();
         }
     }

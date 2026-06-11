@@ -205,6 +205,58 @@ public sealed class SubnetSweepProbeTests
     }
 
     [Fact]
+    public async Task PollAsync_CidrListBranch_BypassesSshClientDerivation_OmitsIfaceFlag_AndMapsMacs()
+    {
+        // M-HRD-08 (v1.0 hardening) — E2E pin of the CIDR-list branch as the Dropbear
+        // `$SSH_CLIENT`-unset workaround. When SubnetScanRanges is set, PollAsync must:
+        //   (a) NEVER issue `ip route get "${SSH_CLIENT%% *}"` (the auto-derivation that fails
+        //       on Dropbear, which does not export $SSH_CLIENT) — the operator-configured CIDR
+        //       list short-circuits derivation entirely;
+        //   (b) build the sweep command WITHOUT the `-I <iface>` flag (iface stays null on the
+        //       CIDR branch — the AP's own routing picks the interface);
+        //   (c) still return a Success carrying the parsed MAC→IP mappings from the sweep output.
+        // The T-09-03-05 peerIp gate is still enforced at entry (valid IPv4 required) but the
+        // value is NOT interpolated into command construction on this branch (SC4 isolation).
+        //
+        // Unlike PollAsync_SubnetScanRangesSet_UsesCidrListWithoutAutoDerivation (theory,
+        // skip-guarded on a captured arping.txt), this test provisions its own arping fixture
+        // inline so it ALWAYS runs and can assert deterministic MAC→IP output + the -I omission.
+        var ct = TestContext.Current.CancellationToken;
+        var fixtureDir = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT");
+        var session = new FakeSshSession(fixtureDir);
+        session.CommandOverrides["arping -c1 -w1"] = "arping-cidr-e2e";
+
+        // Two responding hosts inside 192.168.1.0/30 (.1 and .2 are the usable hosts); BusyBox
+        // arping output, lowercase MACs — the parser must uppercase them.
+        File.WriteAllText(Path.Combine(fixtureDir, "arping-cidr-e2e.txt"),
+            "ARPING 192.168.1.1 from 192.168.1.1 br-lan\n" +
+            "Unicast reply from 192.168.1.1 [de:ad:be:ef:00:01] 0.500ms\n" +
+            "ARPING 192.168.1.2 from 192.168.1.1 br-lan\n" +
+            "Unicast reply from 192.168.1.2 [de:ad:be:ef:00:02] 0.700ms\n");
+
+        var probe = new SubnetSweepProbe(session, NullLogger<SubnetSweepProbe>.Instance);
+        var node = MakeNode(ranges: "192.168.1.0/30");
+        var result = await probe.PollAsync(node, peerIp: "192.168.1.42", ct);
+
+        // (c) Success with the parsed, uppercased MAC→IP mappings.
+        var success = Assert.IsType<SubnetSweepProbeResult.Success>(result);
+        Assert.Equal("192.168.1.1", success.MacToIp["DE:AD:BE:EF:00:01"]);
+        Assert.Equal("192.168.1.2", success.MacToIp["DE:AD:BE:EF:00:02"]);
+
+        // (a) $SSH_CLIENT auto-derivation must NOT have run.
+        Assert.DoesNotContain(session.CommandsIssued, c => c.Contains("${SSH_CLIENT%% *}", StringComparison.Ordinal));
+        Assert.DoesNotContain(session.CommandsIssued, c => c.StartsWith("ip route get", StringComparison.Ordinal));
+        Assert.DoesNotContain(session.CommandsIssued, c => c.StartsWith("ip -4 addr show", StringComparison.Ordinal));
+
+        // (b) the sweep command omits the `-I ` iface flag (iface is null on the CIDR branch).
+        var sweep = session.CommandsIssued.Single(c => c.Contains("arping -c1 -w1"));
+        Assert.DoesNotContain("-I ", sweep);
+
+        // Sanity: the capability probe + the sweep loop are the issued commands.
+        Assert.Contains(session.CommandsIssued, c => c == "command -v arping");
+    }
+
+    [Fact]
     public async Task PollAsync_ArpingAbsent_FallsBackToPing_DoesNotIssueArpingLoop()
     {
         var ct = TestContext.Current.CancellationToken;

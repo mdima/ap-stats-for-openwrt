@@ -1,0 +1,9 @@
+# GitHub issue-template config.
+# Disables blank issues so contributors use the structured forms, and redirects
+# usage questions to Discussions. The Discussions URL uses the GitHub repo owner
+# `mdima` (NOT the Docker Hub `michele73` namespace — do not conflate).
+blank_issues_enabled: false
+contact_links:
+  - name: Question / discussion
+    url: https://github.com/mdima/ap-stats-for-openwrt/discussions
+    about: Ask usage questions in Discussions — Issues are for actionable bugs and requests.

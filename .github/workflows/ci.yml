@@ -4,17 +4,21 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: ['milestone-*']
+    branches: [main]
+    tags: ['v*']
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
-          dotnet-version: 10.x
+          # WR-05 review fix: pin to the global.json SDK family (10.0.x) not the
+          # floating 10.x feature-band — the MTP toolchain is version-fragile
+          # (CLAUDE.md) so a new feature band must not slip onto the runner silently.
+          dotnet-version: 10.0.x
 
       - name: Restore
         run: dotnet restore
@@ -52,7 +56,8 @@ jobs:
           echo "path=coverage.cobertura.xml" >> "$GITHUB_OUTPUT"
 
       - name: Enforce 80% line + 80% branch coverage
-        uses: irongut/CodeCoverageSummary@v1.3.0
+        # WR-02 review fix: SHA-pinned (supply-chain hardening for public repo).
+        uses: irongut/CodeCoverageSummary@51cc3a756ddcd398d447c044c02cb6aa83fdae95 # v1.3.0
         with:
           filename: coverage.cobertura.xml
           badge: false
@@ -63,7 +68,7 @@ jobs:
 
       - name: Upload coverage artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage
           path: coverage.cobertura.xml
@@ -80,17 +85,29 @@ jobs:
   smoke-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
-          dotnet-version: 10.x
+          # WR-05 review fix: pin to the global.json SDK family (10.0.x) not the
+          # floating 10.x feature-band — the MTP toolchain is version-fragile
+          # (CLAUDE.md) so a new feature band must not slip onto the runner silently.
+          dotnet-version: 10.0.x
 
       - name: Restore
         run: dotnet restore
 
       - name: Build (Release)
         run: dotnet build -c Release --no-restore
+
+      # Phase 21 / Plan 21-04 — M-HRD-04 D-05/D-06. The Microsoft.Playwright NuGet package
+      # ships only the managed driver, not the Chromium binary. CspBrowserSmokeTests (the
+      # CSP browser gate) needs Chromium provisioned in the fresh runner before the smoke
+      # run, otherwise Playwright throws "Executable doesn't exist". chromium ONLY (not all
+      # browsers) to minimize download; ubuntu-latest ships pwsh. This job stays coverage-
+      # exempt (no --coverage), same as the smoke run below.
+      - name: Install Playwright Chromium
+        run: pwsh ApStatsForOpenWrt.Tests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
 
       - name: Smoke tests (requires Docker daemon)
         run: |

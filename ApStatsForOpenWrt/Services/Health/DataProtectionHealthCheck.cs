@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Bootstrap;
 
 namespace ApStatsForOpenWrt.Services.Health;
 
@@ -9,7 +10,8 @@ namespace ApStatsForOpenWrt.Services.Health;
 /// <list type="bullet">
 ///   <item><description>Guard 1: <see cref="INodeRepo.AnyEncryptedPasswordsAsync"/> == false → Healthy
 ///   (no encrypted creds means key-ring readability is irrelevant).</description></item>
-///   <item><description>Guard 2: <c>/data/keys</c> exists with ≥ 1 <c>*.xml</c> file → Healthy.</description></item>
+///   <item><description>Guard 2: <see cref="BootstrapPaths.KeysDir"/> (<c>{DataRoot}/keys</c>)
+///   exists with ≥ 1 <c>*.xml</c> file → Healthy.</description></item>
 ///   <item><description>Otherwise (creds present but no keys) → Unhealthy.</description></item>
 /// </list>
 /// <para>
@@ -25,15 +27,17 @@ namespace ApStatsForOpenWrt.Services.Health;
 /// consume the same <see cref="INodeRepo"/> seam.
 /// </para>
 /// <para>
-/// <c>KeyRingPath</c> is hard-coded to <c>/data/keys</c> per D-13 — no appsettings indirection.
-/// Local Windows dev redirects via the <c>DATA_ROOT</c> env var read in <c>Program.cs</c>; this
-/// health check is concerned only with the production-volume contract.
+/// The key-ring path is resolved via <see cref="BootstrapPaths.KeysDir"/> (the <c>DATA_ROOT</c>
+/// env var, default <c>/data</c> → <c>/data/keys</c> in production) per D-13 — NOT appsettings
+/// indirection and NOT a hard-coded literal. This is the SAME resolver <c>Program.cs</c> uses to
+/// PERSIST the key ring, so the probe targets exactly where the keys live; local Windows dev (and
+/// the non-root CI runner) redirects via <c>DATA_ROOT</c> exactly as persistence does. D-13's
+/// principle is "env var, not appsettings", which <c>BootstrapPaths</c> honors. When
+/// <c>DATA_ROOT</c> is unset (the shipped container) the path is byte-identical to <c>/data/keys</c>.
 /// </para>
 /// </summary>
 public sealed class DataProtectionHealthCheck(INodeRepo nodeRepo) : IHealthCheck
 {
-    private const string KeyRingPath = "/data/keys";
-
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
         CancellationToken cancellationToken = default)
@@ -44,9 +48,9 @@ public sealed class DataProtectionHealthCheck(INodeRepo nodeRepo) : IHealthCheck
             if (!await nodeRepo.AnyEncryptedPasswordsAsync(cancellationToken))
                 return HealthCheckResult.Healthy("ok");
 
-            // Guard 2 — encrypted creds present; verify the key ring is readable.
-            var keysExist = Directory.Exists(KeyRingPath)
-                         && Directory.EnumerateFiles(KeyRingPath, "*.xml").Any();
+            // Guard 2 — encrypted creds present; verify the resolved key ring is readable.
+            var keysExist = Directory.Exists(BootstrapPaths.KeysDir)
+                         && Directory.EnumerateFiles(BootstrapPaths.KeysDir, "*.xml").Any();
             return keysExist
                 ? HealthCheckResult.Healthy("ok")
                 : HealthCheckResult.Unhealthy("fail");

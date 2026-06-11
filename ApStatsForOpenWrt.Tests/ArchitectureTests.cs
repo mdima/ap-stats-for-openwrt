@@ -228,4 +228,168 @@ public sealed class ArchitectureTests
             $"Offending csproj(s): {string.Join(", ", violators)}. " +
             $"Fix: delete the <Version> element from each listed file; Directory.Build.props is the single source of truth.");
     }
+
+    /// <summary>
+    /// ci-test-data-writability (residual-fix regression guard). EVERY
+    /// <see cref="Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory{TEntryPoint}"/>
+    /// subclass in the TEST assembly boots the real <c>Program.cs</c> bootstrap chain, whose
+    /// writability probe + <c>MigrationsHostedService.CreateDirectory</c> target the resolved
+    /// <c>DATA_ROOT</c>/<c>LOGS_ROOT</c>. On a non-root CI runner the default <c>/data</c> is
+    /// unwritable, so any host-booting factory that does NOT redirect those roots to a writable
+    /// temp dir aborts host startup and fails ONLY on a clean runner (the dev box masks it via a
+    /// writable <c>C:\data</c>). The original fix wired 5 factories; a real-runner re-run still
+    /// failed because 8 more host-boot sites were missed. This test asserts every such subclass
+    /// declares a <see cref="ApStatsForOpenWrt.Tests.TestSupport.TempBootstrapRoots"/> field so a
+    /// future host-booting test that forgets the redirect fails FAST locally, not only on CI.
+    /// </summary>
+    [Fact]
+    public void EveryWebApplicationFactory_RedirectsBootstrapRootsToTempDir()
+    {
+        var testAssembly = typeof(ArchitectureTests).Assembly;
+        var tempRootsType = typeof(ApStatsForOpenWrt.Tests.TestSupport.TempBootstrapRoots);
+
+        // Every concrete subclass of WebApplicationFactory<Program> in the test assembly.
+        var hostBootFactories = testAssembly.GetTypes()
+            .Where(t => t.IsClass && !t.IsAbstract)
+            .Where(IsWebApplicationFactoryOfProgram)
+            .ToList();
+
+        // Sanity: the reflection probe must actually find the known host-booting factories
+        // (e.g. SmokeFactoryFixture). A zero count would mean the matcher silently broke and
+        // the guard would vacuously pass.
+        Assert.NotEmpty(hostBootFactories);
+
+        var violators = hostBootFactories
+            .Where(t => !DeclaresTempBootstrapRootsField(t, tempRootsType))
+            .Select(t => t.FullName ?? t.Name)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            violators.Count == 0,
+            "ci-test-data-writability: every WebApplicationFactory<Program> subclass MUST hold a " +
+            "TempBootstrapRoots field so DATA_ROOT/LOGS_ROOT are redirected to a writable temp dir " +
+            "BEFORE the real Program.cs bootstrap runs (otherwise the writability probe aborts host " +
+            "startup on a non-root CI runner and the test fails only on a clean runner). " +
+            "Offending factory(ies): " + string.Join(", ", violators) + ". " +
+            "Fix: add `private readonly ApStatsForOpenWrt.Tests.TestSupport.TempBootstrapRoots _roots = new();` " +
+            "as a field initializer and dispose it in the factory's Dispose/DisposeAsync.");
+
+        static bool IsWebApplicationFactoryOfProgram(Type t)
+        {
+            for (var b = t.BaseType; b is not null; b = b.BaseType)
+            {
+                if (b.IsGenericType &&
+                    b.GetGenericTypeDefinition() == typeof(Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<>) &&
+                    b.GetGenericArguments()[0] == typeof(Program))
+                    return true;
+            }
+            return false;
+        }
+
+        static bool DeclaresTempBootstrapRootsField(Type t, Type tempRootsType)
+        {
+            // Walk the type and any (non-WAF) base types it introduces, so a shared base helper
+            // that holds the field also satisfies the guard.
+            for (var cur = t; cur is not null && cur != typeof(object); cur = cur.BaseType)
+            {
+                var fields = cur.GetFields(
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+                if (fields.Any(f => tempRootsType.IsAssignableFrom(f.FieldType)))
+                    return true;
+            }
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 260609-9fe regression guard. The two Data Protection key-ring guards
+    /// (<c>DataProtectionHealthHostedService</c>, <c>DataProtectionHealthCheck</c>) MUST resolve the
+    /// key-ring path via <c>BootstrapPaths.KeysDir</c> (the <c>DATA_ROOT</c> env-var resolver), NOT a
+    /// bare <c>"/data/keys"</c> string literal in executable code. The original bug: the guards
+    /// hard-coded <c>"/data/keys"</c> while <c>Program.cs</c> persisted keys to <c>{DATA_ROOT}/keys</c>,
+    /// so under local dev (<c>DATA_ROOT=C:\temp\data</c>) the guard probed an empty <c>C:\data\keys</c>,
+    /// saw encrypted creds, logged FTL "key ring is empty" and called <c>StopApplication()</c>. This
+    /// test scans <c>*.cs</c> under <c>ApStatsForOpenWrt/Services</c> and fails if any NON-COMMENT line
+    /// contains the <c>"/data/keys"</c> literal — doc comments mentioning it for explanation do not trip.
+    /// </summary>
+    [Fact]
+    public void NoServiceSourceHardCodesDataKeysLiteral()
+    {
+        // Walk up from the test binary to the repo root (Directory.Build.props marker), then into
+        // the production Services dir — same path-discovery idiom as
+        // NoCsprojDeclaresVersion_DirectoryBuildPropsIsTheOnlySource.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Directory.Build.props")))
+            dir = dir.Parent;
+        Assert.NotNull(dir); // sanity — repo root must be discoverable from the test binary
+
+        var servicesDir = Path.Combine(dir!.FullName, "ApStatsForOpenWrt", "Services");
+        Assert.True(Directory.Exists(servicesDir),
+            $"260609-9fe: production Services dir not found at '{servicesDir}' — path probe broke; guard would be vacuous.");
+
+        var serviceFiles = Directory.GetFiles(servicesDir, "*.cs", SearchOption.AllDirectories)
+            .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .ToList();
+
+        // Sanity: the probe must actually find source files (a zero count would mean the path
+        // silently broke and the guard would vacuously pass) — mirrors Assert.NotEmpty(hostBootFactories).
+        Assert.NotEmpty(serviceFiles);
+
+        var violators = serviceFiles
+            .Where(path => FileHasDataKeysLiteralInCode(path))
+            .Select(path => Path.GetRelativePath(dir.FullName, path))
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            violators.Count == 0,
+            "260609-9fe: no executable code under ApStatsForOpenWrt/Services may hard-code the " +
+            "key-ring path. Resolve via BootstrapPaths.KeysDir — the DATA_ROOT env-var resolver — " +
+            "not a bare '/data/keys' literal; this prevents the 260609-9fe local-dev fail-fast " +
+            "regression. Offending file(s): " + string.Join(", ", violators) + ".");
+
+        // Returns true if any NON-COMMENT line in the file contains the "/data/keys" literal.
+        // Strips // and /// line comments and the interior of /* */ block comments (incl. XML-doc
+        // prose) so an explanatory mention of /data/keys does not trip the guard.
+        static bool FileHasDataKeysLiteralInCode(string path)
+        {
+            var inBlockComment = false;
+            foreach (var raw in File.ReadLines(path))
+            {
+                var line = raw;
+
+                // Handle (single-line and multi-line) /* */ block comments.
+                if (inBlockComment)
+                {
+                    var end = line.IndexOf("*/", StringComparison.Ordinal);
+                    if (end < 0) continue;            // entire line is still inside the block comment
+                    line = line[(end + 2)..];          // resume scanning after the comment closes
+                    inBlockComment = false;
+                }
+
+                var open = line.IndexOf("/*", StringComparison.Ordinal);
+                if (open >= 0)
+                {
+                    var close = line.IndexOf("*/", open + 2, StringComparison.Ordinal);
+                    if (close >= 0)
+                        line = line.Remove(open, close + 2 - open); // strip inline /* ... */
+                    else
+                    {
+                        line = line[..open];          // strip from /* to EOL; remember we're inside
+                        inBlockComment = true;
+                    }
+                }
+
+                // Strip // and /// line comments (XML-doc included).
+                var slash = line.IndexOf("//", StringComparison.Ordinal);
+                if (slash >= 0) line = line[..slash];
+
+                if (line.Contains("/data/keys", StringComparison.Ordinal))
+                    return true;
+            }
+            return false;
+        }
+    }
 }

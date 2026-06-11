@@ -75,6 +75,9 @@ public sealed class DetailTests
         public Task DeleteAbsentAsync(int wiFiNodeId, IReadOnlyCollection<string> presentMacs, CancellationToken ct = default) => Task.CompletedTask;
         public Task DeleteAbsentAsync(ApStatsForOpenWrt.Data.DatabaseContext db, int wiFiNodeId, IReadOnlyCollection<string> presentMacs, CancellationToken ct = default) => Task.CompletedTask;
         public Task<bool> AnyEnabledAsync(CancellationToken ct = default) => Task.FromResult(Rows.Any(r => r.Enabled));
+        // M-HRD-10: not exercised by these tests — empty batched read satisfies the contract.
+        public Task<IReadOnlyDictionary<int, IReadOnlyList<WiFiNetwork>>> GetAllGroupedByNodeAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyDictionary<int, IReadOnlyList<WiFiNetwork>>>(new Dictionary<int, IReadOnlyList<WiFiNetwork>>());
     }
 
     private sealed class StubDiscovery : IWlanDiscoveryService

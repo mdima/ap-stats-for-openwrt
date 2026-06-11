@@ -3,6 +3,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using ApStatsForOpenWrt.Data;
 using ApStatsForOpenWrt.Data.Models;
 using ApStatsForOpenWrt.Data.Repositories;
+using ApStatsForOpenWrt.Services.Bootstrap;
 using ApStatsForOpenWrt.Services.Health;
 using ApStatsForOpenWrt.Tests.TestSupport;
 using Xunit;
@@ -14,14 +15,23 @@ namespace ApStatsForOpenWrt.Tests.Health;
 /// Mirrors the three arms of <c>DataProtectionHealthHostedServiceTests</c>:
 /// <list type="bullet">
 ///   <item>Guard 1 — no encrypted credentials → Healthy (key ring is irrelevant).</item>
-///   <item>Guard 2 — creds present + /data/keys populated → Healthy.</item>
-///   <item>Negative — creds present + /data/keys missing → Unhealthy.</item>
+///   <item>Guard 2 — creds present + key-ring dir populated → Healthy.</item>
+///   <item>Negative — creds present + key-ring dir empty → Unhealthy.</item>
 /// </list>
-/// Environment-dependent arms use the same skip-with-Inconclusive guard as
-/// <c>DataProtectionHealthHostedServiceTests.cs:91-96</c> so the assertions don't false-fail on
-/// an operator's dev box that happens to have <c>/data/keys</c> populated (or NOT populated
-/// for the negative arm).
+/// 260609-9fe: the SUT now probes <see cref="BootstrapPaths.KeysDir"/> (the <c>DATA_ROOT</c>-env
+/// resolver). The <c>BootstrapRootsModuleInit</c> [ModuleInitializer] points <c>DATA_ROOT</c> at a
+/// writable temp dir with a pre-created EMPTY <c>{root}/keys</c>, so the env-dependent arms are
+/// driven DETERMINISTICALLY in <c>BootstrapPaths.KeysDir</c> (drop a non-PII dummy <c>*.xml</c> for
+/// the populated arm; delete stray <c>*.xml</c> for the empty arm) — no <c>Assert.Skip</c> / no
+/// host-drive <c>/data/keys</c> dependency.
+/// <para>
+/// Serialized with <c>DataProtectionHealthHostedServiceTests</c> via
+/// <c>[Collection("DataProtectionKeyRingSerial")]</c> — both classes share the process-global
+/// <see cref="BootstrapPaths.KeysDir"/> and <see cref="Environment.ExitCode"/>, so their key-ring
+/// arms must not run in parallel.
+/// </para>
 /// </summary>
+[Collection("DataProtectionKeyRingSerial")]
 public sealed class DataProtectionHealthCheckTests(SqliteInMemoryFixture sql) : IClassFixture<SqliteInMemoryFixture>
 {
     private readonly SqliteInMemoryFixture _sql = sql;
@@ -48,17 +58,15 @@ public sealed class DataProtectionHealthCheckTests(SqliteInMemoryFixture sql) : 
     [Fact]
     public async Task ReturnsHealthy_WhenCredsExistAndKeyRingPopulated()
     {
-        // Guard 1 false + Guard 2 true. Skip with Inconclusive on dev boxes that don't have
-        // /data/keys populated — same idiom as DataProtectionHealthHostedServiceTests.cs:91-96.
-        if (!Directory.Exists("/data/keys") ||
-            !Directory.EnumerateFiles("/data/keys", "*.xml").Any())
-        {
-            Assert.Skip("Skipping positive-arm: /data/keys not populated on this host (CI runner / dev box without volume mount). The probe behavior is exercised in the integration-test arm in plan 06-03.");
-        }
-
+        // Guard 1 false + Guard 2 true. Deterministic: drop a non-PII dummy *.xml into the probed
+        // BootstrapPaths.KeysDir (NEVER real key material), clean up in finally. No Assert.Skip.
         var ct = TestContext.Current.CancellationToken;
         var hostname = $"dphc-positive-{Guid.NewGuid():N}";
         await SeedEncryptedNodeAsync(hostname, ct);
+
+        Directory.CreateDirectory(BootstrapPaths.KeysDir);
+        var dummyKey = Path.Combine(BootstrapPaths.KeysDir, $"key-{Guid.NewGuid():N}.xml");
+        await File.WriteAllTextAsync(dummyKey, "<key/>", ct);
 
         try
         {
@@ -72,6 +80,7 @@ public sealed class DataProtectionHealthCheckTests(SqliteInMemoryFixture sql) : 
         }
         finally
         {
+            if (File.Exists(dummyKey)) File.Delete(dummyKey);
             await RemoveSeededNodeAsync(hostname, ct);
         }
     }
@@ -79,18 +88,16 @@ public sealed class DataProtectionHealthCheckTests(SqliteInMemoryFixture sql) : 
     [Fact]
     public async Task ReturnsUnhealthy_WhenCredsExistButKeyRingMissing()
     {
-        // Guard 1 false + Guard 2 false. Hard to test on a host where /data/keys IS populated;
-        // skip-with-Inconclusive in that direction. The integration test in plan 06-03 covers
-        // the negative arm via a SmokeFactoryFixture override.
-        if (Directory.Exists("/data/keys") &&
-            Directory.EnumerateFiles("/data/keys", "*.xml").Any())
-        {
-            Assert.Skip("Skipping negative-arm: /data/keys IS populated on this host; the unhealthy condition is unreachable here. Plan 06-03's HealthEndpointTests exercises this arm via fixture override.");
-        }
-
+        // Guard 1 false + Guard 2 false. Deterministic: ensure BootstrapPaths.KeysDir exists with
+        // ZERO *.xml (ModuleInit pre-creates it empty; defensively delete stray *.xml a parallel
+        // positive arm may have written). No Assert.Skip.
         var ct = TestContext.Current.CancellationToken;
         var hostname = $"dphc-negative-{Guid.NewGuid():N}";
         await SeedEncryptedNodeAsync(hostname, ct);
+
+        Directory.CreateDirectory(BootstrapPaths.KeysDir);
+        foreach (var stray in Directory.EnumerateFiles(BootstrapPaths.KeysDir, "*.xml"))
+            File.Delete(stray);
 
         try
         {

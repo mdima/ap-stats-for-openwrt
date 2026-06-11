@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using ApStatsForOpenWrt.Data;
+using ApStatsForOpenWrt.Tests.TestSupport;
 using Serilog;
 using Serilog.Core;
 using Serilog.Events;
@@ -26,10 +27,17 @@ namespace ApStatsForOpenWrt.Tests.Integration;
 /// else (no shared state with SmokeFactoryFixture, no production console / file sinks — the
 /// test scope cares only about the filter behaviour).
 /// </para>
+/// <para>
+/// Like <see cref="SmokeFactoryFixture"/> it also redirects <c>DATA_ROOT</c>/<c>LOGS_ROOT</c> to a
+/// writable temp dir (<see cref="TempBootstrapRoots"/>) so the real <c>Program.cs</c> filesystem
+/// bootstrap (writability probe + <c>MigrationsHostedService.CreateDirectory</c>) does not abort
+/// host startup on a non-root CI runner where the default <c>/data</c> is unwritable.
+/// </para>
 /// </summary>
 public sealed class SerilogCapturingFixture : WebApplicationFactory<Program>, IAsyncLifetime
 {
     private readonly string _dataSource = $"SerilogCap-{Guid.NewGuid():N}";
+    private readonly TempBootstrapRoots _roots = new();
     private SqliteConnection? _keepAlive;
 
     /// <summary>
@@ -96,6 +104,7 @@ public sealed class SerilogCapturingFixture : WebApplicationFactory<Program>, IA
     {
         _keepAlive?.Dispose();
         base.Dispose();
+        _roots.Dispose();
         return ValueTask.CompletedTask;
     }
 }

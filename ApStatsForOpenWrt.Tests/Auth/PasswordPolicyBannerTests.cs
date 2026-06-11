@@ -382,6 +382,13 @@ public sealed class PasswordPolicyBannerTests
         private readonly string _dataSource = $"PolicyBanner-{Guid.NewGuid():N}";
         private Microsoft.Data.Sqlite.SqliteConnection? _keepAlive;
 
+        // ci-test-data-writability (residual fix) -- redirect DATA_ROOT/LOGS_ROOT to a writable
+        // per-instance temp dir BEFORE the real Program.cs bootstrap runs, so the writability
+        // probe + MigrationsHostedService.CreateDirectory do not abort host startup on a non-root
+        // CI runner with an unwritable /data. Field initializer => constructed in the ctor, before
+        // the first CreateClient()/Services access triggers the host build. Restored on dispose.
+        private readonly ApStatsForOpenWrt.Tests.TestSupport.TempBootstrapRoots _roots = new();
+
         protected override void ConfigureWebHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)
         {
             builder.UseEnvironment("Testing");
@@ -407,6 +414,7 @@ public sealed class PasswordPolicyBannerTests
         public new ValueTask DisposeAsync()
         {
             _keepAlive?.Dispose();
+            _roots.Dispose();
             base.Dispose();
             return ValueTask.CompletedTask;
         }

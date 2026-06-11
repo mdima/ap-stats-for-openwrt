@@ -185,4 +185,48 @@ public sealed class NetworkRepoTests(SqliteInMemoryFixture fixture) : IClassFixt
 
         Assert.True(await nets.AnyEnabledAsync(ct));
     }
+
+    // ── M-HRD-10: GetAllGroupedByNodeAsync (batched dashboard read; replaces the N+1 loop) ──
+
+    [Fact]
+    public async Task GetAllGroupedByNodeAsync_GroupsNetworksByNodeId()
+    {
+        // M-HRD-10 — a single batched read returns every network grouped by its owning node.
+        // Two nodes each with their own networks must appear under their own keys.
+        var ct = TestContext.Current.CancellationToken;
+        var repo = CreateRepo();
+        var nodeA = await SeedNodeAsync(ct);
+        var nodeB = await SeedNodeAsync(ct);
+
+        var macA1 = $"1A:00:00:00:00:{Random.Shared.Next(0, 255):X2}";
+        var macA2 = $"1A:00:00:00:01:{Random.Shared.Next(0, 255):X2}";
+        var macB1 = $"1B:00:00:00:00:{Random.Shared.Next(0, 255):X2}";
+
+        await repo.UpsertManyAsync(nodeA, [MakeNetwork("a-1", macA1), MakeNetwork("a-2", macA2)], ct);
+        await repo.UpsertManyAsync(nodeB, [MakeNetwork("b-1", macB1)], ct);
+
+        var grouped = await repo.GetAllGroupedByNodeAsync(ct);
+
+        Assert.True(grouped.ContainsKey(nodeA));
+        Assert.True(grouped.ContainsKey(nodeB));
+        Assert.Equal(2, grouped[nodeA].Count);
+        Assert.Single(grouped[nodeB]);
+        Assert.Contains(grouped[nodeA], w => w.MacAddress == macA1 && w.SSID == "a-1");
+        Assert.Contains(grouped[nodeA], w => w.MacAddress == macA2 && w.SSID == "a-2");
+        Assert.Contains(grouped[nodeB], w => w.MacAddress == macB1 && w.SSID == "b-1");
+    }
+
+    [Fact]
+    public async Task GetAllGroupedByNodeAsync_NodeWithZeroNetworks_AbsentFromDictionary()
+    {
+        // M-HRD-10 — a node with no networks contributes NO key (mirrors the old loop, where
+        // a per-node GetByNodeAsync returning empty added nothing to networkLookup).
+        var ct = TestContext.Current.CancellationToken;
+        var repo = CreateRepo();
+        var emptyNode = await SeedNodeAsync(ct);   // seeded but no networks upserted
+
+        var grouped = await repo.GetAllGroupedByNodeAsync(ct);
+
+        Assert.False(grouped.ContainsKey(emptyNode));
+    }
 }

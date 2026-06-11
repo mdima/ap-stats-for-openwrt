@@ -1,6 +1,27 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Options;
 
 namespace ApStatsForOpenWrt.Services.Security;
+
+/// <summary>
+/// M-HRD-04 (plan 21-03) — the runtime-assembled CSP injected into
+/// <see cref="SecurityHeadersMiddleware"/>. The <c>script-src</c> <c>sha256-</c> hash stays in
+/// the compile-time <see cref="SecurityHeadersMiddleware.ContentSecurityPolicyValue"/> const
+/// (so <c>CspScriptHashTests</c> can pin it). The only runtime-variable part is the
+/// <c>connect-src</c> directive, which APPENDS validated <c>Csp__ConnectSrc</c> origins to
+/// <c>'self'</c>. The final string is built ONCE at startup (after fail-loud validation in
+/// Program.cs) and passed here so <see cref="SecurityHeadersMiddleware.SetHeaders"/> stays a
+/// pure REPLACE (Open Question 1 — build-once-inject recommendation).
+/// </summary>
+public sealed class SecurityHeadersOptions
+{
+    /// <summary>
+    /// The fully-assembled Content-Security-Policy header value emitted on every response.
+    /// Defaults to the compile-time const (no <c>Csp__ConnectSrc</c> origins appended).
+    /// </summary>
+    public string ContentSecurityPolicy { get; set; } =
+        SecurityHeadersMiddleware.ContentSecurityPolicyValue;
+}
 
 /// <summary>
 /// M-SEC-07 / plan 16-05 — baseline security response headers middleware. Emits the
@@ -15,9 +36,20 @@ namespace ApStatsForOpenWrt.Services.Security;
 /// </list>
 /// </para>
 /// <para>
-/// <c>'unsafe-inline'</c> stays in <c>script-src</c> + <c>style-src</c> for v0.12
-/// because <c>App.razor</c> carries an inline boot script and AdminLTE/Bootstrap
-/// ships inline <c>&lt;style&gt;</c> blocks. v0.13 polish candidate to externalize.
+/// M-HRD-04 (plan 21-03) HARDENED <c>script-src</c>: <c>'unsafe-inline'</c> is DROPPED in
+/// favor of a <c>sha256-</c> hash of the SINGLE inline boot <c>&lt;script&gt;</c> in
+/// <c>App.razor</c> (the anti-FOUC theme/sidebar pre-paint). The hash is LF-normalized so it
+/// is identical on a Windows checkout and the Linux container build (repo-root
+/// <c>.gitattributes</c> <c>*.razor eol=lf</c>, RESEARCH Pitfall 1); <c>CspScriptHashTests</c>
+/// recomputes it from source and fails the build on any un-re-pinned boot-script edit.
+/// </para>
+/// <para>
+/// <c>style-src</c> DELIBERATELY KEEPS <c>'unsafe-inline'</c> — AdminLTE/Bootstrap ship inline
+/// <c>&lt;style&gt;</c> blocks that have no stable hash. <c>connect-src</c> tightens from
+/// <c>'self' ws: wss:</c> to <c>'self'</c> (same-origin <c>ws://</c> is covered by <c>'self'</c>
+/// in modern CSP); proxied deployments append their WebSocket origin via the fail-loud
+/// <c>Csp__ConnectSrc</c> env knob, which is assembled into the emitted value via
+/// <see cref="SecurityHeadersOptions"/> at startup.
 /// </para>
 /// </summary>
 public sealed class SecurityHeadersMiddleware : IMiddleware
@@ -28,8 +60,33 @@ public sealed class SecurityHeadersMiddleware : IMiddleware
     internal const string ReferrerPolicyValue = "same-origin";
     internal const string PermissionsPolicyValue =
         "geolocation=(), camera=(), microphone=(), interest-cohort=()";
+
+    // M-HRD-04 (plan 21-03): script-src carries the sha256- hash of the App.razor inline boot
+    // script (NO 'unsafe-inline'); style-src KEEPS 'unsafe-inline'; connect-src is 'self' (no
+    // ws:/wss: wildcards — Csp__ConnectSrc appends proxy origins at startup). The hash below is
+    // LF-normalized and PINNED by CspScriptHashTests — if the App.razor boot script changes,
+    // that test fails and prints the fresh hash to paste here.
+    //
+    // Plan 21-04 correction (Rule 1 bug): the original pin sha256-T5YSl+2a… never matched the
+    // bytes the browser actually hashes. CspScriptHashTests extracted the script body with
+    // `<script>(.*?)</script>` over the RAW razor, which greedily swallowed the literal
+    // "<script> order (AdminLTE first…)" word inside the App.razor `@* *@` header comment —
+    // hashing 1781 bytes of comment-tail + script instead of the real 1078-byte boot script.
+    // The Playwright CSP browser gate (CspBrowserSmokeTests) caught the divergence: the browser
+    // computes sha256-N+XgxVzS… over the rendered text node. Both the test (now strips razor
+    // comments first) and this const are corrected to the real rendered hash.
     internal const string ContentSecurityPolicyValue =
-        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+        "default-src 'self'; script-src 'self' 'sha256-N+XgxVzS7xHbt2VJ63Smp/xmf8x7iq10qnQZ1+ljDiY='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+
+    // M-HRD-04: the assembled CSP (const + any Csp__ConnectSrc origins) injected at startup.
+    // Falls back to the const when the middleware is resolved without options registered (e.g.
+    // a synthetic-context unit test) so SetHeaders always has a value.
+    private readonly string _csp;
+
+    public SecurityHeadersMiddleware(IOptions<SecurityHeadersOptions>? options = null)
+    {
+        _csp = options?.Value.ContentSecurityPolicy ?? ContentSecurityPolicyValue;
+    }
 
     public async Task InvokeAsync(HttpContext ctx, RequestDelegate next)
     {
@@ -41,17 +98,26 @@ public sealed class SecurityHeadersMiddleware : IMiddleware
         // otherwise Append() a second, conflicting CSP value after this middleware ran.
         // The indexer assignment in SetHeaders REPLACES rather than Appends, so the
         // emitted CSP is exactly the verbatim charter value (frame-ancestors 'none').
+        // Capture the instance-assembled CSP (const + any Csp__ConnectSrc origins) into the
+        // OnStarting state tuple so the static callback stays allocation-disciplined and emits
+        // the runtime-configured value without re-resolving options.
+        var csp = _csp;
         ctx.Response.OnStarting(static state =>
         {
-            SetHeaders((HttpContext)state);
+            var (httpCtx, cspValue) = ((HttpContext, string))state;
+            SetHeaders(httpCtx, cspValue);
             return Task.CompletedTask;
-        }, ctx);
+        }, (ctx, csp));
 
         await next(ctx);
     }
 
     // internal so tests can call directly with a synthetic HttpContext if needed.
-    internal static void SetHeaders(HttpContext ctx)
+    // Overload uses the compile-time const (no Csp__ConnectSrc origins) — for synthetic-context
+    // callers that don't go through the DI-injected instance.
+    internal static void SetHeaders(HttpContext ctx) => SetHeaders(ctx, ContentSecurityPolicyValue);
+
+    internal static void SetHeaders(HttpContext ctx, string contentSecurityPolicy)
     {
         var h = ctx.Response.Headers;
         // Indexer assignment = REPLACE semantics (sets the header to exactly this single
@@ -64,7 +130,7 @@ public sealed class SecurityHeadersMiddleware : IMiddleware
         h["X-Frame-Options"] = XFrameOptionsValue;
         h["Referrer-Policy"] = ReferrerPolicyValue;
         h["Permissions-Policy"] = PermissionsPolicyValue;
-        h["Content-Security-Policy"] = ContentSecurityPolicyValue;
+        h["Content-Security-Policy"] = contentSecurityPolicy;
         // M-SEC-07 deliberate omissions (HTTP-on-LAN compat):
         //   - Strict-Transport-Security: NOT emitted under any code path.
         //   - CSP upgrade-insecure-requests: NOT included in the CSP value above.

@@ -1,0 +1,67 @@
+# Phase 22 / Plan 22-01 — M-FLD-01 / D-07. Dropbear-in-Docker SSH-negotiation arm.
+#
+# Mirrors ci.yml's smoke-tests job (ubuntu-latest, trait-filtered, coverage-exempt):
+# the Category=DropbearCompat trait runs the production SSH.NET path against two
+# digest-pinned Dropbear servers spun by Testcontainers and asserts the negotiated
+# KEX/host-key/cipher/MAC per version + one round-trip. It does NOT route through
+# the Blazor liveness endpoint (D-07 / CLAUDE.md) — it exercises the SSH layer directly.
+#
+# Ships INERT in Phase 22 (no remote until the Phase 23 cutover — D-03). The
+# Category=DropbearCompat trait it filters on is created in plan 22-03; referencing
+# a not-yet-existing trait in inert config is expected.
+name: dropbear-compat
+
+on:
+  # WR-03 review fix: the `pull_request` trigger was REMOVED. This job builds and
+  # runs the PR-author-controlled test/dropbear/* Dockerfiles + sentinel.sh on the
+  # runner via Testcontainers. On a public repo a fork PR can edit those exact paths,
+  # turning the runner into an untrusted-code execution surface (cryptominer /
+  # runner-abuse) with no maintainer gate. (There is no secret-exfil path — this was
+  # `pull_request`, not `pull_request_target` — but the build/run surface alone is the
+  # risk.) T7's "exercise the SSH negotiation arm when SSH/Dropbear paths change"
+  # intent is preserved for TRUSTED pushes only: push to `main` (path-filtered) +
+  # nightly cron + manual dispatch. PR-time coverage, if ever wanted, must go behind
+  # an `environment:` with required reviewers — see the review note for WR-03.
+  push:
+    branches: [main]
+    # T7 path filter: the SSH negotiation surface (SshAlgorithmFallbackPolicy.cs
+    # lives under Services/Polling/Ssh/), the Dropbear test surface, and this
+    # workflow file itself.
+    paths:
+      - 'ApStatsForOpenWrt/Services/Polling/Ssh/**'
+      - 'ApStatsForOpenWrt.Tests/Dropbear/**'
+      - 'test/dropbear/**'
+      - '.github/workflows/dropbear-compat.yml'
+  schedule:
+    - cron: '0 3 * * *'   # nightly negotiation regression (T7)
+  workflow_dispatch:       # manual maintainer-triggered run (e.g. to vet a PR after review)
+
+jobs:
+  # runs-on: ubuntu-latest — only the Linux runners ship a Docker daemon in the
+  # GitHub-hosted pool (Testcontainers needs it), same rationale as ci.yml smoke-tests.
+  dropbear-compat:
+    runs-on: ubuntu-latest
+    steps:
+      # WR-02 review fix: SHA-pinned (supply-chain hardening for public repo).
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          # WR-05 review fix: pin to the global.json SDK family (10.0.x) not the
+          # floating 10.x feature-band — the MTP toolchain is version-fragile
+          # (CLAUDE.md) so a new feature band must not slip onto the runner silently.
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build (Release)
+        run: dotnet build -c Release --no-restore
+
+      # Coverage-exempt (the coverage flag is omitted), same as smoke. No Playwright
+      # step (that is CSP-smoke-only). The trait runs the SSH negotiation arm directly
+      # via Testcontainers — never through the Blazor liveness endpoint.
+      - name: Dropbear compat tests (requires Docker daemon)
+        run: |
+          dotnet test --no-build -c Release \
+            -- --filter-trait "Category=DropbearCompat"

@@ -71,6 +71,13 @@ public sealed class SessionRotationTests(SessionRotationTests.ForwardedHeadersTr
         private readonly string _dataSource = $"SessionRot-{Guid.NewGuid():N}";
         private Microsoft.Data.Sqlite.SqliteConnection? _keepAlive;
 
+        // ci-test-data-writability (residual fix) -- redirect DATA_ROOT/LOGS_ROOT to a writable
+        // per-instance temp dir BEFORE the real Program.cs bootstrap runs, so the writability
+        // probe + MigrationsHostedService.CreateDirectory do not abort host startup on a non-root
+        // CI runner with an unwritable /data. Field initializer => constructed in the ctor, before
+        // the first CreateClient()/Services access triggers the host build. Restored on dispose.
+        private readonly ApStatsForOpenWrt.Tests.TestSupport.TempBootstrapRoots _roots = new();
+
         // M-SEC-05 / plan 16-01 Task 3 — the production ForwardedHeaders registration is now
         // env-var-gated (was unconditional in v0.11). These auth tests need X-Forwarded-For
         // honored so each request lands in a distinct /Login per-IP rate-limit partition.
@@ -119,6 +126,7 @@ public sealed class SessionRotationTests(SessionRotationTests.ForwardedHeadersTr
             // mode=disabled for sibling tests that expect no forwarded-headers trust.
             Environment.SetEnvironmentVariable("ForwardedHeaders__KnownNetworks", _priorKnownNetworks);
             _keepAlive?.Dispose();
+            _roots.Dispose();
             base.Dispose();
             return ValueTask.CompletedTask;
         }
@@ -134,6 +142,12 @@ public sealed class SessionRotationTests(SessionRotationTests.ForwardedHeadersTr
         {
             AllowAutoRedirect = false,
             HandleCookies = true,
+            // M-HRD-05 (plan 21-03): this factory sets ForwardedHeaders__KnownNetworks, so the
+            // app now runs with forwardedHeadersEnabled=true and the auth cookie SecurePolicy is
+            // Always. A Secure cookie is only sent back over https, so drive the TestServer over
+            // https://localhost — otherwise the cookie is silently dropped and every authed GET
+            // redirects to /Login. The change is behavior-neutral for the rotation contract.
+            BaseAddress = new Uri("https://localhost"),
         });
         client.DefaultRequestHeaders.Add("X-Forwarded-For", xForwardedFor);
         return client;

@@ -1,5 +1,14 @@
 # syntax=docker/dockerfile:1.7
 ARG DOTNET_VERSION=10.0
+# Classic-builder-safe defaults for BuildKit's predefined platform args.
+# The Testcontainers DockerSmokeFixture builds via the Docker Engine API's
+# CLASSIC builder, which does NOT auto-populate BUILDPLATFORM/TARGETARCH —
+# an empty $BUILDPLATFORM makes `FROM --platform=""` a hard parse error and
+# an empty $TARGETARCH makes `-a` swallow the next argument. Under buildx
+# (release.yml multi-arch path) the builder-provided values take precedence
+# over these defaults, so amd64+arm64 cross-compilation is unaffected.
+ARG BUILDPLATFORM=linux/amd64
+ARG TARGETARCH=amd64
 
 # ── BASE STAGE ────────────────────────────────────────────────────────────
 # Runtime image used by both the production `final` stage and Visual Studio's
@@ -33,8 +42,16 @@ WORKDIR /app
 EXPOSE 8080
 
 # ── BUILD STAGE ───────────────────────────────────────────────────────────
-FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION} AS build
+# Pin the build stage to the build host's platform so the .NET SDK runs NATIVELY
+# instead of being QEMU-emulated per target arch (M-REL-03, RESEARCH Pattern 1 — documented
+# 80s→17s improvement). `-a $TARGETARCH` then cross-compiles the publish output for
+# each target RID; only the small `base`/runtime stage is pulled per-arch.
+# Under a plain classic `docker build` (DockerSmokeFixture path) the global
+# ARG defaults above apply (linux/amd64); the bare stage-level `ARG TARGETARCH`
+# below inherits the global default per Dockerfile ARG scoping rules.
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION} AS build
 ARG BUILD_CONFIGURATION=Release
+ARG TARGETARCH
 WORKDIR /src
 
 # csproj-only restore for cache-friendly layer ordering. Only the production csproj is
@@ -45,12 +62,13 @@ WORKDIR /src
 COPY ApStatsForOpenWrt.sln Directory.Build.props global.json ./
 COPY ApStatsForOpenWrt/ApStatsForOpenWrt.csproj ApStatsForOpenWrt/
 
-RUN dotnet restore ApStatsForOpenWrt/ApStatsForOpenWrt.csproj
+RUN dotnet restore -a $TARGETARCH ApStatsForOpenWrt/ApStatsForOpenWrt.csproj
 
 COPY . .
 
 RUN dotnet publish ApStatsForOpenWrt/ApStatsForOpenWrt.csproj \
     -c ${BUILD_CONFIGURATION} \
+    -a $TARGETARCH \
     -o /app/publish \
     --no-restore \
     /p:UseAppHost=false

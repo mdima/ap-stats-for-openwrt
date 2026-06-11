@@ -1,0 +1,88 @@
+# Phase 22 / Plan 22-01 — M-REL-03 + M-REL-04. Tag-triggered multi-arch Docker Hub
+# push + DRAFT GitHub Release with the embedded image digest.
+#
+# Ships INERT in Phase 22 (no remote exists until the Phase 23 cutover — D-03 /
+# Phase 20 trigger-redesign precedent). The image name is parameterized via the
+# repo variable vars.DOCKERHUB_IMAGE (D-05) so the throwaway-repo → real-coords
+# flip at Phase 23 is a one-line change. Auth via DOCKERHUB_USERNAME /
+# DOCKERHUB_TOKEN repo secrets (T3). Distinct from ci.yml: tags-only, no branches.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write          # required for the draft GitHub Release (M-REL-04)
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      # The ACTUAL pushed Docker tag (semver-stripped, e.g. v1.0.0 -> 1.0.0).
+      # The draft-release pull command MUST use this, not github.ref_name —
+      # the dry run (22-05) proved the raw git tag 404s on Docker Hub.
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      # WR-02 review fix: third-party actions SHA-pinned (mutable major tags are a
+      # supply-chain risk on a public repo — this workflow holds contents:write AND
+      # DOCKERHUB_TOKEN). Trailing comment records the human-readable version the SHA
+      # resolved to; bump via Dependabot's github-actions ecosystem.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      # KEEP setup-qemu even though the Dockerfile cross-compiles: buildx still
+      # needs binfmt to assemble the arm64 *runtime* base layer (RESEARCH Pitfall 5).
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          # D-05 one-line flip: throwaway (mdima/apstats-pipeline-test) → real
+          # (mdima/ap-stats-for-openwrt) by changing only this repo variable.
+          images: ${{ vars.DOCKERHUB_IMAGE }}
+          # type=semver auto-applies the moving `latest` (flavor latest=auto)
+          # ONLY for non-prerelease tags — a future rc/test tag can never
+          # hijack `latest` (dry-run finding, 22-05; was type=raw before).
+          tags: |
+            type=semver,pattern={{version}}
+
+      - id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  draft-release:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          draft: true                  # T4: CI drafts, operator reviews + publishes
+          generate_release_notes: true # auto commit/PR list (hybrid bottom half)
+          body: |                      # hand-written highlights header (prepended hybrid top half)
+            ## Highlights
+            <!-- operator edits before publishing -->
+
+            ### Container image
+            ```
+            docker pull ${{ vars.DOCKERHUB_IMAGE }}:${{ needs.build-and-push.outputs.version }}
+            ```
+            Digest: `${{ needs.build-and-push.outputs.digest }}`
+
+            ### Upgrade
+            Schema migrates automatically; **back up `/data` first.**

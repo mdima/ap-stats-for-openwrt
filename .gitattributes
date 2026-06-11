@@ -1,0 +1,39 @@
+# Line-ending normalization — M-HRD-04 / Phase 21 hardening.
+#
+# WHY THIS FILE EXISTS: the CSP `script-src` directive pins a SHA-256 hash of the
+# single inline boot <script> in ApStatsForOpenWrt/Components/App.razor. The browser
+# hashes the EXACT bytes of the rendered inline script; the Razor compiler emits those
+# bytes with whatever line endings the on-disk source has at compile time. With
+# core.autocrlf=true and NO .gitattributes, App.razor checks out CRLF on Windows but
+# LF in the Linux container build — diverging the hash and silently breaking CSP
+# enforcement (and the Blazor circuit) in exactly one environment.
+#
+# Fix (RESEARCH Pitfall 1): normalize ALL text files to LF on disk on every platform.
+# The hash is also LF-normalized in both the middleware source and the ArchitectureTest
+# (CspScriptHashTests) so the pinned value is platform-deterministic regardless of
+# checkout state. After adding this file, a one-time `git add --renormalize .` re-stages
+# already-checked-out files with LF.
+
+# Default: treat every file as text, auto-detect, and force LF on checkout (every OS).
+* text=auto eol=lf
+
+# The hash-relevant file — pinned explicitly (belt + braces over the wildcard above).
+*.razor text eol=lf
+
+# Binary assets — never normalize (corrupts the bytes). Scanned from support/ and
+# wwwroot/lib/: vendored fonts, images, the AdminLTE zip, and the SQLite DB on /data.
+*.png   -text
+*.ico   -text
+*.woff  -text
+*.woff2 -text
+*.ttf   -text
+*.eot   -text
+*.otf   -text
+*.zip   -text
+*.gz    -text
+*.db    -text
+*.jpg   -text
+*.jpeg  -text
+*.gif   -text
+*.webp  -text
+*.pdf   -text
