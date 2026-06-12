@@ -36,7 +36,7 @@ If you run one or more OpenWRT access points, you already know the problem: LuCI
 - **Active enrichment** — batched `arping` sweep with `ping` fallback, reverse-DNS resolution, random-MAC detection, AssignedName / Hostname / MAC display cascade.
 - **Per-station detail page** — rename, delete, mark as random-MAC, and a confirmation-gated *Disconnect station* write-side SSH action.
 - **First-run wizard** — set the UI password, declare your first AP, choose WLANs to monitor. No config files to hand-edit. See [first-boot](docs/first-boot.md).
-- **Visitor-gated polling** — the background poller is suspended while no browser session is open and resumes the moment you open the dashboard. A separate `/health` HTTP endpoint stays available for external monitoring without counting toward the gate.
+- **Visitor-gated polling** — If the historical data service is disabled, the background poller is suspended whenever no browser session is open, and resumes as soon as you open the dashboard. A separate `/health` HTTP endpoint remains available for external monitoring and does not count toward the gate.
 - **Encrypted credentials at rest** — each AP password is encrypted with ASP.NET Data Protection; the optional UI password is stored as a PBKDF2 hash. See the [threat model](docs/threat-model.md).
 - **Single image, single SQLite file** — stop the container, copy `/data`, and your entire deployment is portable. See [backup](docs/backup.md).
 - **Automatic update check** — a daily, visitor-gated query to the GitHub Releases API surfaces a newer published release via a calm navbar badge, a one-time toast, and a Settings card. Notify-only; toggle it off for zero outbound traffic.
