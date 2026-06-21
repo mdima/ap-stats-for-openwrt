@@ -33,16 +33,17 @@
     </PackageReference>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
     <PackageReference Include="bunit" Version="2.7.2" />
-    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.7.0" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.8.0" />
     <!-- Explicit pin used by SqliteInMemoryFixture to manage the in-memory connection lifecycle.
          EF Core 10.0.7 brings it transitively, but pinning here is honest and survives any
          future EF dependency changes. -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.8" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.9" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
     <!-- Phase 3: WebApplicationFactory<Program> integration host. First use is Plan 03-01's
          AdminLteAssetSmokeTests; reused by Plan 03-03 AuthGate/RateLimit, Plan 03-04 Nodes
          page tests, Plan 03-05 Settings round-trip. Microsoft Learn confirms 10.0.x is the
          matching framework version for net10.0. -->
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.8" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.9" />
     <!-- DEVIATION (Rule 3, blocking) the plan pin xunit.v3 3.2.2 transitively references
          xunit.v3.mtp-v1, which targets Microsoft.Testing.Platform v1.x. The locked
          Microsoft.Testing.Extensions.CodeCoverage 18.6.2 requires MTP v2.1.0 (TypeLoadException
@@ -60,7 +61,7 @@
          TimeProvider seam used by PollOrchestrator. Version 9.0.x targets .NET 10 cleanly
          (10.0.x track ships separately under Microsoft.Extensions.TimeProvider.Testing
          when the .NET 10 release wave catches up; 9.0.x is the current latest GA). -->
-    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.6.0" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.7.0" />
     <!-- Phase 7 / Testcontainers for the Docker-smoke fixture (D-06). Targets net10.0 cleanly.
          NO Testcontainers.Xunit (still v2-only as of 4.11.0); use the manual IAsyncLifetime
          pattern with [Collection(DisableParallelization = true)]. Smoke facts are gated by

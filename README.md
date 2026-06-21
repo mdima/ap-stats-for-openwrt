@@ -10,7 +10,7 @@
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![Blazor Server](https://img.shields.io/badge/Blazor-InteractiveServer-512BD4?logo=blazor&logoColor=white)](https://learn.microsoft.com/aspnet/core/blazor/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](#quickstart)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue)](Directory.Build.props)
+[![Version](https://img.shields.io/badge/version-1.0.1-blue)](Directory.Build.props)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
 ---
@@ -48,7 +48,7 @@ A ready-to-use [`docker-compose.yml`](docker-compose.yml) ships in this repo:
 ```yaml
 services:
   apstatsforopenwrt:
-    image: michele73/ap-stats-for-openwrt:1.0.0
+    image: michele73/ap-stats-for-openwrt:1.0.1
     container_name: apstatsforopenwrt
     restart: unless-stopped
     ports:
@@ -81,7 +81,7 @@ docker run -d \
   -v apstatsforopenwrt-data:/data \
   -v apstatsforopenwrt-logs:/logs \
   --restart unless-stopped \
-  michele73/ap-stats-for-openwrt:1.0.0
+  michele73/ap-stats-for-openwrt:1.0.1
 ```
 
 Then open **<http://localhost:8080>** and the [first-run wizard](docs/first-boot.md) takes over — no environment variables required.
