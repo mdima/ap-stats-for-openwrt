@@ -84,6 +84,32 @@ public sealed class OpenWrtOutputParserTests
     }
 
     [Fact]
+    public void ParseIpNeigh_IncludeStale_KeepsStaleIpv4_DropsFailed_PrefersIpv4OverV6()
+    {
+        // Quick task 260720-q8i: the active subnet-sweep calls ParseIpNeigh(includeStale: true) so a
+        // power-saving station's STALE (last-known) IPv4 is surfaced. A station commonly also has an
+        // fe80:: IPv6 neighbour entry under the SAME MAC — IPv4 must win and never be clobbered.
+        // FAILED is dropped regardless of includeStale. Mirrors the real 25.12 node table.
+        const string raw = """
+            192.168.22.14 dev br-lan lladdr aa:bb:cc:dd:ee:01 ref 1 used 0/0/0 probes 0 REACHABLE
+            192.168.22.33 dev br-lan lladdr aa:bb:cc:dd:ee:02 used 0/0/0 probes 1 STALE
+            fe80::1c58:fc91:3631:240d dev br-lan lladdr aa:bb:cc:dd:ee:02 used 0/0/0 probes 4 STALE
+            192.168.22.99 dev br-lan lladdr aa:bb:cc:dd:ee:03 used 0/0/0 probes 1 FAILED
+            """;
+
+        var withStale = OpenWrtOutputParser.ParseIpNeigh(raw, NullLogger.Instance, includeStale: true);
+        Assert.Equal("192.168.22.14", withStale["AA:BB:CC:DD:EE:01"]);   // REACHABLE
+        Assert.Equal("192.168.22.33", withStale["AA:BB:CC:DD:EE:02"]);   // STALE IPv4 kept; fe80:: did NOT clobber
+        Assert.Null(withStale["AA:BB:CC:DD:EE:03"]);                     // FAILED → null (key still present)
+
+        // Default (includeStale: false) preserves the POLL-13 / B9 LOCK passive behaviour: STALE → null.
+        var passive = OpenWrtOutputParser.ParseIpNeigh(raw, NullLogger.Instance);
+        Assert.Equal("192.168.22.14", passive["AA:BB:CC:DD:EE:01"]);
+        Assert.Null(passive["AA:BB:CC:DD:EE:02"]);
+        Assert.Null(passive["AA:BB:CC:DD:EE:03"]);
+    }
+
+    [Fact]
     public void ParseIpNeigh_EmptyInput_ReturnsEmpty_NoWarning()
     {
         // D-05 empty rule: empty input is not an error.

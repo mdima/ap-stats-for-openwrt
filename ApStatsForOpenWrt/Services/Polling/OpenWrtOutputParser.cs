@@ -317,10 +317,25 @@ public static class OpenWrtOutputParser
 
     /// <summary>
     /// POLL-13: parse `ip neigh show` → Dictionary&lt;MAC, IP?&gt;. MACs uppercased; IP is null
-    /// for STALE/FAILED/blank entries. Keys ALWAYS exist for every line that parses; values may be null.
-    /// Uses StringComparer.Ordinal (keys are uppercased on insert).
+    /// for FAILED / non-IPv4 / (by default) STALE entries. Keys ALWAYS exist for every line that
+    /// parses; values may be null. Uses StringComparer.Ordinal (keys are uppercased on insert).
+    /// <para>
+    /// Only IPv4 is meaningful for enrichment (arping + subnet derivation are IPv4): a station
+    /// commonly also registers an <c>fe80::</c> IPv6 link-local neighbour entry under the SAME
+    /// MAC, and a naive last-wins would let that clobber the IPv4. IPv6 tokens are therefore
+    /// treated as no-IP, and a null line never overwrites an already-recorded non-null IPv4 for
+    /// the same MAC (260720-q8i).
+    /// </para>
+    /// <para>
+    /// <paramref name="includeStale"/> (default <c>false</c>) controls the STALE disposition.
+    /// Default keeps the POLL-13 / B9 LOCK behaviour (STALE → null) used by the passive NodePoller
+    /// path. The active subnet-sweep passes <c>true</c>: a STALE entry is a valid <em>last-known</em>
+    /// IP↔MAC (e.g. a power-saving station that doesn't answer the arping/ping probe but whose
+    /// address the kernel still remembers), which is exactly what enrichment wants to surface.
+    /// FAILED is dropped regardless (no usable mapping).
+    /// </para>
     /// </summary>
-    public static IReadOnlyDictionary<string, string?> ParseIpNeigh(string raw, ILogger log)
+    public static IReadOnlyDictionary<string, string?> ParseIpNeigh(string raw, ILogger log, bool includeStale = false)
     {
         var result = new Dictionary<string, string?>(StringComparer.Ordinal);
         if (string.IsNullOrWhiteSpace(raw)) return result;
@@ -337,21 +352,34 @@ public static class OpenWrtOutputParser
                 if (macEnd < 0) macEnd = line.Length;
                 var mac = line.Substring(macStart, macEnd - macStart).ToUpperInvariant();
 
-                // IP is the first whitespace-separated token before " dev ".
+                // IP is the first whitespace-separated token before " dev ". Accept it only when it
+                // parses as an IPv4 dotted-quad — an IPv6 token (e.g. the fe80:: link-local) is
+                // treated as no-IP so it cannot clobber the IPv4 mapping for the same MAC.
                 string? ip = null;
                 var devIdx = line.IndexOf(IpNeighDevKey, StringComparison.Ordinal);
                 if (devIdx > 0)
                 {
                     var ipToken = line.Substring(0, devIdx).Trim();
-                    if (!string.IsNullOrEmpty(ipToken)) ip = ipToken;
+                    if (System.Net.IPAddress.TryParse(ipToken, out var addr)
+                        && addr.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                    {
+                        ip = ipToken;
+                    }
                 }
-                // POLL-13 / B9 LOCK: STALE/FAILED → null, even if an IP-shaped token preceded " dev ".
-                if (line.Contains(IpNeighStaleKey, StringComparison.Ordinal) ||
-                    line.Contains(IpNeighFailedKey, StringComparison.Ordinal))
+                // FAILED → never a usable mapping. STALE → dropped by default (POLL-13 / B9 LOCK),
+                // kept when includeStale is set (the active sweep wants last-known IPs).
+                if (line.Contains(IpNeighFailedKey, StringComparison.Ordinal)
+                    || (!includeStale && line.Contains(IpNeighStaleKey, StringComparison.Ordinal)))
                 {
                     ip = null;
                 }
-                result[mac] = ip;
+                // A null (non-IPv4 / STALE-dropped / FAILED) line must not overwrite an
+                // already-recorded non-null IPv4 for the same MAC. Last non-null wins; a null only
+                // fills a MAC not yet seen (preserves the key-present-with-null contract).
+                if (ip is not null || !result.ContainsKey(mac))
+                {
+                    result[mac] = ip;
+                }
             }
             catch (Exception ex)
             {

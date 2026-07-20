@@ -195,11 +195,13 @@ public sealed class SubnetSweepProbe(ISshSession session, ILogger<SubnetSweepPro
             var sweepPortion = sentinelIdx < 0 ? raw : raw.Substring(0, sentinelIdx);
             var neighPortion = sentinelIdx < 0 ? string.Empty : raw.Substring(sentinelIdx + NeighSentinel.Length);
 
-            // Merge: neighbour-table entries FIRST (kernel cache; ParseIpNeigh maps STALE/FAILED to
-            // null, which we drop), then the live sweep result OVERWRITES on any MAC conflict so a
-            // stale cache entry can never clobber a fresh reading.
+            // Merge: neighbour-table entries FIRST (kernel cache), then the live sweep result
+            // OVERWRITES on any MAC conflict so a stale cache entry can never clobber a fresh
+            // reading. includeStale: true keeps last-known IPs for stations that are associated but
+            // don't answer the arping/ping probe (power-saving phones, randomized-MAC clients whose
+            // entry has aged to STALE); FAILED and IPv6-only entries are still dropped by the parser.
             var macToIp = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var kv in OpenWrtOutputParser.ParseIpNeigh(neighPortion, log))
+            foreach (var kv in OpenWrtOutputParser.ParseIpNeigh(neighPortion, log, includeStale: true))
             {
                 if (kv.Value is not null) macToIp[kv.Key] = kv.Value;
             }

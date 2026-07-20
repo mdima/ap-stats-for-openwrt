@@ -363,13 +363,14 @@ public sealed class SubnetSweepProbeTests
     private const string NeighSentinel = "===AP-STATS-NEIGH===";
 
     [Fact]
-    public async Task PollAsync_PingFallback_ResolvesMacIpFromNeighbourTable()
+    public async Task PollAsync_PingFallback_ResolvesFromNeighbourTable_KeepsStaleLastKnown_PrefersIpv4_DropsFailed()
     {
-        // Quick task 260720-q8i (fix): a node WITHOUT arping falls back to ping, whose stdout
-        // carries no MAC (ParseArpingPingOutput yields nothing). The universal fix appends
-        // `; ip neigh show` and reads the ARP cache the ping sweep just populated. This is the
-        // exact node-3 / OpenWrt-25.12 scenario from C:\Temp\logs ("found 0 MAC-IP mappings via
-        // ping") — post-fix it resolves via the neighbour-table read.
+        // Quick task 260720-q8i (fix + UAT refinement): a node WITHOUT arping falls back to ping,
+        // whose stdout carries no MAC (ParseArpingPingOutput yields nothing). The fix appends
+        // `; ip neigh show` and reads the ARP cache. UAT on the real 25.12 node showed its only
+        // associated client (a randomized MAC) sat at a STALE IPv4 entry with an fe80:: IPv6 entry
+        // under the same MAC, so the sweep reads the neighbour table with includeStale:true and
+        // prefers IPv4 — otherwise that last-known IP is lost and/or clobbered by the IPv6 entry.
         var ct = TestContext.Current.CancellationToken;
         var fixtureDir = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT");
 
@@ -383,10 +384,16 @@ public sealed class SubnetSweepProbeTests
             "PING 192.168.1.1 (192.168.1.1): 56 data bytes\n" +
             "64 bytes from 192.168.1.1: seq=0 ttl=64 time=1.100 ms\n" +
             "PING 192.168.1.2 (192.168.1.2): 56 data bytes\n" +
-            "64 bytes from 192.168.1.2: seq=0 ttl=64 time=1.200 ms\n" +
+            "PING 192.168.1.3 (192.168.1.3): 56 data bytes\n" +
             NeighSentinel + "\n" +
-            "192.168.1.1 dev br-lan lladdr de:ad:be:ef:00:01 REACHABLE\n" +
-            "192.168.1.2 dev br-lan lladdr de:ad:be:ef:00:02 STALE\n");   // STALE → dropped
+            // ..01 REACHABLE → resolves. ..02 mirrors the real field case (260720-q8i): a
+            // power-saving client whose IPv4 entry is STALE and which ALSO has an fe80:: IPv6
+            // entry under the SAME MAC — the STALE IPv4 must be kept (last-known) and the IPv6
+            // must not clobber it. ..03 FAILED → dropped (no usable mapping).
+            "192.168.1.1 dev br-lan lladdr de:ad:be:ef:00:01 ref 1 used 0/0/0 probes 1 REACHABLE\n" +
+            "192.168.1.2 dev br-lan lladdr de:ad:be:ef:00:02 used 0/0/0 probes 1 STALE\n" +
+            "fe80::dcad:beff:feef:2 dev br-lan lladdr de:ad:be:ef:00:02 used 0/0/0 probes 4 STALE\n" +
+            "192.168.1.3 dev br-lan lladdr de:ad:be:ef:00:03 used 0/0/0 probes 1 FAILED\n");
 
         var session = new FakeSshSession(fixtureDir);
         session.CommandOverrides["command -v arping"] = "missing-arping";
@@ -397,9 +404,9 @@ public sealed class SubnetSweepProbeTests
         var result = await probe.PollAsync(node, peerIp: "192.168.1.1", ct);
 
         var success = Assert.IsType<SubnetSweepProbeResult.Success>(result);
-        // The REACHABLE neigh entry resolves (uppercased); the STALE one is dropped.
-        Assert.Equal("192.168.1.1", success.MacToIp["DE:AD:BE:EF:00:01"]);
-        Assert.False(success.MacToIp.ContainsKey("DE:AD:BE:EF:00:02"));
+        Assert.Equal("192.168.1.1", success.MacToIp["DE:AD:BE:EF:00:01"]);   // REACHABLE resolves (uppercased)
+        Assert.Equal("192.168.1.2", success.MacToIp["DE:AD:BE:EF:00:02"]);   // STALE IPv4 kept; fe80:: did NOT clobber it
+        Assert.False(success.MacToIp.ContainsKey("DE:AD:BE:EF:00:03"));      // FAILED dropped
         // Single combined SSH round-trip: the ping loop command carries the appended neigh dump,
         // and the arping loop was NOT issued (capability probe said arping is absent).
         Assert.Contains(session.CommandsIssued,
