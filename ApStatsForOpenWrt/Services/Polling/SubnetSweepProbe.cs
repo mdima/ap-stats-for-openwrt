@@ -23,6 +23,12 @@ public sealed class SubnetSweepProbe(ISshSession session, ILogger<SubnetSweepPro
     private const int ChunkSize = 64;             // D-01 (revised 2026-05-11, quick task 260511-lct): groups of 64 backgrounded probes per batch. BusyBox arping is cheap (small applet, no kernel netfilter state); 64-fanout cuts a /24 sweep from 16 chunks to 4 with no observed instability on tested hardware (Operator validation 2026-05-11).
     private const int LoopBudgetSeconds = 60;     // arping/ping wait budget for one full sweep.
 
+    // Quick task 260720-q8i: sentinel echoed between the sweep output and the appended
+    // `ip neigh show` dump (same SSH round-trip) so each section is parsed by its own parser —
+    // `ip neigh show` lines carry a MAC + IPv4 that ParseArpingPingOutput would otherwise mis-read.
+    // A fixed ASCII marker that cannot occur in arping / ping / ip-neigh output.
+    private const string NeighSentinel = "===AP-STATS-NEIGH===";
+
     // T-09-03-05 defense-in-depth: re-validate the iface name at the shell-command construction
     // site before interpolating into `ip -4 addr show dev <iface>` (the SubnetDeriver regex
     // already restricts charset, but a typed-name passed through this path must not regress).
@@ -161,20 +167,55 @@ public sealed class SubnetSweepProbe(ISshSession session, ILogger<SubnetSweepPro
             // Step 3: build the AP-side batched-loop command. D-01 (revised 2026-05-11): groups
             // of 64 (quick task 260511-lct), hand-rolled shell loop, one SSH command total per
             // node per refresh tick.
+            //
+            // Quick task 260720-q8i: the sweep (arping when available, ping otherwise) exists only
+            // to PROVOKE ARP resolution on the AP — the kernel neighbour-table read below is the
+            // source of truth for MAC↔IP. This makes enrichment work even when `arping` is absent
+            // (e.g. a fresh OpenWrt 25.12 node without the iputils-arping package), where the ping
+            // branch's stdout carries no MAC and ParseArpingPingOutput alone always yields 0
+            // mappings. Root cause + evidence:
+            // .planning/quick/260720-q8i-subnetsweepprobe-universal-ip-neigh-arp-/260720-q8i-PLAN.md.
             var loopCmd = BuildSweepCommand(scanIps, iface, useArping);
 
-            // Step 4: run the loop, parse the interleaved stdout, return.
-            var raw = await session.RunCommandAsync(loopCmd, sct);
-            var macToIp = OpenWrtOutputParser.ParseArpingPingOutput(raw, log);
+            // Step 4: run the sweep AND dump the neighbour table in ONE SSH round-trip, separated by
+            // a sentinel echo after the loop's final `wait`. The `ip neigh show` read picks up the
+            // ARP cache the sweep just populated. The sentinel is REQUIRED for correctness: an
+            // `ip neigh show` line carries BOTH a MAC and an IPv4, so ParseArpingPingOutput would
+            // mis-read neigh lines (and, via its last-wins rule, let a stale cache entry clobber a
+            // fresh arping reading) if the two sections were parsed as one blob. Splitting on the
+            // sentinel parses each section with the parser that understands it.
+            var raw = await session.RunCommandAsync(
+                loopCmd + $"; echo '{NeighSentinel}'; ip neigh show", sct);
+
+            // Split at the sentinel: sweep output (arping/ping) before it, neighbour table after.
+            // Sentinel absent (e.g. an arping-only fixture, or an AP that emitted nothing after the
+            // sweep) → the whole output is the sweep portion and the neighbour portion is empty, so
+            // the arping happy path stays byte-identical to pre-260720-q8i behaviour.
+            var sentinelIdx = raw.IndexOf(NeighSentinel, StringComparison.Ordinal);
+            var sweepPortion = sentinelIdx < 0 ? raw : raw.Substring(0, sentinelIdx);
+            var neighPortion = sentinelIdx < 0 ? string.Empty : raw.Substring(sentinelIdx + NeighSentinel.Length);
+
+            // Merge: neighbour-table entries FIRST (kernel cache; ParseIpNeigh maps STALE/FAILED to
+            // null, which we drop), then the live sweep result OVERWRITES on any MAC conflict so a
+            // stale cache entry can never clobber a fresh reading.
+            var macToIp = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var kv in OpenWrtOutputParser.ParseIpNeigh(neighPortion, log))
+            {
+                if (kv.Value is not null) macToIp[kv.Key] = kv.Value;
+            }
+            var sweepMap = OpenWrtOutputParser.ParseArpingPingOutput(sweepPortion, log);
+            foreach (var kv in sweepMap) macToIp[kv.Key] = kv.Value;
+            var neighOnlyCount = macToIp.Count - sweepMap.Count;   // MACs contributed only by the neighbour table.
 
             // Debug session p10-trigger-and-nslookup: per-cycle resolution summary at probe
             // boundary. Mirrors the ReverseDnsProbe.cs:86-89 pattern. One structured log line per
-            // probe invocation, NOT per IP probed. Discriminates among (a) ran arping with 0 hits
-            // (LAN devices silent / arping disabled / wrong iface), (b) ran arping with N hits
-            // (expected steady-state), and (c) Failed/skip paths above (each have their own line).
+            // probe invocation, NOT per IP probed. The greppable `found {Count} MAC-IP mappings
+            // ... on subnet {Subnet}` anchor is preserved (operator log tooling); {Probe} names the
+            // ARP-provocation tool and {NeighCount} shows how many mappings came only from the
+            // neighbour-table read (the arping-absent path resolves entirely via {NeighCount}).
             log.LogInformation(
-                "Subnet-sweep pass on node {Hostname} (Id={NodeId}): found {Count} MAC-IP mappings via {Probe} on subnet {Subnet}.",
-                node.Hostname, node.Id, macToIp.Count, useArping ? "arping" : "ping", subnetDescription);
+                "Subnet-sweep pass on node {Hostname} (Id={NodeId}): found {Count} MAC-IP mappings (provoked via {Probe}; {NeighCount} from neighbour table) on subnet {Subnet}.",
+                node.Hostname, node.Id, macToIp.Count, useArping ? "arping" : "ping", neighOnlyCount, subnetDescription);
 
             return new SubnetSweepProbeResult.Success(node.Id, macToIp);
         }

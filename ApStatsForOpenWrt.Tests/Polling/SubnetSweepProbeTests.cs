@@ -326,9 +326,13 @@ public sealed class SubnetSweepProbeTests
         var waitCount = arpingLoop.Split("wait").Length - 1;
         Assert.Equal(4, waitCount);
 
-        // The command starts with `for ip in ` and ends with `wait` (no trailing whitespace).
+        // The command starts with `for ip in `; the sweep body's final `wait` is now followed by
+        // the appended sentinel + `ip neigh show` dump (quick task 260720-q8i), so the whole
+        // command ends with `; ip neigh show`. The 4× `wait` chunk-count invariant above is
+        // unaffected (neither the sentinel nor `ip neigh show` contains the substring "wait").
         Assert.StartsWith("for ip in ", arpingLoop);
-        Assert.EndsWith("wait", arpingLoop);
+        Assert.EndsWith("; ip neigh show", arpingLoop);
+        Assert.Contains("wait; echo '===AP-STATS-NEIGH==='; ip neigh show", arpingLoop);
 
         // Per-chunk IP-count invariant: every chunk holds at most 64 IPs. The chunk body shape
         // is `for ip in <ip1> ... <ipN>; do arping ... & done; wait`, so we slice between each
@@ -351,5 +355,124 @@ public sealed class SubnetSweepProbeTests
             var ipCount = ipsSlice.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
             Assert.True(ipCount <= 64, $"Chunk exceeded 64 IPs: count={ipCount}.");
         }
+    }
+
+    // Sentinel echoed between the sweep output and the `ip neigh show` dump (must match
+    // SubnetSweepProbe.NeighSentinel). Fixtures below concatenate sweep output + sentinel +
+    // neighbour-table output to mirror the single-round-trip combined stdout the probe parses.
+    private const string NeighSentinel = "===AP-STATS-NEIGH===";
+
+    [Fact]
+    public async Task PollAsync_PingFallback_ResolvesMacIpFromNeighbourTable()
+    {
+        // Quick task 260720-q8i (fix): a node WITHOUT arping falls back to ping, whose stdout
+        // carries no MAC (ParseArpingPingOutput yields nothing). The universal fix appends
+        // `; ip neigh show` and reads the ARP cache the ping sweep just populated. This is the
+        // exact node-3 / OpenWrt-25.12 scenario from C:\Temp\logs ("found 0 MAC-IP mappings via
+        // ping") — post-fix it resolves via the neighbour-table read.
+        var ct = TestContext.Current.CancellationToken;
+        var fixtureDir = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT");
+
+        // arping absent → capability probe exits non-zero → ping branch.
+        File.WriteAllText(Path.Combine(fixtureDir, "missing-arping.txt"), "");
+        File.WriteAllText(Path.Combine(fixtureDir, "missing-arping.txt.exit"), "1");
+
+        // Combined stdout of `<ping loop>; echo <sentinel>; ip neigh show`: ping lines (no MAC —
+        // ignored) then a BusyBox `ip neigh show` block (lowercase MACs — parser uppercases).
+        File.WriteAllText(Path.Combine(fixtureDir, "ping-neigh-resolved.txt"),
+            "PING 192.168.1.1 (192.168.1.1): 56 data bytes\n" +
+            "64 bytes from 192.168.1.1: seq=0 ttl=64 time=1.100 ms\n" +
+            "PING 192.168.1.2 (192.168.1.2): 56 data bytes\n" +
+            "64 bytes from 192.168.1.2: seq=0 ttl=64 time=1.200 ms\n" +
+            NeighSentinel + "\n" +
+            "192.168.1.1 dev br-lan lladdr de:ad:be:ef:00:01 REACHABLE\n" +
+            "192.168.1.2 dev br-lan lladdr de:ad:be:ef:00:02 STALE\n");   // STALE → dropped
+
+        var session = new FakeSshSession(fixtureDir);
+        session.CommandOverrides["command -v arping"] = "missing-arping";
+        session.CommandOverrides["ping -c1 -W1"] = "ping-neigh-resolved";
+
+        var probe = new SubnetSweepProbe(session, NullLogger<SubnetSweepProbe>.Instance);
+        var node = MakeNode(ranges: "192.168.1.0/30");
+        var result = await probe.PollAsync(node, peerIp: "192.168.1.1", ct);
+
+        var success = Assert.IsType<SubnetSweepProbeResult.Success>(result);
+        // The REACHABLE neigh entry resolves (uppercased); the STALE one is dropped.
+        Assert.Equal("192.168.1.1", success.MacToIp["DE:AD:BE:EF:00:01"]);
+        Assert.False(success.MacToIp.ContainsKey("DE:AD:BE:EF:00:02"));
+        // Single combined SSH round-trip: the ping loop command carries the appended neigh dump,
+        // and the arping loop was NOT issued (capability probe said arping is absent).
+        Assert.Contains(session.CommandsIssued,
+            c => c.Contains("ping -c1 -W1") && c.EndsWith("; ip neigh show", StringComparison.Ordinal));
+        Assert.DoesNotContain(session.CommandsIssued, c => c.Contains("arping -c1 -w1"));
+    }
+
+    [Fact]
+    public async Task PollAsync_PingFallback_NoNeighbourEntries_YieldsEmptyMap_PinsOldFailure()
+    {
+        // Quick task 260720-q8i (regression pin): with ping stdout only and an EMPTY neighbour
+        // table, the map is empty — proving the neighbour-table read (not the ping stdout) is what
+        // actually resolves IPs on arping-less nodes. Pre-fix this path always returned empty; this
+        // test locks that the ping stdout alone still yields nothing, so a future refactor cannot
+        // silently reintroduce a "ping stdout is enough" assumption.
+        var ct = TestContext.Current.CancellationToken;
+        var fixtureDir = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT");
+
+        File.WriteAllText(Path.Combine(fixtureDir, "missing-arping.txt"), "");
+        File.WriteAllText(Path.Combine(fixtureDir, "missing-arping.txt.exit"), "1");
+        // Ping stdout, sentinel, then NO neighbour entries (unresponsive hosts / empty ARP cache).
+        File.WriteAllText(Path.Combine(fixtureDir, "ping-no-neigh.txt"),
+            "PING 192.168.1.1 (192.168.1.1): 56 data bytes\n" +
+            "PING 192.168.1.2 (192.168.1.2): 56 data bytes\n" +
+            NeighSentinel + "\n");
+
+        var session = new FakeSshSession(fixtureDir);
+        session.CommandOverrides["command -v arping"] = "missing-arping";
+        session.CommandOverrides["ping -c1 -W1"] = "ping-no-neigh";
+
+        var probe = new SubnetSweepProbe(session, NullLogger<SubnetSweepProbe>.Instance);
+        var node = MakeNode(ranges: "192.168.1.0/30");
+        var result = await probe.PollAsync(node, peerIp: "192.168.1.1", ct);
+
+        var success = Assert.IsType<SubnetSweepProbeResult.Success>(result);
+        Assert.Empty(success.MacToIp);
+    }
+
+    [Fact]
+    public async Task PollAsync_ArpingPresent_NeighbourReadIsAdditive_AndSweepWinsOnConflict()
+    {
+        // Quick task 260720-q8i: the neighbour-table read is UNIVERSAL (runs on the arping path
+        // too). It must (a) fill a MAC that arping missed but the kernel cache knows, and (b) NOT
+        // clobber a fresh arping IP when the (older) neighbour entry disagrees — the live sweep
+        // wins on conflict. The sentinel split is what makes (b) hold: without it, the neigh line's
+        // MAC+IPv4 would be swept up by ParseArpingPingOutput's last-wins rule and overwrite arping.
+        var ct = TestContext.Current.CancellationToken;
+        var fixtureDir = Path.Combine("Fixtures", "ssh-output", "openwrt-23.05-SNAPSHOT");
+
+        // Combined stdout of `<arping loop>; echo <sentinel>; ip neigh show`.
+        //   MAC ..01: arping reports .1; neigh (REACHABLE) disagrees at .251 → arping must win.
+        //   MAC ..02: arping reports .2; neigh agrees at .2.
+        //   MAC ..03: arping missed it; only the neigh cache has it at .3 → additive fill.
+        File.WriteAllText(Path.Combine(fixtureDir, "arping-plus-neigh.txt"),
+            "ARPING 192.168.1.1 from 192.168.1.1 br-lan\n" +
+            "Unicast reply from 192.168.1.1 [de:ad:be:ef:00:01] 0.5ms\n" +
+            "ARPING 192.168.1.2 from 192.168.1.1 br-lan\n" +
+            "Unicast reply from 192.168.1.2 [de:ad:be:ef:00:02] 0.6ms\n" +
+            NeighSentinel + "\n" +
+            "192.168.1.251 dev br-lan lladdr de:ad:be:ef:00:01 REACHABLE\n" +
+            "192.168.1.2 dev br-lan lladdr de:ad:be:ef:00:02 REACHABLE\n" +
+            "192.168.1.3 dev br-lan lladdr de:ad:be:ef:00:03 REACHABLE\n");
+
+        var session = new FakeSshSession(fixtureDir);
+        session.CommandOverrides["arping -c1 -w1"] = "arping-plus-neigh";
+
+        var probe = new SubnetSweepProbe(session, NullLogger<SubnetSweepProbe>.Instance);
+        var node = MakeNode(ranges: "192.168.1.0/29");   // usable hosts .1..-.6
+        var result = await probe.PollAsync(node, peerIp: "192.168.1.42", ct);
+
+        var success = Assert.IsType<SubnetSweepProbeResult.Success>(result);
+        Assert.Equal("192.168.1.1", success.MacToIp["DE:AD:BE:EF:00:01"]);   // (b) arping wins over neigh .251
+        Assert.Equal("192.168.1.2", success.MacToIp["DE:AD:BE:EF:00:02"]);   // agreement
+        Assert.Equal("192.168.1.3", success.MacToIp["DE:AD:BE:EF:00:03"]);   // (a) neigh-only additive fill
     }
 }
