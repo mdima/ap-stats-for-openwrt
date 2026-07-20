@@ -10,7 +10,7 @@
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![Blazor Server](https://img.shields.io/badge/Blazor-InteractiveServer-512BD4?logo=blazor&logoColor=white)](https://learn.microsoft.com/aspnet/core/blazor/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](#quickstart)
-[![Version](https://img.shields.io/badge/version-1.0.1-blue)](Directory.Build.props)
+[![Version](https://img.shields.io/badge/version-1.0.2-blue)](Directory.Build.props)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
 ---
@@ -48,7 +48,7 @@ A ready-to-use [`docker-compose.yml`](docker-compose.yml) ships in this repo:
 ```yaml
 services:
   apstatsforopenwrt:
-    image: michele73/ap-stats-for-openwrt:1.0.1
+    image: michele73/ap-stats-for-openwrt:1.0.2
     container_name: apstatsforopenwrt
     restart: unless-stopped
     ports:
@@ -81,7 +81,7 @@ docker run -d \
   -v apstatsforopenwrt-data:/data \
   -v apstatsforopenwrt-logs:/logs \
   --restart unless-stopped \
-  michele73/ap-stats-for-openwrt:1.0.1
+  michele73/ap-stats-for-openwrt:1.0.2
 ```
 
 Then open **<http://localhost:8080>** and the [first-run wizard](docs/first-boot.md) takes over — no environment variables required.
@@ -102,9 +102,11 @@ The honest state of device coverage. The lowest tier is an **invitation to repor
 
 | Tier | Versions | Evidence |
 |---|---|---|
-| ✅ Tested on hardware | **23.05** | operator's live APs |
+| ✅ Tested on hardware | **23.05, 25.12** | operator's live APs |
 | 🧪 Fixture-verified | **23.05-SNAPSHOT, 22.03, 21.02** | parser tests vs captured real `iwinfo`/`iw`/`ip-neigh`/`nslookup` output (point: 22.03.7, 21.02.7) |
 | 🌐 Community-verified | everything else | none yet — **Should work — untested, please report results** |
+
+> **OpenWrt 25.12 note:** 25.12 uses the `apk` package manager and does not ship `arping` by default. Station-IP discovery does **not** require it — the poller reads the kernel neighbour table its ping sweep populates (v1.0.2+). If station IPs or per-station hostnames don't appear, see [Enrichment troubleshooting](docs/enrichment-troubleshooting.md).
 
 Running a version not in the matrix? Please [open an AP-version support report](../../issues/new?template=ap_version_support.yml) — it walks you through capturing redacted SSH fixtures with the bundled `tools/FixtureCapture`, which is how new versions get verified.
 
@@ -118,6 +120,7 @@ Topic guides live under [`docs/`](docs/README.md):
 - [Backing up /data](docs/backup.md) — manual backups and the automatic pre-migration `.bak` set with its restore procedure.
 - [Upgrading](docs/upgrading.md) — the `docker compose pull` upgrade path, automatic schema migration, and the rolling `.bak` safety net.
 - [Dropbear & SubnetScanRanges](docs/dropbear-subnet-note.md) — why stock Dropbear breaks subnet auto-derivation and how to set an explicit `SubnetScanRanges`.
+- [Enrichment troubleshooting](docs/enrichment-troubleshooting.md) — why a station's IP or hostname may be blank (arping vs neighbour-table read, and the dumb-AP reverse-DNS `boguspriv` fix).
 
 ## Roadmap
 
@@ -129,6 +132,8 @@ Topic guides live under [`docs/`](docs/README.md):
 - **v0.12** — Security hardening: login throttling + password policy, session rotation on password change, anti-takeover onboarding, baseline response headers, opt-in reverse-proxy header trust, SSH host-key TOFU UX + algorithm visibility, hardened disconnect command. See the [threat model](docs/threat-model.md).
 - **v0.13** — Automatic update check: a daily, visitor-gated query to the GitHub Releases API surfacing a newer published release via a navbar badge, a one-time toast, and a Settings card. Notify-only.
 - **v1.0** — First public release. 🎉
+- **v1.0.1** — Security patch: remediate the bundled native SQLite advisory (GHSA-2m69-gcr7-jv3q).
+- **v1.0.2** — Station-IP enrichment resolves from the kernel neighbour table, so it works on APs without `arping` (e.g. OpenWrt 25.12); OpenWrt 25.12 tested on hardware.
 
 Beyond v1.0, candidates on the deferred list include time-series sighting history, CSV export, station tags, per-AP/WLAN summary cards, and a chiseled base image. Have an idea? [Open a feature request](../../issues/new?template=feature_request.yml).
 

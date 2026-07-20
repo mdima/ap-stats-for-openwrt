@@ -11,3 +11,4 @@ first-boot walkthrough; reach for the others as your deployment grows.
 | [Backing up /data](backup.md) | Manual `/data` backups and the automatic pre-migration `.bak` set with its restore procedure. |
 | [Upgrading](upgrading.md) | The `docker compose pull` upgrade path, automatic schema migration, and the rolling `.bak` safety net. |
 | [Dropbear & SubnetScanRanges](dropbear-subnet-note.md) | Why stock Dropbear breaks subnet auto-derivation and how to set an explicit `SubnetScanRanges`. |
+| [Enrichment troubleshooting](enrichment-troubleshooting.md) | Why a station's IP or hostname may be blank — the arping/neighbour-table read, and the dumb-AP reverse-DNS (`boguspriv`) fix. |
