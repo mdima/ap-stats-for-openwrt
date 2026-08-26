@@ -52,9 +52,9 @@ public sealed class CsprojReferencesTests
             .ToList();
 
         // Locked pins — exact strings.
-        Assert.Contains(pkgRefs, r => r.Include == "xunit.v3" && r.Version == "3.2.2");
-        Assert.Contains(pkgRefs, r => r.Include == "bunit"    && r.Version == "2.7.2");
-        Assert.Contains(pkgRefs, r => r.Include == "Microsoft.Testing.Extensions.CodeCoverage" && r.Version == "18.8.0");
+        Assert.Contains(pkgRefs, r => r.Include == "xunit.v3" && r.Version == "4.0.0");
+        Assert.Contains(pkgRefs, r => r.Include == "bunit"    && r.Version == "2.9.0");
+        Assert.Contains(pkgRefs, r => r.Include == "Microsoft.Testing.Extensions.CodeCoverage" && r.Version == "18.10.0");
 
         // Forbidden — ANY coverlet.* variant (CI-02). Even the new coverlet.MTP integration is
         // excluded for v1 because CONTEXT.md CI-02 pins Microsoft.Testing.Extensions.CodeCoverage

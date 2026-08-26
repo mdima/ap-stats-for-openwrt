@@ -24,32 +24,32 @@
          tooling discoverability and the CsprojReferencesTests grep (CI-02). Its transitive
          xunit.v3.mtp-v1 conflicts with the v2 MTP runtime required by
          Microsoft.Testing.Extensions.CodeCoverage 18.6.2; ExcludeAssets suppresses that. -->
-    <PackageReference Include="xunit.v3" Version="3.2.2">
+    <PackageReference Include="xunit.v3" Version="4.0.0">
       <ExcludeAssets>compile;runtime</ExcludeAssets>
     </PackageReference>
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
-    <PackageReference Include="bunit" Version="2.7.2" />
-    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.8.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+    <PackageReference Include="bunit" Version="2.9.0" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.10.0" />
     <!-- Explicit pin used by SqliteInMemoryFixture to manage the in-memory connection lifecycle.
          EF Core 10.0.7 brings it transitively, but pinning here is honest and survives any
          future EF dependency changes. -->
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.9" />
-    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
     <!-- Phase 3: WebApplicationFactory<Program> integration host. First use is Plan 03-01's
          AdminLteAssetSmokeTests; reused by Plan 03-03 AuthGate/RateLimit, Plan 03-04 Nodes
          page tests, Plan 03-05 Settings round-trip. Microsoft Learn confirms 10.0.x is the
          matching framework version for net10.0. -->
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.9" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" />
     <!-- DEVIATION (Rule 3, blocking) the plan pin xunit.v3 3.2.2 transitively references
          xunit.v3.mtp-v1, which targets Microsoft.Testing.Platform v1.x. The locked
          Microsoft.Testing.Extensions.CodeCoverage 18.6.2 requires MTP v2.1.0 (TypeLoadException
          on IDataConsumer otherwise). Adding xunit.v3.mtp-v2 3.2.2 (same release, v2-aligned
          variant) pulls xunit.v3.core.mtp-v2 and the matching MTP v2 runtime. -->
-    <PackageReference Include="xunit.v3.mtp-v2" Version="3.2.2" />
+    <PackageReference Include="xunit.v3.mtp-v2" Version="4.0.0" />
     <!-- Phase 6 Plan 06-03 W7 / B2 — TestCorrelator sink lets HealthSerilogFilterTests assert
          at runtime that the production .Filter.ByExcluding clause for /health is honored. The
          doubled-quote literal `p.ToString() == "\"/health\""` in Program.cs is fragile; static
@@ -61,7 +61,7 @@
          TimeProvider seam used by PollOrchestrator. Version 9.0.x targets .NET 10 cleanly
          (10.0.x track ships separately under Microsoft.Extensions.TimeProvider.Testing
          when the .NET 10 release wave catches up; 9.0.x is the current latest GA). -->
-    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.7.0" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.9.0" />
     <!-- Phase 7 / Testcontainers for the Docker-smoke fixture (D-06). Targets net10.0 cleanly.
          NO Testcontainers.Xunit (still v2-only as of 4.11.0); use the manual IAsyncLifetime
          pattern with [Collection(DisableParallelization = true)]. Smoke facts are gated by
@@ -69,7 +69,7 @@
          `dotnet test ... filter-not-trait Category=Smoke` invocation excludes them on dev
          boxes and from the 80/80 coverage gate; CI's smoke-tests job runs them on
          ubuntu-latest with `filter-trait Category=Smoke`. -->
-    <PackageReference Include="Testcontainers" Version="4.12.0" />
+    <PackageReference Include="Testcontainers" Version="4.14.0" />
     <!-- Phase 21 Plan 21-04 / M-HRD-04 D-05 — Microsoft.Playwright drives headless Chromium for
          the CSP browser smoke gate (CspBrowserSmokeTests) ONLY. RESEARCH-pinned 1.60.0 (published
          2026-05-21, netstandard2.0, computed-compatible up through net10.0); package legitimacy was
@@ -78,7 +78,7 @@
          driver — the Chromium binary is provisioned separately by the `playwright.ps1 install`
          chromium step (with deps) in the CI smoke-tests job + the local user_setup step; the
          browser cache lands under bin/ (gitignored), never committed. -->
-    <PackageReference Include="Microsoft.Playwright" Version="1.60.0" />
+    <PackageReference Include="Microsoft.Playwright" Version="1.62.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -104,4 +104,5 @@
          copy to output). A glob matching *.* would redundantly touch the .cs Compile items; omitted
          deliberately. See 22-03-SUMMARY.md "glob not needed" note. -->
   </ItemGroup>
+  
 </Project>

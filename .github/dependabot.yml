@@ -1,0 +1,21 @@
+# Bump dei pin SHA delle GitHub Actions. I commenti nei workflow
+# ("bump via Dependabot's github-actions ecosystem") presupponevano questo file,
+# che però non esisteva: per questo i pin sono rimasti su action Node 20 fino al
+# warning di deprecazione (runner su Node 24 di default dal 16/06/2026).
+#
+# Con i pin espressi come SHA + commento `# vX.Y.Z`, Dependabot aggiorna sia lo
+# SHA sia il commento, quindi la disciplina di pinning (WR-02) resta intatta.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    groups:
+      # Un'unica PR per tutte le action: evita 9 PR separate su un repo
+      # dove i workflow cambiano raramente.
+      actions:
+        patterns:
+          - "*"
