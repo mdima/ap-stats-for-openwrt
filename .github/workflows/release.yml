@@ -29,7 +29,7 @@ jobs:
       # supply-chain risk on a public repo — this workflow holds contents:write AND
       # DOCKERHUB_TOKEN). Trailing comment records the human-readable version the SHA
       # resolved to; bump via Dependabot's github-actions ecosystem.
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # KEEP setup-qemu even though the Dockerfile cross-compiles: buildx still
       # needs binfmt to assemble the arm64 *runtime* base layer (RESEARCH Pitfall 5).
@@ -68,9 +68,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: softprops/action-gh-release@fe965f7af51af5f2602596916f38a38df2e33de0 # v3.0.2
+      - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           draft: true                  # T4: CI drafts, operator reviews + publishes
           generate_release_notes: true # auto commit/PR list (hybrid bottom half)
